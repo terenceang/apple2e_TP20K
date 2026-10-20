@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Apple //e</title>
+<style>
+:root{--bg:#f2f3f5;--card:#fff;--tx:#1b1d21;--sub:#6b7280;--ln:#e3e5e8;--ac:#2f7d32;--acd:#256528;--dg:#c62828;--hi:#eef6ee}
+@media(prefers-color-scheme:dark){:root{--bg:#121315;--card:#1c1e22;--tx:#e8eaed;--sub:#9aa0a8;--ln:#2d3036;--ac:#55b559;--acd:#6fcd73;--dg:#ef6b6b;--hi:#20291f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;align-items:center;gap:12px;padding:14px 16px;background:#1f2a1f;color:#e9f5e9}
+header h1{margin:0;font-size:19px;flex:1;letter-spacing:.3px}
+header h1 small{font-weight:400;opacity:.7;font-size:13px;margin-left:6px}
+.chip{font-size:12px;padding:3px 10px;border-radius:12px;background:#ffffff22;white-space:nowrap}
+.chip.ok{background:#2f7d32}
+main{max-width:640px;margin:0 auto;padding:12px}
+.card{background:var(--card);border:1px solid var(--ln);border-radius:12px;margin:12px 0;padding:14px 16px}
+.card h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--sub)}
+.row{display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--ln);flex-wrap:wrap}
+.row:first-of-type{border-top:0}
+.row .nm{flex:1;min-width:120px;word-break:break-all}
+.row .nm b{display:block}
+.sub{color:var(--sub);font-size:13px}
+.tag{font-size:11px;padding:1px 7px;border-radius:8px;border:1px solid var(--ln);color:var(--sub);margin-left:6px;vertical-align:middle}
+.tag.rw{color:var(--ac);border-color:var(--ac)}
+button{font:inherit;font-size:14px;padding:7px 13px;border-radius:8px;border:1px solid var(--ln);background:var(--card);color:var(--tx);cursor:pointer}
+button:hover{border-color:var(--ac)}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff}
+button.p:hover{background:var(--acd)}
+button.d{color:var(--dg)}
+button:disabled{opacity:.5;cursor:default}
+input[type=text],input[type=password]{width:100%;font:inherit;padding:9px 11px;border-radius:8px;border:1px solid var(--ln);background:var(--bg);color:var(--tx)}
+input:focus{outline:2px solid var(--ac);outline-offset:-1px}
+.pw{display:flex;gap:6px;margin-top:8px}
+.btns{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.net{display:flex;align-items:center;gap:10px;padding:9px 6px;border-top:1px solid var(--ln);cursor:pointer;border-radius:6px}
+.net:hover,.net.sel{background:var(--hi)}
+.net span.s{flex:1;word-break:break-all}
+.sig{display:inline-flex;align-items:flex-end;gap:2px;height:16px}
+.sig i{width:4px;background:var(--ln);border-radius:1px}
+.sig i:nth-child(1){height:5px}.sig i:nth-child(2){height:9px}.sig i:nth-child(3){height:13px}.sig i:nth-child(4){height:16px}
+.sig i.on{background:var(--ac)}
+#nets{margin-top:10px}
+#bar{height:6px;border-radius:3px;background:var(--ln);overflow:hidden;margin-top:10px;display:none}
+#bar div{height:100%;width:0;background:var(--ac);transition:width .15s}
+#t{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(80px);background:#222;color:#fff;padding:10px 18px;border-radius:22px;opacity:0;transition:.25s;max-width:90%;text-align:center;pointer-events:none}
+#t.on{transform:translateX(-50%);opacity:1}
+label.f{display:inline-block;padding:7px 13px;border-radius:8px;border:1px dashed var(--ln);cursor:pointer;font-size:14px}
+</style></head><body>
+<header><h1>Apple //e<small>disk companion</small></h1><span class="chip" id="chip">Wi-Fi</span></header>
+<main>
+<div class="card"><h2>Drives</h2><div id="drives"></div></div>
+
+<div class="card"><h2>Library</h2><div id="lib"></div>
+<div class="btns"><label class="f" id="pick">Choose image (.dsk .do .po)<input type="file" id="f" accept=".dsk,.do,.po" hidden></label>
+<button class="p" id="up" disabled>Add to library</button></div>
+<div id="bar"><div></div></div></div>
+
+<div class="card"><h2>Wi-Fi</h2>
+<div id="ws" class="sub">&nbsp;</div>
+<div id="nets"></div>
+<div class="btns" style="margin-top:6px"><button id="scan">Scan networks</button></div>
+<input type="text" id="n" placeholder="Network name" autocomplete="off" autocapitalize="off" style="margin-top:12px">
+<div class="pw"><input type="password" id="p" placeholder="Password" autocomplete="off"><button id="eye" type="button">Show</button></div>
+<div class="btns"><button class="p" id="go">Connect</button><button class="d" id="forget">Forget router</button>
+<button id="qr">Show QR on display</button></div></div>
+</main>
+<div id="t"></div>
+<script>
+const $=i=>document.getElementById(i),
+esc=s=>String(s).replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
+function toast(m){const t=$('t');t.textContent=m;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('on'),3500)}
+async function P(u,b){try{toast(await(await fetch(u,{method:'POST',body:b})).text())}catch(e){toast('Request failed')}st()}
+
+async function st(){
+ try{
+  const j=await(await fetch('/status')).json();
+  $('drives').innerHTML=j.drives.map((d,i)=>'<div class=row><div class=nm><b>Drive '+(i+1)+'</b><span class=sub>'+
+   (d.name?esc(d.name)+'<span class="tag'+(d.rw?' rw':'')+'">'+(d.rw?'read/write':'read only')+'</span>':'empty')+'</span></div>'+
+   (d.name?'<button data-u=/eject/'+(i+1)+'>Eject</button>':'')+'</div>').join('');
+  $('lib').innerHTML=j.lib.length?j.lib.map(n=>'<div class=row><div class=nm>'+esc(n)+'</div>'+
+   '<button data-u="/mount/1?name='+esc(n)+'">Drive 1</button><button data-u="/mount/2?name='+esc(n)+'">Drive 2</button>'+
+   '<button class=d data-del="'+esc(n)+'">Delete</button></div>').join(''):'<div class=sub>No images yet.</div>';
+ }catch(e){}
+ try{
+  const t=(await(await fetch('/wifi')).text()).split('\n'),on=t[2]=='1';
+  $('chip').textContent=on?t[1]:t[0]?'connecting...':'Wi-Fi: no router';
+  $('chip').className='chip'+(on?' ok':'');
+  $('ws').textContent=on?'Connected to '+t[0]+' ('+t[1]+')':t[0]?'Connecting to '+t[0]+'...':'No router set. Pick a network below.';
+ }catch(e){}
+}
+
+async function scan(){
+ const b=$('scan');b.disabled=true;b.textContent='Scanning...';
+ try{
+  const seen={};
+  (await(await fetch('/wifi/scan')).text()).split('\n').filter(x=>x).forEach(l=>{
+   const a=l.split('\t'),r=+a[0],au=+a[1],s=a.slice(2).join('\t');
+   if(!seen[s]||seen[s].r<r)seen[s]={r,au,s}});
+  const l=Object.values(seen).sort((x,y)=>y.r-x.r);
+  $('nets').innerHTML=l.length?l.map(x=>{const q=x.r>-55?4:x.r>-65?3:x.r>-75?2:1;
+   return '<div class=net data-s="'+esc(x.s)+'"><span class=s>'+esc(x.s)+'</span>'+(x.au?'<span class=sub>secured</span>':'')+
+   '<span class=sig>'+[1,2,3,4].map(i=>'<i'+(i<=q?' class=on':'')+'></i>').join('')+'</span></div>'}).join(''):'<div class=sub>No networks found.</div>';
+ }catch(e){toast('Scan failed')}
+ b.disabled=false;b.textContent='Scan networks';
+}
+
+function connect(){const n=$('n').value.trim();if(!n)return toast('Enter a network name');P('/wifi',n+'\n'+$('p').value)}
+
+// The board accepts A-Z a-z 0-9 . _ - with a .dsk, .do or .po extension, 31 characters at most.
+function libName(n){
+ n=n.replace(/[^A-Za-z0-9._-]/g,'_').replace(/^\.+/,'');
+ const e=(n.match(/\.[A-Za-z0-9]+$/)||[''])[0];
+ return n.slice(0,n.length-e.length).slice(0,31-e.length)+e;
+}
+function upload(f){
+ const nm=libName(f.name);
+ if(!/\.(dsk|do|po)$/i.test(nm))return toast('Only .dsk, .do and .po images (143360 bytes)');
+ const x=new XMLHttpRequest(),bar=$('bar');
+ x.open('POST','/lib?name='+nm);
+ bar.style.display='block';
+ x.upload.onprogress=e=>bar.firstChild.style.width=(100*e.loaded/e.total)+'%';
+ x.onload=()=>{toast(x.responseText);bar.style.display='none';st()};
+ x.onerror=()=>{toast('Upload failed');bar.style.display='none'};
+ x.send(f);
+}
+
+document.onclick=e=>{
+ const t=e.target,net=t.closest('.net');
+ if(t.dataset.u)P(t.dataset.u);
+ else if(t.dataset.del){if(confirm('Delete '+t.dataset.del+'?'))P('/delete?name='+t.dataset.del)}
+ else if(net){document.querySelectorAll('.net').forEach(x=>x.classList.remove('sel'));net.classList.add('sel');$('n').value=net.dataset.s;$('p').focus()}
+ else if(t.id=='scan')scan();
+ else if(t.id=='go')connect();
+ else if(t.id=='forget'){if(confirm('Forget the saved router?'))P('/wifi/forget')}
+ else if(t.id=='qr')P('/qr');
+ else if(t.id=='eye'){const p=$('p'),h=p.type=='password';p.type=h?'text':'password';t.textContent=h?'Hide':'Show'}
+ else if(t.id=='up'&&$('f').files[0])upload($('f').files[0]);
+};
+$('f').onchange=()=>{const f=$('f').files[0];$('pick').firstChild.textContent=f?f.name:'Choose image (.dsk .do .po)';$('up').disabled=!f};
+$('p').onkeydown=e=>{if(e.key=='Enter')connect()};
+st();setInterval(st,3000);
+fetch('/wifi').then(r=>r.text()).then(t=>{if(t.split('\n')[2]!='1')scan()});
+</script></body></html>

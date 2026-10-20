@@ -1,0 +1,35 @@
+# fpga.yaml: RTL file list and constraints, read by scripts/sources.ps1 and scripts/build.ps1
+name: apple2e_TP20K
+board: tang-primer-20k
+top: top
+
+sources:
+  - src/cpu/ALU.v
+  - src/cpu/cpu_65c02.v
+  - src/clk_gen.v
+  - src/apple2_mem.v
+  - src/ddr3_memory_interface/ddr3_memory_interface.v   # Gowin DDR3 IP, see its README
+  - src/aux_ram.v
+  - src/slot_bus.v
+  - src/disk2/disk2_card.v
+  - src/disk2/disk2_store.v
+  - src/disk2/disk2_trk.v
+  - src/spi_master.v
+  - src/spi_ctl.v
+  - src/apple2_core.v
+  - src/video_generator.v
+  - src/colorbar_gen.v
+  - src/input_controller.v
+  - src/sound_generator.v
+  - src/serial_debugger.v
+  - src/hdmi/hdmi_tmds_encoder.v
+  - src/hdmi/hdmi_packet_ecc.v
+  - src/hdmi/hdmi_packets.v
+  - src/hdmi/hdmi_data_island.v
+  - src/hdmi/hdmi_island_scheduler.v
+  - src/hdmi/hdmi_tx.v
+  - src/top.v
+
+constraints:
+  - constraints/top.cst
+  - constraints/top.sdc

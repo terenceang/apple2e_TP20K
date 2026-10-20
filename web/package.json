@@ -1,0 +1,31 @@
+{
+  "name": "apple2e-keyboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Apple //e keyboard, console and hardware debugger over Web Serial",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "pages": "node scripts/pages.mjs",
+    "pages:check": "node scripts/pages.mjs --check",
+    "preview": "vite preview",
+    "charset": "node scripts/charset.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "playwright": "^1.63.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0"
+  }
+}

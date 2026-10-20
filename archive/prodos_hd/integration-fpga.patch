@@ -1,0 +1,625 @@
+--- a/src/aux_ram.v
++++ b/src/aux_ram.v
+@@ -49,14 +49,6 @@
+     input  wire [7:0]  wr_data,
+     output wire        wr_busy,
+ 
+-    // ProDOS Hard Disk port (src/prodos/prodos_card.v)
+-    input  wire        hd_go,
+-    input  wire [21:0] hd_addr,
+-    input  wire        hd_we,
+-    input  wire [15:0] hd_wdata,
+-    output wire [15:0] hd_rdata,
+-    output wire        hd_ack,
+-    output wire        hd_idle,
+ 
+     // Disk ][ image store (src/disk2/disk2_store.v), the lowest-priority
+     // client.  A request is latched when dsk_go is pulsed, so a client that
+@@ -109,7 +101,7 @@
+     );
+     assign O_sdram_addr = sd_a13[10:0];
+ 
+-    localparam [2:0] K_REF = 3'd0, K_FILL = 3'd1, K_WR = 3'd2, K_RD = 3'd3, K_HD = 3'd4, K_DSK = 3'd5;
++    localparam [2:0] K_REF = 3'd0, K_FILL = 3'd1, K_WR = 3'd2, K_RD = 3'd3, K_DSK = 3'd5;
+ 
+     // Operation engine
+     reg        op_busy = 1'b0;
+@@ -145,17 +137,6 @@
+     assign rd_hit  = cache_valid && (cache_word == rd_addr[15:1]);
+     assign rd_data = rd_addr[0] ? cache_data[7:0] : cache_data[15:8];
+ 
+-    // ProDOS Hard Disk port.
+-    reg        hd_pend  = 1'b0;
+-    reg [21:0] hd_a_q   = 22'd0;
+-    reg        hd_we_q  = 1'b0;
+-    reg [15:0] hd_d_q   = 16'd0;
+-    reg [15:0] hd_r_q   = 16'd0;
+-    reg        hd_ack_q = 1'b0;
+-    assign hd_idle  = !hd_pend;
+-    assign hd_ack   = hd_ack_q;
+-    assign hd_rdata = hd_r_q;
+-
+     // Disk store port.  A request is latched when dsk_go arrives, so the store
+     // can pulse one whenever it is ready and the request survives the arbiter
+     // being busy with a line fill or a CPU access; dsk_idle is then simply
+@@ -191,21 +172,12 @@
+             cache_valid <= 1'b0;
+             fill_active <= 1'b0;
+             wr_pend     <= 1'b0;
+-            hd_pend     <= 1'b0;
+-            hd_ack_q    <= 1'b0;
+             dsk_pend    <= 1'b0;
+             dsk_ack_q   <= 1'b0;
+         end
+ 
+-        // ProDOS and Disk store requests are taken whatever the arbiter is doing,
+-        // and held until a slot can be given to them.
+-        hd_ack_q <= 1'b0;
+-        if (hd_go) begin
+-            hd_pend <= 1'b1;
+-            hd_a_q  <= hd_addr;
+-            hd_we_q <= hd_we;
+-            hd_d_q  <= hd_wdata;
+-        end
++        // Disk store requests are taken whatever the arbiter is doing, and
++        // held until a slot can be given to them.
+ 
+         dsk_ack_q <= 1'b0;
+         if (dsk_go) begin
+@@ -247,11 +219,6 @@
+                         cache_word  <= rd_word_q;
+                         cache_valid <= !rd_stale && !wr_pend && !wr_go;
+                     end
+-                    K_HD: begin
+-                        hd_r_q   <= sd_dout;
+-                        hd_pend  <= 1'b0;
+-                        hd_ack_q <= 1'b1;
+-                    end
+                     K_DSK: begin
+                         dsk_r_q   <= sd_dout;
+                         dsk_pend  <= 1'b0;
+@@ -281,12 +248,6 @@
+                 rd_word_q <= rd_addr[15:1];
+                 rd_stale <= 1'b0;
+                 op_busy <= 1'b1; t <= 3'd0; sd_cs <= 1'b1;
+-            end else if (hd_pend) begin
+-                kind <= K_HD; sd_refresh <= 1'b0; sd_we <= hd_we_q;
+-                sd_ds <= 2'b00;
+-                sd_din <= hd_d_q;
+-                sd_addr <= hd_a_q;
+-                op_busy <= 1'b1; t <= 3'd0; sd_cs <= 1'b1;
+             end else if (dsk_pend) begin
+                 // Lowest priority: a sector move, which has milliseconds of
+                 // slack and must never delay the line fill or the CPU.
+--- a/src/apple2_core.v
++++ b/src/apple2_core.v
+@@ -57,15 +57,6 @@
+     input  wire        dsk_store_ack,
+     input  wire        dsk_store_idle,
+ 
+-    // ProDOS Slot 7 Hard Disk SDRAM port to aux_ram
+-    output wire        hd_store_go,
+-    output wire [21:0] hd_store_addr,
+-    output wire        hd_store_we,
+-    output wire [15:0] hd_store_wdata,
+-    input  wire [15:0] hd_store_rdata,
+-    input  wire        hd_store_ack,
+-    input  wire        hd_store_idle,
+-
+     // Diagnostic status & Debugger Interface
+     input  wire        cpu_rdy,
+     input  wire [15:0] dbg_mem_addr,
+@@ -93,22 +84,6 @@
+     output wire        img_dn_valid,
+     output wire        img_dn_done,
+ 
+-    // ProDOS Hard Disk image transfer (2 MB per drive)
+-    input  wire        hd_up_go,
+-    input  wire        hd_up_drive,
+-    input  wire [20:0] hd_up_addr,
+-    input  wire [7:0]  hd_up_data,
+-    input  wire        hd_up_last,
+-    input  wire        hd_up_bad,
+-    output wire        hd_up_busy,
+-    output wire        hd_up_done,
+-    input  wire        hd_dn_go,
+-    input  wire        hd_dn_drive,
+-    input  wire [20:0] hd_dn_addr,
+-    input  wire        hd_dn_last,
+-    output wire [7:0]  hd_dn_data,
+-    output wire        hd_dn_valid,
+-    output wire        hd_dn_done,
+     output wire [7:0]  debug_dsk_head,   // the Disk ][ head's track (for the debugger's i command)
+     output wire [15:0] debug_cpu_pc,
+     output wire [15:0] debug_cpu_addr,
+@@ -331,13 +306,11 @@
+     // Index 5 of a seven-slot vector is slot 6, which is the indexing
+     // slot_bus uses throughout.
+     wire [7:0]  d2_rom_data;
+-    wire [7:0]  prodos_rom_data;
+     wire [6:0]  card_present;
+     // A byte per card, so 56 bits wide, not 7:
+-    // Slot 6 (index 5) is Disk ][, Slot 7 (index 6) is ProDOS Hard Disk.
++    // Slot 6 (index 5) is the Disk ][.
+     wire [55:0] card_data;
+-    assign card_data = ({48'd0, d2_rom_data} << (5 * 8)) |
+-                       ({48'd0, prodos_rom_data} << (6 * 8));
++    assign card_data = {48'd0, d2_rom_data} << (5 * 8);
+ 
+     // The card's registers are on the $C0Ex bus, which the read mux claims
+     // after the motherboard's own $C0xx addresses and before the $00 an
+@@ -346,10 +319,6 @@
+     wire        d2_io_hit = (effective_cpu_addr[15:8] == 8'hC0) &&
+                             (effective_cpu_addr[7:4] == 4'hE);
+ 
+-    wire [7:0]  prodos_io_data;
+-    wire        prodos_io_hit = (effective_cpu_addr[15:8] == 8'hC0) &&
+-                                (effective_cpu_addr[7:4] == 4'hF);
+-
+     slot_bus u_slot_bus (
+         .clk(clk),
+         .reset(reset),
+@@ -510,9 +479,6 @@
+                 // The Disk ][ controller's registers: the data register at Q6L
+                 // and Q6, and the floating bus at the rest of $C0E0-$C0EF.
+                 cpu_din_comb = d2_io_data;
+-            end else if (prodos_io_hit) begin
+-                // The ProDOS Hard Disk controller's registers at $C0F0-$C0FF.
+-                cpu_din_comb = prodos_io_data;
+             end else begin
+                 cpu_din_comb = 8'h00;
+             end
+@@ -567,7 +533,7 @@
+     wire [8:0]  d2_wr_off;
+     wire        d2_any_disk;
+ 
+-    assign card_present = 7'b1100000;   // slot 7 (bit 6) and slot 6 (bit 5)
++    assign card_present = 7'b0100000;   // slot 6 (bit 5): the Disk ][
+     wire [6:0]  d2_dbg_track;
+     wire [7:0]  d2_dbg_head;
+     assign debug_dsk_head = d2_dbg_head;
+@@ -648,45 +614,4 @@
+         .dsk_idle(dsk_store_idle)
+     );
+ 
+-    // ------------------------------------------------------------------
+-    // ProDOS Hard Disk controller card, slot 7
+-    // ------------------------------------------------------------------
+-    prodos_card u_prodos_card (
+-        .clk(clk),
+-        .reset(reset),
+-        .ce_1m(ce_1m),
+-        .devsel_n(devsel_n[6]),
+-        .iosel_n(iosel_n[6]),
+-        .bus_cycle(cpu_go),
+-        .cpu_we(cpu_we),
+-        .addr(effective_cpu_addr),
+-        .cpu_di(cpu_dout),
+-        .rom_data(prodos_rom_data),
+-        .io_data(prodos_io_data),
+-        .hd_go(hd_store_go),
+-        .hd_addr(hd_store_addr),
+-        .hd_we(hd_store_we),
+-        .hd_wdata(hd_store_wdata),
+-        .hd_rdata(hd_store_rdata),
+-        .hd_ack(hd_store_ack),
+-        .hd_idle(hd_store_idle),
+-        .up_go(hd_up_go),
+-        .up_drive(hd_up_drive),
+-        .up_addr(hd_up_addr),
+-        .up_data(hd_up_data),
+-        .up_last(hd_up_last),
+-        .up_bad(hd_up_bad),
+-        .up_busy(hd_up_busy),
+-        .up_done(hd_up_done),
+-        .down_go(hd_dn_go),
+-        .down_drive(hd_dn_drive),
+-        .down_addr(hd_dn_addr),
+-        .down_last(hd_dn_last),
+-        .down_data(hd_dn_data),
+-        .down_valid(hd_dn_valid),
+-        .down_done(hd_dn_done),
+-        .drv_present(),
+-        .drv_writable()
+-    );
+-
+ endmodule
+--- a/src/top.v
++++ b/src/top.v
+@@ -103,29 +103,6 @@
+     assign img_dn_addr  = dbg_img_dn_addr;
+     assign img_dn_last  = dbg_img_dn_last;
+ 
+-    // ProDOS Hard Disk image transfer (2 MB per drive)
+-    wire        hd_up_go, hd_up_drive, hd_up_last, hd_up_bad, hd_up_busy, hd_up_done;
+-    wire [20:0] hd_up_addr;
+-    wire [7:0]  hd_up_data;
+-    // The debugger's ProDOS HD transfer outputs go straight to the card.
+-    wire        dbg_up_go, dbg_up_drive, dbg_up_last;
+-    wire [20:0] dbg_up_addr;
+-    wire [7:0]  dbg_up_data;
+-    assign hd_up_go    = dbg_up_go;
+-    assign hd_up_drive = dbg_up_drive;
+-    assign hd_up_addr  = dbg_up_addr;
+-    assign hd_up_data  = dbg_up_data;
+-    assign hd_up_last  = dbg_up_last;
+-    wire        hd_dn_go, hd_dn_drive, hd_dn_last, hd_dn_valid, hd_dn_done;
+-    wire [20:0] hd_dn_addr;
+-    wire [7:0]  hd_dn_data;
+-    wire        dbg_dn_go, dbg_dn_drive, dbg_dn_last;
+-    wire [20:0] dbg_dn_addr;
+-    assign hd_dn_go    = dbg_dn_go;
+-    assign hd_dn_drive = dbg_dn_drive;
+-    assign hd_dn_addr  = dbg_dn_addr;
+-    assign hd_dn_last  = dbg_dn_last;
+-
+     // Asserted by the debugger's "x" (CPU reset) command; consumed by the core
+     wire        cpu_reset_req;
+ 
+@@ -183,21 +160,6 @@
+         .img_dn_data(img_dn_data),
+         .img_dn_valid(img_dn_valid),
+         .img_dn_done(img_dn_done),
+-        .hd_up_go(dbg_up_go),
+-        .hd_up_drive(dbg_up_drive),
+-        .hd_up_addr(dbg_up_addr),
+-        .hd_up_data(dbg_up_data),
+-        .hd_up_last(dbg_up_last),
+-        .hd_up_bad(hd_up_bad),
+-        .hd_up_busy(hd_up_busy),
+-        .hd_up_done(hd_up_done),
+-        .hd_dn_go(dbg_dn_go),
+-        .hd_dn_drive(dbg_dn_drive),
+-        .hd_dn_addr(dbg_dn_addr),
+-        .hd_dn_last(dbg_dn_last),
+-        .hd_dn_data(hd_dn_data),
+-        .hd_dn_valid(hd_dn_valid),
+-        .hd_dn_done(hd_dn_done),
+         .cpu_pc(debug_cpu_pc),
+         .dsk_head(debug_dsk_head),
+         .cpu_a(debug_cpu_a),
+@@ -265,20 +227,12 @@
+     wire [21:0] dsk_store_addr;
+     wire [15:0] dsk_store_wdata, dsk_store_rdata;
+ 
+-    // The ProDOS hard disk SDRAM port, from the core's copy of the card.
+-    wire        hd_store_go, hd_store_we, hd_store_ack, hd_store_idle;
+-    wire [21:0] hd_store_addr;
+-    wire [15:0] hd_store_wdata, hd_store_rdata;
+-
+     aux_ram u_aux (
+         .clk(clk_pixel), .reset(sys_reset),
+         .fill_start(aux_fill_start), .fill_addr(aux_fill_addr), .col(aux_col),
+         .line_data(aux_line_data),
+         .rd_want(aux_rd_want), .rd_addr(aux_rd_addr), .rd_data(aux_rd_data), .rd_hit(aux_rd_hit),
+         .wr_go(aux_wr_go), .wr_addr(aux_wr_addr), .wr_data(aux_wr_data), .wr_busy(aux_wr_busy),
+-        .hd_go(hd_store_go), .hd_addr(hd_store_addr), .hd_we(hd_store_we),
+-        .hd_wdata(hd_store_wdata), .hd_rdata(hd_store_rdata),
+-        .hd_ack(hd_store_ack), .hd_idle(hd_store_idle),
+         .dsk_go(dsk_store_go), .dsk_addr(dsk_store_addr), .dsk_we(dsk_store_we),
+         .dsk_wdata(dsk_store_wdata), .dsk_rdata(dsk_store_rdata),
+         .dsk_ack(dsk_store_ack), .dsk_idle(dsk_store_idle),
+@@ -320,10 +274,6 @@
+         .dsk_store_we(dsk_store_we), .dsk_store_wdata(dsk_store_wdata),
+         .dsk_store_rdata(dsk_store_rdata), .dsk_store_ack(dsk_store_ack),
+         .dsk_store_idle(dsk_store_idle),
+-        .hd_store_go(hd_store_go), .hd_store_addr(hd_store_addr),
+-        .hd_store_we(hd_store_we), .hd_store_wdata(hd_store_wdata),
+-        .hd_store_rdata(hd_store_rdata), .hd_store_ack(hd_store_ack),
+-        .hd_store_idle(hd_store_idle),
+         .cpu_rdy(cpu_rdy),
+         .dbg_mem_addr(dbg_mem_addr),
+         .dbg_mem_din(dbg_mem_din),
+@@ -344,21 +294,6 @@
+         .img_dn_data(img_dn_data),
+         .img_dn_valid(img_dn_valid),
+         .img_dn_done(img_dn_done),
+-        .hd_up_go(hd_up_go),
+-        .hd_up_drive(hd_up_drive),
+-        .hd_up_addr(hd_up_addr),
+-        .hd_up_data(hd_up_data),
+-        .hd_up_last(hd_up_last),
+-        .hd_up_bad(hd_up_bad),
+-        .hd_up_busy(hd_up_busy),
+-        .hd_up_done(hd_up_done),
+-        .hd_dn_go(hd_dn_go),
+-        .hd_dn_drive(hd_dn_drive),
+-        .hd_dn_addr(hd_dn_addr),
+-        .hd_dn_last(hd_dn_last),
+-        .hd_dn_data(hd_dn_data),
+-        .hd_dn_valid(hd_dn_valid),
+-        .hd_dn_done(hd_dn_done),
+         .debug_cpu_pc(debug_cpu_pc),
+         .debug_dsk_head(debug_dsk_head),
+         .debug_cpu_addr(debug_cpu_addr),
+--- a/src/serial_debugger.v
++++ b/src/serial_debugger.v
+@@ -94,22 +94,6 @@
+     input  wire        img_dn_valid,  // img_dn_data is good
+     input  wire        img_dn_done,   // img_dn_last and it has been served
+ 
+-    // ProDOS Hard Disk image transfer (2 MB per drive)
+-    output reg         hd_up_go,
+-    output wire        hd_up_drive,
+-    output wire [20:0] hd_up_addr,
+-    output reg  [7:0]  hd_up_data,
+-    output wire        hd_up_last,
+-    output reg         hd_up_bad,
+-    input  wire        hd_up_busy,
+-    input  wire        hd_up_done,
+-    output reg         hd_dn_go,
+-    output wire        hd_dn_drive,
+-    output wire [20:0] hd_dn_addr,
+-    output wire        hd_dn_last,
+-    input  wire [7:0]  hd_dn_data,
+-    input  wire        hd_dn_valid,
+-    input  wire        hd_dn_done,
+ 
+     // Softswitch state, for the W (screen dump) command
+     input  wire        text_mode,
+@@ -258,11 +242,7 @@
+     localparam STR_DONE_LEN     = 8'd8;
+     localparam STR_LOST_START   = 9'd244;
+     localparam STR_LOST_LEN     = 8'd8;
+-    localparam STR_HD_UP_START  = 9'd252;
+-    localparam STR_HD_UP_LEN    = 8'd34;
+-    localparam STR_HD_DN_START  = 9'd286;
+-    localparam STR_HD_DN_LEN    = 8'd26;
+-    reg [7:0] str_rom [0:311];
++    reg [7:0] str_rom [0:251];
+     initial begin
+         str_rom[0] = 8'h0D; str_rom[1] = 8'h0A; str_rom[2] = 8'h5B; str_rom[3] = 8'h20;
+         str_rom[4] = 8'h41; str_rom[5] = 8'h70; str_rom[6] = 8'h70; str_rom[7] = 8'h6C;
+@@ -340,25 +320,6 @@
+         // 244: "\r\nlost\r\n"
+         str_rom[244] = 8'h0D; str_rom[245] = 8'h0A; str_rom[246] = 8'h6C; str_rom[247] = 8'h6F;
+         str_rom[248] = 8'h73; str_rom[249] = 8'h74; str_rom[250] = 8'h0D; str_rom[251] = 8'h0A;
+-        // ProDOS Hard Disk image transfer (2 MB):
+-        // 252: "\r\nUPLOAD 2097152 bytes, send now\r\n"
+-        str_rom[252] = 8'h0D; str_rom[253] = 8'h0A; str_rom[254] = 8'h55; str_rom[255] = 8'h50;
+-        str_rom[256] = 8'h4C; str_rom[257] = 8'h4F; str_rom[258] = 8'h41; str_rom[259] = 8'h44;
+-        str_rom[260] = 8'h20; str_rom[261] = 8'h32; str_rom[262] = 8'h30; str_rom[263] = 8'h39;
+-        str_rom[264] = 8'h37; str_rom[265] = 8'h31; str_rom[266] = 8'h35; str_rom[267] = 8'h32;
+-        str_rom[268] = 8'h20; str_rom[269] = 8'h62; str_rom[270] = 8'h79; str_rom[271] = 8'h74;
+-        str_rom[272] = 8'h65; str_rom[273] = 8'h73; str_rom[274] = 8'h2C; str_rom[275] = 8'h20;
+-        str_rom[276] = 8'h73; str_rom[277] = 8'h65; str_rom[278] = 8'h6E; str_rom[279] = 8'h64;
+-        str_rom[280] = 8'h20; str_rom[281] = 8'h6E; str_rom[282] = 8'h6F; str_rom[283] = 8'h77;
+-        str_rom[284] = 8'h0D; str_rom[285] = 8'h0A;
+-        // 286: "\r\nDOWNLOAD 2097152 bytes\r\n"
+-        str_rom[286] = 8'h0D; str_rom[287] = 8'h0A; str_rom[288] = 8'h44; str_rom[289] = 8'h4F;
+-        str_rom[290] = 8'h57; str_rom[291] = 8'h4E; str_rom[292] = 8'h4C; str_rom[293] = 8'h4F;
+-        str_rom[294] = 8'h41; str_rom[295] = 8'h44; str_rom[296] = 8'h20; str_rom[297] = 8'h32;
+-        str_rom[298] = 8'h30; str_rom[299] = 8'h39; str_rom[300] = 8'h37; str_rom[301] = 8'h31;
+-        str_rom[302] = 8'h35; str_rom[303] = 8'h32; str_rom[304] = 8'h20; str_rom[305] = 8'h62;
+-        str_rom[306] = 8'h79; str_rom[307] = 8'h74; str_rom[308] = 8'h65; str_rom[309] = 8'h73;
+-        str_rom[310] = 8'h0D; str_rom[311] = 8'h0A;
+     end
+ 
+     // String printer sub-engine
+@@ -394,7 +355,7 @@
+     localparam M_MEM     = 4'd4;
+     localparam M_STATUS  = 4'd5;
+     localparam M_SCREEN  = 4'd6;
+-    localparam M_IMG     = 4'd7;   // a Disk ][ or ProDOS HD image, in or out
++    localparam M_IMG     = 4'd7;   // a Disk ][ image, in or out
+     localparam M_INFO    = 4'd8;   // the Disk ][ checksums (the i command)
+     localparam M_HIST    = 4'd9;   // the last 32 instruction addresses before a BRK (p)
+ 
+@@ -402,15 +363,10 @@
+     localparam [17:0] IMG_BYTES = 18'd143360;
+     localparam [17:0] IMG_LAST  = IMG_BYTES - 18'd1;
+ 
+-    // ProDOS Hard Disk image: 2,097,152 bytes (4,096 blocks x 512 bytes)
+-    localparam [21:0] IMG_HD_BYTES = 22'd2097152;
+-    localparam [20:0] IMG_HD_LAST  = 21'd2097151;
+-
+     // Which way the bytes are going, and the position in the image.  img_dir is
+     // 0 for the host writing the drive and 1 for the host reading it.
+     reg        img_dir   = 1'b0;
+     reg        img_drv   = 1'b0;
+-    reg        img_is_hd = 1'b0;
+     reg [20:0] img_addr  = 21'd0;
+ 
+     assign img_up_drive = img_drv;
+@@ -420,20 +376,13 @@
+     assign img_dn_addr  = img_addr[17:0];
+     assign img_dn_last  = (img_addr == {3'd0, IMG_LAST});
+ 
+-    assign hd_up_drive  = img_drv;
+-    assign hd_up_addr   = img_addr;
+-    assign hd_up_last   = (img_addr == IMG_HD_LAST);
+-    assign hd_dn_drive  = img_drv;
+-    assign hd_dn_addr   = img_addr;
+-    assign hd_dn_last   = (img_addr == IMG_HD_LAST);
+-
+-    wire        active_up_busy  = img_is_hd ? hd_up_busy  : img_up_busy;
+-    wire        active_up_done  = img_is_hd ? hd_up_done  : img_up_done;
+-    wire        active_up_last  = img_is_hd ? hd_up_last  : img_up_last;
+-    wire        active_dn_valid = img_is_hd ? hd_dn_valid : img_dn_valid;
+-    wire        active_dn_last  = img_is_hd ? hd_dn_last  : img_dn_last;
+-    wire [7:0]  active_dn_data  = img_is_hd ? hd_dn_data  : img_dn_data;
+-    wire [21:0] img_target_bytes = img_is_hd ? {1'b0, IMG_HD_BYTES} : {4'd0, IMG_BYTES};
++    wire        active_up_busy  = img_up_busy;
++    wire        active_up_done  = img_up_done;
++    wire        active_up_last  = img_up_last;
++    wire        active_dn_valid = img_dn_valid;
++    wire        active_dn_last  = img_dn_last;
++    wire [7:0]  active_dn_data  = img_dn_data;
++    wire [21:0] img_target_bytes = {4'd0, IMG_BYTES};
+ 
+     // The byte that has arrived from the host and the flag that says so, and the
+     // flag that says it has been handed to the store.
+@@ -585,7 +534,6 @@
+             scr_flags      <= 8'h00;
+             img_dir        <= 1'b0;
+             img_drv        <= 1'b0;
+-            img_is_hd      <= 1'b0;
+             img_addr       <= 21'd0;
+             img_byte       <= 8'h00;
+             img_have       <= 1'b0;
+@@ -597,10 +545,6 @@
+             img_up_go      <= 1'b0;
+             img_up_bad     <= 1'b0;
+             img_dn_go      <= 1'b0;
+-            hd_up_data     <= 8'h00;
+-            hd_up_go       <= 1'b0;
+-            hd_up_bad      <= 1'b0;
+-            hd_dn_go       <= 1'b0;
+             img_rx         <= 22'd0;
+             dsk_sum0       <= 32'd0;
+             dsk_sum1       <= 32'd0;
+@@ -611,9 +555,6 @@
+             img_up_go  <= 1'b0;
+             img_up_bad <= 1'b0;
+             img_dn_go  <= 1'b0;
+-            hd_up_go   <= 1'b0;
+-            hd_up_bad  <= 1'b0;
+-            hd_dn_go   <= 1'b0;
+ 
+             if (ce_1m && cpu_sync && !ph_frz) begin
+                 ph[ph_i] <= cpu_pc;
+@@ -752,26 +693,18 @@
+                     end
+ 
+                     // d1/d2 upload Disk ][, e1/e2 download Disk ][.
+-                    // p1/p2 upload ProDOS HD, o1/o2 download ProDOS HD.
+                     "d", "D", "e", "E": begin
+                         img_cmd   <= 1'b1;
+-                        img_is_hd <= 1'b0;
+                         img_dir   <= (rx_byte == "e") || (rx_byte == "E");
+                     end
+ 
+-                    "p", "P", "o", "O": begin
+-                        img_cmd   <= 1'b1;
+-                        img_is_hd <= 1'b1;
+-                        img_dir   <= (rx_byte == "o") || (rx_byte == "O");
+-                    end
+-
+                     "1", "2": begin
+                         if (img_cmd) begin
+                             img_cmd    <= 1'b0;
+                             img_drv    <= (rx_byte == "2");
+                             img_addr   <= 21'd0;
+                             img_rx     <= 22'd0;
+-                            if (!img_is_hd && !img_dir) begin
++                            if (!img_dir) begin
+                                 if (rx_byte == "2") dsk_sum1 <= 32'd0;
+                                 else                dsk_sum0 <= 32'd0;
+                             end
+@@ -781,15 +714,8 @@
+                             img_ackq   <= 1'b0;
+                             img_up_go  <= 1'b0;
+                             img_dn_go  <= 1'b0;
+-                            hd_up_go   <= 1'b0;
+-                            hd_dn_go   <= 1'b0;
+-                            if (img_is_hd) begin
+-                                str_pos <= img_dir ? STR_HD_DN_START : STR_HD_UP_START;
+-                                str_cnt <= img_dir ? STR_HD_DN_LEN   : STR_HD_UP_LEN;
+-                            end else begin
+-                                str_pos <= img_dir ? STR_DN_START : STR_UP_START;
+-                                str_cnt <= img_dir ? STR_DN_LEN   : STR_UP_LEN;
+-                            end
++                            str_pos <= img_dir ? STR_DN_START : STR_UP_START;
++                            str_cnt <= img_dir ? STR_DN_LEN   : STR_UP_LEN;
+                             return_job <= M_IMG;
+                             main_state <= M_STR;
+                         end else if (rx_byte == "1") begin
+@@ -1381,11 +1307,8 @@
+                                     if (img_rx == {1'b0, img_addr} + 22'd1) begin
+                                         str_pos <= STR_DONE_START;
+                                     end else begin
+-                                        if (img_is_hd) hd_up_bad <= 1'b1;
+-                                        else begin
+-                                            img_up_bad <= 1'b1;
+-                                            if (img_drv) dsk_sum1 <= 32'd0; else dsk_sum0 <= 32'd0;
+-                                        end
++                                        img_up_bad <= 1'b1;
++                                        if (img_drv) dsk_sum1 <= 32'd0; else dsk_sum0 <= 32'd0;
+                                         str_pos <= STR_LOST_START;
+                                     end
+                                     str_cnt    <= (img_rx == {1'b0, img_addr} + 22'd1)
+@@ -1396,15 +1319,10 @@
+                             end
+                         end else if (img_have) begin
+                             if (!active_up_busy) begin
+-                                if (img_is_hd) begin
+-                                    hd_up_data <= img_byte;
+-                                    hd_up_go   <= 1'b1;
+-                                end else begin
+-                                    img_up_data <= img_byte;
+-                                    img_up_go   <= 1'b1;
+-                                    if (img_drv) dsk_sum1 <= dsk_nxt;
+-                                    else         dsk_sum0 <= dsk_nxt;
+-                                end
++                                img_up_data <= img_byte;
++                                img_up_go   <= 1'b1;
++                                if (img_drv) dsk_sum1 <= dsk_nxt;
++                                else         dsk_sum0 <= dsk_nxt;
+                                 img_have    <= 1'b0;
+                                 img_sent    <= 1'b1;
+                             end
+@@ -1417,11 +1335,8 @@
+                             end
+                         end
+                         if ((img_rx >= img_target_bytes) && !img_have && !img_sent && (img_addr != img_target_bytes[20:0])) begin
+-                            if (img_is_hd) hd_up_bad <= 1'b1;
+-                            else begin
+-                                img_up_bad <= 1'b1;
+-                                if (img_drv) dsk_sum1 <= 32'd0; else dsk_sum0 <= 32'd0;
+-                            end
++                            img_up_bad <= 1'b1;
++                            if (img_drv) dsk_sum1 <= 32'd0; else dsk_sum0 <= 32'd0;
+                             str_pos    <= STR_LOST_START;
+                             str_cnt    <= STR_LOST_LEN;
+                             return_job <= M_IDLE;
+@@ -1451,8 +1366,7 @@
+                                 end
+                             end
+                         end else if (!tx_fifo_full) begin
+-                            if (img_is_hd) hd_dn_go <= 1'b1;
+-                            else           img_dn_go <= 1'b1;
++                            img_dn_go <= 1'b1;
+                             img_ask   <= 1'b1;
+                         end
+                     end
+--- a/fpga.yaml
++++ b/fpga.yaml
+@@ -13,7 +13,6 @@
+   - src/slot_bus.v
+   - src/disk2/disk2_card.v
+   - src/disk2/disk2_store.v
+-  - src/prodos/prodos_card.v
+   - src/apple2_core.v
+   - src/video_generator.v
+   - src/colorbar_gen.v
+--- a/sim/run.ps1
++++ b/sim/run.ps1
+@@ -96,7 +96,7 @@
+ # apple2_core, so both need the card with it; tb_disk2 drives the card on its
+ # own and does not want the core.
+ $disk2 = @('src/disk2/disk2_card.v', 'src/disk2/disk2_store.v')
+-$core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v', 'src/prodos/prodos_card.v',
++$core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v',
+            'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v') + $disk2
+ Run-Tb 'tb_disk2'        $disk2 -Gen '2012' -Defines $disk2Defines
+ Run-Tb 'tb_diskimg'      @('src/serial_debugger.v', 'src/disk2/disk2_store.v') -Gen '2012'
+--- a/sim/tb_p6boot.v
++++ b/sim/tb_p6boot.v
+@@ -79,17 +79,11 @@
+         .dsk_store_go(dsk_go), .dsk_store_addr(dsk_addr), .dsk_store_we(dsk_we),
+         .dsk_store_wdata(dsk_wdata), .dsk_store_rdata(dsk_rdata),
+         .dsk_store_ack(dsk_ack), .dsk_store_idle(dsk_idle),
+-        .hd_store_go(), .hd_store_addr(), .hd_store_we(), .hd_store_wdata(),
+-        .hd_store_rdata(16'd0), .hd_store_ack(1'b0), .hd_store_idle(1'b1),
+         .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_aux(1'b0), .dbg_mem_ready(),
+         .img_up_go(1'b0), .img_up_drive(1'b0), .img_up_addr(18'd0), .img_up_data(8'd0),
+         .img_up_last(1'b0), .img_up_bad(1'b0), .img_up_busy(), .img_up_done(),
+         .img_dn_go(1'b0), .img_dn_drive(1'b0), .img_dn_addr(18'd0), .img_dn_last(1'b0),
+         .img_dn_data(), .img_dn_valid(), .img_dn_done(),
+-        .hd_up_go(1'b0), .hd_up_drive(1'b0), .hd_up_addr(21'd0), .hd_up_data(8'd0),
+-        .hd_up_last(1'b0), .hd_up_bad(1'b0), .hd_up_busy(), .hd_up_done(),
+-        .hd_dn_go(1'b0), .hd_dn_drive(1'b0), .hd_dn_addr(21'd0), .hd_dn_last(1'b0),
+-        .hd_dn_data(), .hd_dn_valid(), .hd_dn_done(),
+         .debug_cpu_pc(pc), .debug_cpu_addr(), .debug_cpu_dout(), .debug_cpu_we(),
+         .debug_cpu_sync(sync), .debug_cpu_a(), .debug_cpu_x(), .debug_cpu_y(),
+         .debug_cpu_s(), .debug_cpu_p(), .debug_cpu_ir()
