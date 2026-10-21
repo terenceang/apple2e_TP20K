@@ -108,41 +108,59 @@ module top (
     wire        img_dn_go, img_dn_drive, img_dn_last, img_dn_valid, img_dn_done;
     wire [17:0] img_dn_addr;
     wire [7:0]  img_dn_data;
-    // The debugger's Disk II transfer outputs go straight to the store.
-    wire        dbg_img_up_go, dbg_img_up_drive, dbg_img_up_last;
+    // The store's byte ports have two users: the debugger's d/e (an image
+    // straight from the page) and sd_vol (the TF card's .dsk files, loaded and
+    // written back).  They never move bytes at once -- sd_vol loads while the
+    // CPU is held and writes back only outside a debugger session -- so
+    // whichever is asking has the port.
+    wire        dbg_img_up_go, dbg_img_up_drive, dbg_img_up_last, dbg_img_up_bad;
     wire [17:0] dbg_img_up_addr;
     wire [7:0]  dbg_img_up_data;
     wire        dbg_img_dn_go, dbg_img_dn_drive, dbg_img_dn_last;
     wire [17:0] dbg_img_dn_addr;
-    assign img_up_go    = dbg_img_up_go;
-    assign img_up_drive = dbg_img_up_drive;
-    assign img_up_addr  = dbg_img_up_addr;
-    assign img_up_data  = dbg_img_up_data;
-    assign img_up_last  = dbg_img_up_last;
-    assign img_dn_go    = dbg_img_dn_go;
-    assign img_dn_drive = dbg_img_dn_drive;
-    assign img_dn_addr  = dbg_img_dn_addr;
-    assign img_dn_last  = dbg_img_dn_last;
+    wire        sd_up_go, sd_up_drive, sd_up_last, sd_up_bad, sd_dn_go, sd_dn_drive;
+    wire [17:0] sd_up_addr, sd_dn_addr;
+    wire [7:0]  sd_up_data;
+    assign img_up_go    = dbg_img_up_go | sd_up_go;
+    assign img_up_drive = sd_up_go | sd_up_bad ? sd_up_drive : dbg_img_up_drive;
+    assign img_up_addr  = sd_up_go ? sd_up_addr  : dbg_img_up_addr;
+    assign img_up_data  = sd_up_go ? sd_up_data  : dbg_img_up_data;
+    assign img_up_last  = sd_up_go ? sd_up_last  : dbg_img_up_last;
+    assign img_up_bad   = dbg_img_up_bad | sd_up_bad;
+    assign img_dn_go    = dbg_img_dn_go | sd_dn_go;
+    assign img_dn_drive = sd_dn_go ? sd_dn_drive : dbg_img_dn_drive;
+    assign img_dn_addr  = sd_dn_go ? sd_dn_addr  : dbg_img_dn_addr;
+    assign img_dn_last  = sd_dn_go ? 1'b0        : dbg_img_dn_last;
+    // the debugger's own image in a drive: that drive no longer belongs to a file
+    wire [1:0]  fl_detach = {2{dbg_img_up_go | dbg_img_up_bad}} &
+                            {dbg_img_up_drive, ~dbg_img_up_drive};
+    wire        fl_wr, fl_wr_drv;
+    wire [5:0]  fl_wr_trk;
 
     // The slot 7 hard disk's DDR3 port (aux_ram hd_*), shared by the card in
     // the core and the TF card loader (src/sd_vol.v).  They never ask at once:
     // the loader moves bytes only while the CPU is held (loading) or sits in
     // the driver's wait for a write-back, and aux_ram, which latches a request
     // on its go pulse, takes whichever pulsed.
-    wire [1:0]  hd_present;
-    wire        hd_ack, hd_sd_busy, hd_loading, sd_err, hd_ld_drv;
+    wire [3:0]  sd_present, sd_fail;
+    wire [1:0]  hd_present = sd_present[3:2];
+    wire        hd_ack, hd_sd_busy, hd_loading, sd_err, sd_fs_ok;
+    wire [1:0]  hd_ld_drv;
     wire [4:0]  hd_ld_prog;
     wire [15:0] hd_rdata;
     wire        core_hd_go, core_hd_we, sd_m_go, sd_m_we;
     wire [1:0]  core_hd_be;
     wire [24:0] core_hd_addr, sd_m_addr;
     wire [15:0] core_hd_wdata, sd_m_wdata;
-    wire        hd_wb_go, hd_wb_drv, sd_mnt_go, sd_mnt_drv;
-    wire [15:0] hd_wb_blk, sd_mnt_slot, sd_slot0, sd_slot1;
+    wire        hd_wb_go, hd_wb_drv, sd_mnt_go;
+    wire [1:0]  sd_mnt_drv;
+    wire [15:0] hd_wb_blk;
     wire [2:0]  sd_estage;
-    wire        sd_x_go, sd_x_zero, sd_x_valid, sd_x_take, sd_x_fin;
-    wire [15:0] sd_x_slot, sd_x_blk;
-    wire [7:0]  sd_x_byte;
+    wire        sd_x_go, sd_x_zero, sd_x_valid, sd_x_take;
+    wire [31:0] sd_x_lba, sd_r_lba;
+    wire [7:0]  sd_x_byte, sd_r_byte;
+    wire        sd_r_go, sd_r_valid, sd_r_take, sd_r_done, sd_r_ok;
+    wire [15:0] sd_r_cnt;
 
     // Asserted by the debugger's "x" (CPU reset) command; consumed by the core
     wire        cpu_reset_req;
@@ -198,7 +216,7 @@ module top (
         .img_up_addr(dbg_img_up_addr),
         .img_up_data(dbg_img_up_data),
         .img_up_last(dbg_img_up_last),
-        .img_up_bad(img_up_bad),
+        .img_up_bad(dbg_img_up_bad),
         .img_up_busy(img_up_busy),
         .img_up_done(img_up_done),
         .img_dn_go(dbg_img_dn_go),
@@ -210,12 +228,11 @@ module top (
         .img_dn_done(img_dn_done),
         .sd_mnt_go(sd_mnt_go),
         .sd_mnt_drv(sd_mnt_drv),
-        .sd_mnt_slot(sd_mnt_slot),
-        .sd_slot0(sd_slot0),
-        .sd_slot1(sd_slot1),
-        .sd_stat({hd_loading, hd_sd_busy, sd_err, sd_estage, hd_present}),
-        .sd_x_go(sd_x_go), .sd_x_slot(sd_x_slot), .sd_x_blk(sd_x_blk), .sd_x_zero(sd_x_zero),
-        .sd_x_byte(sd_x_byte), .sd_x_valid(sd_x_valid), .sd_x_take(sd_x_take), .sd_x_fin(sd_x_fin),
+        .sd_stat({hd_loading, hd_sd_busy, sd_err, sd_estage, sd_fs_ok, 1'b0, sd_fail, sd_present}),
+        .sd_x_go(sd_x_go), .sd_x_lba(sd_x_lba), .sd_x_zero(sd_x_zero),
+        .sd_x_byte(sd_x_byte), .sd_x_valid(sd_x_valid), .sd_x_take(sd_x_take),
+        .sd_r_go(sd_r_go), .sd_r_lba(sd_r_lba), .sd_r_cnt(sd_r_cnt), .sd_r_byte(sd_r_byte),
+        .sd_r_valid(sd_r_valid), .sd_r_take(sd_r_take), .sd_r_done(sd_r_done), .sd_r_ok(sd_r_ok),
         .cpu_pc(debug_cpu_pc),
         .dsk_head(debug_dsk_head),
         .cpu_a(debug_cpu_a),
@@ -328,19 +345,27 @@ module top (
         .DDR3_ODT(DDR3_ODT), .DDR3_DM(DDR3_DM)
     );
 
-    // The slot 7 hard disk's volumes, from the TF card
+    // The drives' images: files on the TF card (FAT32, A2CONFIG.TXT)
     sd_vol u_sd_vol (
         .clk(clk_pixel), .reset(sys_reset),
         .sd_clk(sd_clk), .sd_mosi(sd_mosi), .sd_miso(sd_miso), .sd_cs_n(sd_cs_n),
         .ddr_ready(aux_ready),
         .m_go(sd_m_go), .m_addr(sd_m_addr), .m_we(sd_m_we), .m_wdata(sd_m_wdata),
         .m_rdata(hd_rdata), .m_ack(hd_ack),
-        .slot0(sd_slot0), .slot1(sd_slot1), .present(hd_present),
+        .f_up_go(sd_up_go), .f_up_drive(sd_up_drive), .f_up_addr(sd_up_addr), .f_up_data(sd_up_data),
+        .f_up_last(sd_up_last), .f_up_bad(sd_up_bad), .f_up_busy(img_up_busy), .f_up_done(img_up_done),
+        .f_dn_go(sd_dn_go), .f_dn_drive(sd_dn_drive), .f_dn_addr(sd_dn_addr),
+        .f_dn_data(img_dn_data), .f_dn_valid(img_dn_valid),
+        .fl_wr(fl_wr), .fl_wr_drv(fl_wr_drv), .fl_wr_trk(fl_wr_trk), .fl_detach(fl_detach),
+        .bg_hold(dbg_mode),
+        .present(sd_present), .fail(sd_fail), .fs_ok(sd_fs_ok),
         .loading(hd_loading), .ld_drv(hd_ld_drv), .ld_prog(hd_ld_prog), .busy(hd_sd_busy), .err(sd_err), .estage(sd_estage),
         .wb_go(hd_wb_go), .wb_drv(hd_wb_drv), .wb_blk(hd_wb_blk),
-        .mnt_go(sd_mnt_go), .mnt_drv(sd_mnt_drv), .mnt_slot(sd_mnt_slot),
-        .x_go(sd_x_go), .x_slot(sd_x_slot), .x_blk(sd_x_blk), .x_zero(sd_x_zero),
-        .x_byte(sd_x_byte), .x_valid(sd_x_valid), .x_take(sd_x_take), .x_fin(sd_x_fin)
+        .mnt_go(sd_mnt_go), .mnt_drv(sd_mnt_drv),
+        .x_go(sd_x_go), .x_lba(sd_x_lba), .x_zero(sd_x_zero),
+        .x_byte(sd_x_byte), .x_valid(sd_x_valid), .x_take(sd_x_take),
+        .r_go(sd_r_go), .r_lba(sd_r_lba), .r_cnt(sd_r_cnt), .r_byte(sd_r_byte), .r_valid(sd_r_valid),
+        .r_take(sd_r_take), .r_done(sd_r_done), .r_ok(sd_r_ok)
     );
 
     // 1 = Disk II images come from the ESP32 over SPI (nibble tracks, src/spi_ctl.v);
@@ -373,6 +398,7 @@ module top (
         .vram_addr(vram_addr),
         .vram_data(vram_data),
         .osd_on(hd_loading), .osd_drv(hd_ld_drv), .osd_prog(hd_ld_prog),
+        .fl_wr(fl_wr), .fl_wr_drv(fl_wr_drv), .fl_wr_trk(fl_wr_trk),
         .char_rom_addr(char_rom_addr),
         .char_rom_data(char_rom_data),
         .aux_rd_want(aux_rd_want), .aux_rd_addr(aux_rd_addr),

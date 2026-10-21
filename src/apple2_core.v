@@ -38,8 +38,11 @@ module apple2_core #(
     input  wire [15:0] vram_addr,
     output reg  [7:0]  vram_data,
     input  wire        osd_on,        // the TF card is loading: text page 1 shows the OSD
-    input  wire        osd_drv,
+    input  wire [1:0]  osd_drv,       // S6D1 S6D2 S7D1 S7D2
     input  wire [4:0]  osd_prog,
+    output wire        fl_wr,         // a Disk ][ data field is being written (sd_vol's write-back)
+    output wire        fl_wr_drv,
+    output wire [5:0]  fl_wr_trk,
     input  wire [11:0] char_rom_addr,
     output wire [7:0]  char_rom_data,
 
@@ -473,13 +476,15 @@ module apple2_core #(
     // Loading OSD: while the TF card loads the CPU is held, so the ROM has not
     // cleared the text page and the zeroed RAM would show as inverse @.  Text
     // page 1 fetches read this instead, drawn by the real character ROM:
-    // the project name on row 8, "LOADING VOLUME S7,Dn" on row 11 and a
-    // 32-cell progress bar on row 13.
+    // the project name on row 8, "LOADING DISK S6,Dn" or "LOADING VOLUME S7,Dn"
+    // on row 11 and a 32-cell progress bar on row 13.
     reg  [15:0] vaddr_q;
     always @(posedge clk) if (vram_req) vaddr_q <= vram_addr;
     wire [6:0]   osd_c   = vaddr_q[6:0] - 7'h28;    // column on rows 8-15 (others wrap past 39)
     wire [239:0] osd_ttl = "Project QUERCETIN //e 20K Dock";      // 30 chars, cols 5-34
-    wire [159:0] osd_ld  = {"LOADING VOLUME S7,D", osd_drv ? "2" : "1"};   // 20, cols 10-29
+    wire [7:0]   osd_d   = osd_drv[0] ? "2" : "1";
+    wire [159:0] osd_ld  = osd_drv[1] ? {"LOADING VOLUME S7,D", osd_d}           // 20, cols 10-29
+                                      : {" LOADING DISK S6,D", osd_d, " "};
     reg  [7:0]   osd_byte;
     always @* begin
         osd_byte = 8'hA0;
@@ -623,6 +628,9 @@ module apple2_core #(
     wire [7:0]  d2_wr_byte;
     wire        d2_wr_in_data;
     wire [8:0]  d2_wr_off;
+    assign fl_wr     = d2_wr_seen && d2_wr_in_data;
+    assign fl_wr_drv = d2_pos_drive;
+    assign fl_wr_trk = d2_pos_track[5:0];
 
     assign card_present = 7'b1101000;   // slot 7 (bit 6): ProDOS hard disk, slot 6 (bit 5): the Disk ][, slot 4 (bit 3): Mockingboard
     wire [6:0]  d2_dbg_track;

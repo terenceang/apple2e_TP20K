@@ -1,27 +1,31 @@
 // Behavioural SDHC card (SPI mode) for the testbenches: memory-backed, 512 B sectors.
 // From archive/sdcard, plus CMD18 (sectors stream until CMD12) and CMD12.
+// A command past the last sector answers R1 = $40 (parameter error) and counts in `oob`.
 // Access the contents through `mem` (hierarchically).  `wblks` counts completed sector
 // writes, `last_wlba` is the last one written, `errs` counts protocol errors.
 `timescale 1ns/1ps
-module sdcard #(parameter SECTORS = 8192) (
+module sdcard #(parameter SECTORS = 8192, parameter INIT = "") (
     input  wire sd_clk,
     input  wire sd_mosi,
     input  wire sd_cs_n,
     output wire sd_miso
 );
     reg [7:0] mem [0:SECTORS*512-1];
-    integer wblks = 0, last_wlba = 0, errs = 0, wst = 0, wn = 0, wlba = 0;
+    integer wblks = 0, last_wlba = 0, errs = 0, oob = 0, wst = 0, wn = 0, wlba = 0;
     integer streaming = 0, slba = 0, rblks = 0;
     reg [7:0] q [0:2047]; integer qh = 0, qt = 0;
     reg [7:0] rxs, txs = 8'hFF, nxt; reg pend = 0; integer nb = 0, cn = 0, a41 = 0, k;
     reg [7:0] cmd [0:5];
     wire [31:0] carg = {cmd[1], cmd[2], cmd[3], cmd[4]};
     assign sd_miso = sd_cs_n ? 1'b1 : txs[7];
-    // Slot N of src/sd_vol.v's layout is at 2048 + N * 65536; fold slot 1 down
-    // so that the first blocks of slots 0 and 1 both fit in a small card.
-    function integer fold(input integer l);
-        fold = (l % 65536) + (l >= 65536 ? 4096 : 0);
-    endfunction
+    function integer fold(input integer l); fold = l; endfunction
+    // INIT: a $readmemh image (byte addresses, e.g. build/sim_card.hex from
+    // web/scripts/simcard.mjs); everything else reads as zero.
+    integer z;
+    initial begin
+        for (z = 0; z < SECTORS*512; z = z + 1) mem[z] = 8'h00;
+        if (INIT != "") $readmemh(INIT, mem);
+    end
     task push(input [7:0] b); begin q[qt % 2048] = b; qt = qt + 1; end endtask
     always @(posedge sd_clk) begin
         rxs = {rxs[6:0], sd_mosi}; nb = nb + 1;
@@ -45,13 +49,14 @@ module sdcard #(parameter SECTORS = 8192) (
                         8: begin push(8'h01); push(0); push(0); push(1); push(8'hAA); end
                         55: push(8'h01);
                         41: begin a41 = a41 + 1; push(a41 < 2 ? 8'h01 : 8'h00); end
-                        17: begin
-                            if (fold(carg) >= SECTORS) errs = errs + 1;
+                        17: if (fold(carg) >= SECTORS) begin oob = oob + 1; push(8'h40); end
+                        else begin
                             push(0); push(8'hFF); push(8'hFF); push(8'hFE);
                             for (k = 0; k < 512; k = k + 1) push(mem[fold(carg)*512 + k]);
                             push(0); push(0);
                         end
-                        18: begin
+                        18: if (fold(carg) >= SECTORS) begin oob = oob + 1; push(8'h40); end
+                        else begin
                             push(0); streaming = 1; slba = fold(carg);
                         end
                         12: begin

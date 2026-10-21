@@ -12,12 +12,22 @@ import {
   downloadDisk,
   diskChecksum,
   queryDiskSums,
-  queryHdStatus,
-  mountHd,
-  validateHardDiskImage,
-  copyToSlot,
-  type HdStatus,
+  queryCardStatus,
+  type CardStatus,
 } from './disk.js'
+import { Card } from './card.js'
+import type { DirEntry } from './fat32.js'
+
+/** A file on the TF card, as src/fat32.js lists it. */
+export type CardFile = DirEntry
+
+export interface CardState {
+  files: CardFile[]
+  /** The file A2CONFIG.TXT puts in each drive, S6D1 S6D2 S7D1 S7D2 (null: none, or not on the card). */
+  drives: (CardFile | null)[]
+  configError: string | null
+  status: CardStatus
+}
 
 export type ConnState =
   | 'idle'
@@ -525,6 +535,7 @@ export function useApple() {
 
   const syncRef = useRef(syncDrives)
   syncRef.current = syncDrives
+  const cardRef = useRef<() => Promise<void>>(async () => {})
   useEffect(() => {
     if (conn.state !== 'open') return
     // The probe left the debugger again, so the machine is running; the parser
@@ -532,7 +543,7 @@ export function useApple() {
     // trusts that never pauses the machine and talks to the keyboard instead.
     stream.current.mode = 'console'
     setMode('console')
-    void syncRef.current()
+    void syncRef.current().then(() => cardRef.current().catch(() => {}))
   }, [conn.state])
 
   const downloadDiskFile = useCallback(
@@ -608,85 +619,108 @@ export function useApple() {
     [conn.state, mode, send, release, drives],
   )
 
-  const [hd, setHd] = useState<HdStatus | null>(null)
-  const [hdBusy, setHdBusy] = useState(false)
+  const [card, setCard] = useState<CardState | null>(null)
+  const [cardBusy, setCardBusy] = useState(false)
 
-  /** Talk to the slot 7 hard disk with the machine paused. */
-  const hdSession = useCallback(
-    async (run: (l: Link) => Promise<HdStatus>) => {
+  /** Talk to the TF card with the machine paused: mount it, run, rescan. */
+  const cardSession = useCallback(
+    async <T,>(run: (c: Card, l: Link) => Promise<T>): Promise<T> => {
       if (!link.current || conn.state !== 'open') {
-        throw new Error('Connect USB serial before using the hard disk.')
+        throw new Error('Connect USB serial before using the TF card.')
       }
       setDiskError(null)
-      setHdBusy(true)
+      setCardBusy(true)
       const wasConsole = stream.current.mode === 'console'
       try {
         if (wasConsole) {
           send([CTRL_B])
           await new Promise((r) => setTimeout(r, QUIET_MS))
         }
-        setHd(await run(link.current))
+        const l = link.current
+        const status = await queryCardStatus(l)
+        if (!status.fsOk) {
+          setCard({ files: [], drives: [null, null, null, null], configError: null, status })
+          throw new Error(status.error !== null
+            ? `TF card error (stage ${status.error}): no card, or it did not answer.`
+            : 'The TF card is not FAT32. Format it FAT32 on a PC (32 GB or smaller).')
+        }
+        const c = await Card.open(l)
+        const out = await run(c, l)
+        const s = await c.scan()
+        setCard({ files: s.files, drives: s.drives, configError: s.configError, status: await queryCardStatus(l) })
+        return out
       } catch (err: any) {
         setDiskError(err?.message ?? String(err))
         throw err
       } finally {
-        setHdBusy(false)
+        setCardBusy(false)
+        setDiskProgress(null)
         if (wasConsole) release(CMD.cont.charCodeAt(0))
       }
     },
     [conn.state, send, release],
   )
 
-  const refreshHd = useCallback(() => hdSession((l) => queryHdStatus(l)), [hdSession])
+  const refreshCard = useCallback(() => cardSession(async () => {}), [cardSession])
+  cardRef.current = refreshCard
 
-  /** Copy a .hdv/.po/.2mg file into TF card slot `slot` through the board (q). */
-  const copyHdFile = useCallback(
-    (slot: number, file: File) =>
-      hdSession(async (l) => {
-        const data = validateHardDiskImage(await file.arrayBuffer())
-        try {
-          setDiskProgress({
-            drive: 7,
-            phase: 'uploading',
-            percent: 0,
-            detail: `Starting ${file.name}...`,
-            slot,
-            blocks: 0,
-            totalBlocks: data.length / 512,
-          })
-          const t0 = Date.now()
-          await copyToSlot(l, slot, data, {
-            onProgress: (p) => {
-              const percent = Math.round((p.blocks / p.totalBlocks) * 100)
-              const elapsed = (Date.now() - t0) / 1000
-              const leftSec = p.blocks && elapsed > 0 ? ((p.totalBlocks - p.blocks) / (p.blocks / elapsed)) : 0
-              const timeStr = leftSec >= 60
-                ? `~${Math.floor(leftSec / 60)}m ${Math.round(leftSec % 60)}s left`
-                : `~${Math.round(leftSec)}s left`
-              const speedKb = elapsed > 0 ? (p.blocks * 0.512 / elapsed).toFixed(0) : 0
-              setDiskProgress({
-                drive: 7,
-                phase: 'uploading',
-                percent,
-                detail: `${file.name} to slot ${slot}: block ${p.blocks}/${p.totalBlocks} (${percent}%, ${speedKb} KB/s, ${timeStr})`,
-                slot,
-                blocks: p.blocks,
-                totalBlocks: p.totalBlocks,
-              })
-            },
-          })
-        } finally {
-          setDiskProgress(null)
-        }
-        return queryHdStatus(l)
+  const progress = (verb: string, name: string) => {
+    const t0 = Date.now()
+    return (done: number, total: number) => {
+      const percent = total ? Math.round((done / total) * 100) : 0
+      const elapsed = (Date.now() - t0) / 1000
+      const left = done && elapsed > 0 ? (total - done) / (done / elapsed) : 0
+      const eta = left >= 60 ? `~${Math.floor(left / 60)}m ${Math.round(left % 60)}s left` : `~${Math.round(left)}s left`
+      setDiskProgress({
+        drive: 7,
+        phase: verb === 'Copying' ? 'uploading' : 'downloading',
+        percent,
+        detail: `${verb} ${name}: ${Math.round(done / 1024)} / ${Math.round(total / 1024)} KB (${eta})`,
+      })
+    }
+  }
+
+  /** Copy a file from this computer onto the card; returns it as the card lists it. */
+  const uploadToCard = useCallback(
+    (file: File) =>
+      cardSession(async (c) => {
+        const data = new Uint8Array(await file.arrayBuffer())
+        await c.upload(file.name, data, progress('Copying', file.name))
+        const s = await c.scan()
+        return s.files.find((f) => f.name.toLowerCase() === file.name.replace(/\.2mg$/i, '.po').toLowerCase()) ?? null
       }),
-    [hdSession],
+    [cardSession],
   )
 
-  /** Put TF card slot `slot` in drive 1 or 2 (null ejects); a load takes up to ~30 s. */
-  const mountHdSlot = useCallback(
-    (drive: 1 | 2, slot: number | null) => hdSession((l) => mountHd(l, drive, slot, { onPoll: setHd })),
-    [hdSession],
+  const downloadFromCard = useCallback(
+    (f: CardFile) =>
+      cardSession(async (c) => {
+        const data = await c.download(f, progress('Reading', f.name))
+        if (typeof document !== 'undefined') {
+          const url = URL.createObjectURL(new Blob([data as unknown as BlobPart], { type: 'application/octet-stream' }))
+          const a = document.createElement('a')
+          a.href = url
+          a.download = f.name
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          setTimeout(() => URL.revokeObjectURL(url), 60000)
+        }
+      }),
+    [cardSession],
+  )
+
+  const deleteFromCard = useCallback((f: CardFile) => cardSession((c) => c.remove(f)), [cardSession])
+
+  /** Put a card file in drive d (0-3: S6D1 S6D2 S7D1 S7D2), or empty it; a volume takes up to ~30 s. */
+  const mountCard = useCallback(
+    (d: number, f: CardFile | null) =>
+      cardSession(async (c) => {
+        await c.mount(d, f, { onPoll: (status: CardStatus) => setCard((cs) => (cs ? { ...cs, status } : cs)) })
+        // the floppy now comes from the card, not from this page's upload
+        if (d < 2) setDrives((ds) => ({ ...ds, [d + 1]: { filename: null, busy: false } }))
+      }),
+    [cardSession],
   )
 
   /** Take the disk out on the board too (the debugger's n1/n2), not just here. */
@@ -732,11 +766,13 @@ export function useApple() {
       diskError,
       uploadDiskFile,
       downloadDiskFile,
-      hd,
-      hdBusy,
-      refreshHd,
-      mountHdSlot,
-      copyHdFile,
+      card,
+      cardBusy,
+      refreshCard,
+      uploadToCard,
+      downloadFromCard,
+      deleteFromCard,
+      mountCard,
       ejectDisk,
       clearDiskError,
       pressKey,
@@ -769,11 +805,13 @@ export function useApple() {
       diskError,
       uploadDiskFile,
       downloadDiskFile,
-      hd,
-      hdBusy,
-      refreshHd,
-      mountHdSlot,
-      copyHdFile,
+      card,
+      cardBusy,
+      refreshCard,
+      uploadToCard,
+      downloadFromCard,
+      deleteFromCard,
+      mountCard,
       ejectDisk,
       clearDiskError,
       pressKey,

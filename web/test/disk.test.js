@@ -24,12 +24,8 @@ import {
   diskChecksum,
   queryDiskSums,
   downloadDisk,
-  parseHdStatus,
-  mountHd,
   validateHardDiskImage,
   hdRecords,
-  copyToSlot,
-  buildCardImage,
 } from '../src/disk.js'
 
 test('disk dimensions match standard 140K 5.25" floppy geometry', () => {
@@ -296,41 +292,6 @@ test('queryDiskSums sends i and parses both checksums', async () => {
   assert.deepEqual(await p, [0, 0xdeadbeef])
 })
 
-test('parseHdStatus reads the slot 7 part of the i line', () => {
-  // drive 1 slot 3 loaded, drive 2 empty, idle
-  assert.deepEqual(parseHdStatus('I1:00000000 I2:00000000 H:00 V1:0003 V2:FFFF S:01'), {
-    slots: [3, null], present: [true, false], busy: false, loading: false, error: null,
-  })
-  // loading, busy, err with estage 6 (CMD18)
-  assert.deepEqual(parseHdStatus('V1:0000 V2:0001 S:F8'), {
-    slots: [0, 1], present: [false, false], busy: true, loading: true, error: 6,
-  })
-  assert.equal(parseHdStatus('I1:00000000 I2:00000000 H:00'), null)
-})
-
-test('mountHd sends y, drive and slot, then polls i until not busy', async () => {
-  const link = createMockLink()
-  let polls = 0
-  const write = link.write.bind(link)
-  link.write = (b) => {
-    write(b)
-    if (b[0] === 0x69) {
-      polls++
-      queueMicrotask(() => link.feed(`\r\nI1:0 V1:${polls < 3 ? 'FFFF' : '002A'} V2:FFFF S:${polls < 3 ? 'C0' : '01'}\r\n> `))
-    }
-  }
-  const st = await mountHd(link, 1, 42, { pollMs: 1 })
-  assert.equal(new TextDecoder().decode(link.written[0]), 'y1002A')
-  assert.equal(polls, 3)
-  assert.deepEqual(st.slots, [42, null])
-  await assert.rejects(mountHd(link, 2, 0x10000), /Slot must be/)
-  link.write = (b) => {
-    write(b)
-    if (b[0] === 0x69) queueMicrotask(() => link.feed('V1:0001 V2:FFFF S:3C\r\n'))   // err, stage 7
-  }
-  await assert.rejects(mountHd(link, 1, 1, { pollMs: 1 }), /stage 7/)
-})
-
 test('validateHardDiskImage takes raw and 2IMG images and rejects partial blocks', () => {
   assert.equal(validateHardDiskImage(new Uint8Array(1024)).length, 1024)
   assert.throws(() => validateHardDiskImage(new Uint8Array(1000)), /512-byte blocks/)
@@ -357,92 +318,3 @@ test('hdRecords covers the image with data blocks and zero runs, and no further'
   assert.deepEqual([...recs[1].bytes], [0, 0, 1])
 })
 
-/** A board that takes q the way serial_debugger.v does, into a card of slots. */
-function createSlotBoard() {
-  const link = createMockLink()
-  const write = link.write.bind(link)
-  const slots = new Map()
-  let rx = []
-  let slot = null
-  let blk = 0
-  link.write = (bytes) => {
-    write(bytes)
-    const arr = [...bytes]
-    if (slot === null) {
-      const t = new TextDecoder().decode(Uint8Array.from(arr))
-      if (/^q[0-9A-F]{4}$/.test(t)) {
-        slot = parseInt(t.slice(1), 16)
-        blk = 0
-        if (!slots.has(slot)) slots.set(slot, new Uint8Array(70 * 512).fill(0xee))
-        queueMicrotask(() => link.feed('\r\nUPLOAD HD\r\n'))
-      }
-      return
-    }
-    rx.push(...arr)
-    const vol = slots.get(slot)
-    while (rx.length) {
-      if (rx[0] === 1 && rx.length >= 513) {
-        vol.set(rx.slice(1, 513), blk++ * 512)
-        rx = rx.slice(513)
-      } else if (rx[0] === 0 && rx.length >= 3) {
-        const n = ((rx[1] << 8) | rx[2]) + 1
-        for (let i = 0; i < n; i++, blk++) vol.fill(0, blk * 512, (blk + 1) * 512)
-        rx = rx.slice(3)
-      } else if (rx[0] === 2) {
-        rx = rx.slice(1)
-        slot = null
-        queueMicrotask(() => link.feed('\r\ndone\r\n'))
-        return
-      } else break
-      queueMicrotask(() => link.feed([ACK_BYTE]))
-    }
-  }
-  return { link, slots }
-}
-
-test('copyToSlot sends q, the records and 02, and the slot ends up holding the image', async () => {
-  const { link, slots } = createSlotBoard()
-  const data = new Uint8Array(40 * 512)
-  for (let i = 0; i < data.length; i++) data[i] = ((i * 13) & 0xff) | 1
-  data.fill(0, 10 * 512, 25 * 512) // a hole, which goes as a zero run
-  const progress = []
-  await copyToSlot(link, 0x2a, data, { onProgress: (p) => progress.push(p.blocks), timeoutMs: 1000 })
-  assert.equal(new TextDecoder().decode(link.written[0]), 'q002A')
-  assert.deepEqual(slots.get(0x2a).subarray(0, data.length), data)
-  assert.equal(slots.get(0x2a)[data.length], 0xee, 'nothing written past the image')
-  assert.equal(progress.at(-1), 40)
-  await assert.rejects(copyToSlot(link, 0xffff, data), /Slot must be/)
-})
-
-test('copyToSlot says so when the board refuses (no TF card)', async () => {
-  const link = createMockLink()
-  const write = link.write.bind(link)
-  link.write = (b) => {
-    write(b)
-    queueMicrotask(() => link.feed('\r\nlost\r\n'))
-  }
-  await assert.rejects(copyToSlot(link, 1, new Uint8Array(512), { timeoutMs: 1000 }), /refused/)
-})
-
-test('buildCardImage lays out the config and the slots as sd_vol.v reads them', () => {
-  const a = new Uint8Array(1600 * 512).fill(0x11)
-  const c = new Uint8Array(280 * 512).fill(0x33)
-  const { parts, size } = buildCardImage([a, null, c], [0, 2])
-  const img = new Uint8Array(size)
-  let at = 0
-  for (const p of parts) {
-    img.set(p, at)
-    at += p.length
-  }
-  assert.equal(at, size)
-  assert.equal(size, (2048 + 2 * 65536) * 512 + c.length, 'ends with the last slot')
-  assert.deepEqual([...img.subarray(0, 8)], [0x41, 0x32, 0x48, 0x44, 0, 0, 2, 0])
-  assert.ok(img.subarray(8, 2048 * 512).every((x) => x === 0))
-  assert.deepEqual(img.subarray(2048 * 512, 2048 * 512 + a.length), a)
-  assert.ok(img.subarray((2048 + 65536) * 512, (2048 + 2 * 65536) * 512).every((x) => x === 0), 'slot 1 empty')
-  assert.deepEqual(img.subarray((2048 + 2 * 65536) * 512), c)
-  assert.deepEqual([...buildCardImage([a], [null, null]).parts[0].subarray(4, 8)], [0xff, 0xff, 0xff, 0xff])
-  assert.throws(() => buildCardImage([], [null, null]), /at least one/)
-  assert.throws(() => buildCardImage([a], [1, null]), /no image/)
-  assert.throws(() => buildCardImage([a], [0, 0]), /both drives/)
-})

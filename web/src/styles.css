@@ -304,7 +304,6 @@ button.toggle-btn.active {
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
-
 /* --- console ------------------------------------------------------------- */
 
 .console-pane pre {
@@ -1122,233 +1121,9 @@ button.opt-pill.selected {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
-.disk-tabs {
-  display: flex;
-  background: #171411;
-  border-bottom: 1px solid #2a251e;
-}
-
-.disk-tab-btn {
-  flex: 1;
-  padding: 8px 12px;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: #9c9488;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.disk-tab-btn:hover {
-  color: #e4dfd5;
-  background: #231f1a;
-}
-
-.disk-tab-btn.active {
-  color: #4ade80;
-  border-bottom-color: #22c55e;
-  background: #201c18;
-  font-weight: 600;
-}
-
-.disk-drives-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
-  padding: 12px;
-}
-
-.disk-drive-card {
-  background: #231f1a;
-  border: 1px solid #383129;
-  border-radius: 6px;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  transition: border-color 0.2s, background-color 0.2s;
-}
-
-.disk-drive-card.drag-over {
-  border-color: #6fbf5a;
-  background: #202b1c;
-}
-
-.disk-drive-card.has-disk {
-  border-color: #4a4237;
-}
-
-.disk-drive-card.busy {
-  border-color: #d97706;
-}
-
-.disk-drive-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.disk-drive-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.disk-drive-title h3 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #e4dfd5;
-}
-
-.disk-led {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-  background: #3c382f;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
-  transition: background-color 0.2s, box-shadow 0.2s;
-}
-
-.disk-led.active {
-  background: #22c55e;
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.7);
-}
-
-.disk-led.busy {
-  background: #f59e0b;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.9);
-  animation: pulse-busy 0.8s infinite alternate;
-}
-
-@keyframes pulse-busy {
-  from { opacity: 0.6; }
-  to { opacity: 1; }
-}
-
-.disk-status-tag {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: #2d2720;
-  color: #9c9488;
-  font-weight: 500;
-}
-
-.disk-drive-card.has-disk .disk-status-tag {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-}
-
-.disk-drive-card.busy .disk-status-tag {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
-}
-
-.disk-drive-body {
-  min-height: 52px;
-  display: flex;
-  align-items: center;
-}
-
-.disk-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-}
-
-.disk-icon {
-  font-size: 22px;
-  line-height: 1;
-}
-
-.disk-details {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.disk-filename {
-  font-size: 13px;
-  font-weight: 600;
-  color: #f3efe6;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .disk-meta {
   font-size: 11px;
   color: #8a8274;
-}
-
-.disk-dropzone {
-  width: 100%;
-  border: 1px dashed #443c32;
-  border-radius: 4px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  font-size: 12px;
-  color: #8c8374;
-  cursor: pointer;
-  background: #1c1814;
-  transition: border-color 0.2s, background-color 0.2s;
-}
-
-.disk-dropzone:hover {
-  border-color: #6fbf5a;
-  background: #22201b;
-  color: #d1cbbe;
-}
-
-.drop-icon {
-  font-size: 16px;
-  line-height: 1;
-}
-
-.drop-sub {
-  font-size: 10px;
-  color: #686154;
-}
-
-.disk-drive-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: auto;
-}
-
-.btn-disk-insert {
-  width: 100%;
-  padding: 6px 10px;
-  background: #2e2821;
-  border: 1px solid #443c32;
-  border-radius: 4px;
-  color: #e4dfd5;
-  font-size: 12px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: background-color 0.15s, border-color 0.15s;
-}
-
-.btn-disk-insert:hover:not(:disabled) {
-  background: #3d352b;
-  border-color: #6fbf5a;
 }
 
 .btn-disk-action {
@@ -1372,8 +1147,7 @@ button.opt-pill.selected {
   color: #a39c90;
 }
 
-.btn-disk-action:disabled,
-.btn-disk-insert:disabled {
+.btn-disk-action:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -1411,11 +1185,6 @@ button.opt-pill.selected {
   margin-bottom: 4px;
 }
 
-.progress-phase {
-  font-weight: 600;
-  color: #f59e0b;
-}
-
 .progress-detail {
   color: #a39c90;
 }
@@ -1433,19 +1202,6 @@ button.opt-pill.selected {
   background: linear-gradient(90deg, #f59e0b, #10b981);
   transition: width 0.2s ease-out;
 }
-
-.disk-pane-footer {
-  padding: 8px 12px;
-  border-top: 1px solid #2a251e;
-  background: #171411;
-}
-
-.disk-tip {
-  font-size: 11px;
-  color: #787063;
-  line-height: 1.4;
-}
-
 
 /* --- Disk II drives, above the keyboard ---------------------------------- */
 
@@ -1525,15 +1281,6 @@ button.opt-pill.selected {
 .dd-select:hover:not(:disabled) { filter: brightness(1.25); }
 .dd-select:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.dd-error {
-  flex-basis: 100%;
-  text-align: left;
-  color: var(--err);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-
 /* --- Flashbar Progress ---------------------------------------------------- */
 
 .flashbar-progress {
@@ -1573,40 +1320,199 @@ button.opt-pill.selected {
   transition: width 0.2s ease-out;
 }
 
-/* --- Hard Disk Copy Progress Card ----------------------------------------- */
 
-.hd-copy-progress {
-  width: 100%;
-  margin-top: 8px;
-  padding: 8px 10px;
-  background: #151310;
-  border: 1px solid #3a3227;
-  border-radius: 4px;
+/* --- Disks pane: the slot 6 and slot 7 cards, the TF card shelf ---------- */
+
+.card-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  padding: 12px;
 }
 
-.hd-copy-progress-header {
+.io-card {
+  background: #13241a;            /* a peripheral card's green board */
+  border: 1px solid #24402d;
+  border-radius: 6px;
+  padding: 8px 10px 10px;
+}
+
+.io-card-title {
+  font: 700 10px var(--sans);
+  letter-spacing: 0.12em;
+  color: #9bc7a3;
+  margin-bottom: 8px;
+}
+
+.dd-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  position: relative;
+}
+.dd-buttons .dd-select { margin: 0; }
+
+.dd-label.failed,
+.hd-volume.failed { color: var(--err); }
+
+.dd-more { position: relative; }
+.dd-more > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  font: 700 12px var(--sans);
+  color: var(--dim);
+}
+.dd-more > summary::-webkit-details-marker { display: none; }
+.dd-menu {
+  position: absolute;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  background: #2a251e;
+  border: 1px solid #443c32;
+  border-radius: 4px;
+  padding: 4px;
+}
+.dd-menu button {
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.dd-menu button:hover:not(:disabled) { background: #3d352b; }
+.dd-menu button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* the hard disk: a dark drive with its volume name on a label */
+.hd-unit {
+  flex: 1 1 200px;
+  background: linear-gradient(180deg, #3a3631 0%, #26231f 100%);
+  border-radius: 6px;
+  padding: 8px 12px 10px;
+  box-shadow: inset 0 1px 0 #55504a, 0 3px 10px rgba(0, 0, 0, 0.5);
+}
+.hd-face {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 700 11px var(--sans);
+  letter-spacing: 0.08em;
+  color: #bdb6a8;
+}
+.hd-volume {
+  margin: 8px 0;
+  padding: 3px 6px;
+  background: #121110;
+  border-radius: 2px;
+  box-shadow: inset 0 2px 4px #000;
+  color: var(--phosphor);
+  font: 11px/14px var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shelf { padding: 0 12px 12px; }
+.shelf-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.shelf-head .io-card-title { margin: 0; color: var(--legend-dim); }
+.shelf-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.tile {
+  position: relative;
+  display: flex;
+  background: #221e19;
+  border: 1px solid #3a332a;
+  border-radius: 6px;
+  min-height: 74px;
+}
+.tile.mounted { border-color: var(--ok); }
+.tile-main,
+.tile-add {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.tile-add {
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed #5c5244;
+  border-radius: 6px;
+  color: var(--dim);
+}
+.tile-main:hover:not(:disabled),
+.tile-add:hover:not(:disabled) { background: #2c2720; }
+.tile-main:disabled,
+.tile-add:disabled { opacity: 0.5; cursor: not-allowed; }
+.tile-icon { font-size: 18px; }
+.tile-name {
+  font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tile-more { position: absolute; top: 2px; right: 2px; }
+
+.disk-dialog {
+  background: #1f1b17;
+  color: var(--ink);
+  border: 1px solid #443c32;
+  border-radius: 8px;
+  padding: 16px 18px;
+  min-width: min(360px, 90vw);
+  max-width: 90vw;
+}
+.disk-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+.disk-dialog h3 { margin: 0 0 8px; font-size: 15px; }
+.dlg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 50vh;
+  overflow: auto;
+  margin: 8px 0;
+}
+.dlg-file {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
-  margin-bottom: 5px;
+  gap: 12px;
+  padding: 6px 8px;
+  background: #2a251e;
+  border: 1px solid #3a332a;
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
 }
-
-.hd-copy-tag {
-  color: #f59e0b;
-  font-weight: 600;
+.dlg-file:hover { border-color: var(--accent); }
+.dlg-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }
-
-.hd-copy-percent {
-  font-family: var(--mono);
-  color: #10b981;
-  font-weight: 600;
-}
-
-.hd-copy-detail {
-  font-size: 10px;
-  color: #a39c90;
-  margin-top: 5px;
-  word-break: break-all;
-  font-family: var(--mono);
-}
+.dlg-actions .btn-disk-action.secondary { margin-left: auto; }
+.btn-disk-action.danger { background: #5c2620; border-color: #7a3027; }

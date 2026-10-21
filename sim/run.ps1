@@ -104,6 +104,11 @@ $core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v',
            'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v') + $disk2 + $mockingboard
 Run-Tb 'tb_disk2'        $disk2 -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_diskimg'      @('src/serial_debugger.v', 'src/disk2/disk2_store.v') -Gen '2012'
+# tb_sdvol and tb_sdcopy boot from a FAT32 card built by the page's own FAT code
+if (-not $Target -or $Target -in @('tb_sdvol', 'tb_sdcopy')) {
+    & node (Join-Path $root 'web\scripts\simcard.mjs')
+    if ($LASTEXITCODE -ne 0) { throw 'FAILED: web/scripts/simcard.mjs' }
+}
 Run-Tb 'tb_sdvol'        @('sim/models/sdcard.v', 'src/sd_vol.v', 'src/spi_byte.v') -Gen '2012'
 Run-Tb 'tb_sdcopy'       @('sim/models/sdcard.v', 'src/sd_vol.v', 'src/spi_byte.v', 'src/serial_debugger.v') -Gen '2012'
 Run-Tb 'tb_video_hdmi'   (@('src/video_generator.v', 'src/colorbar_gen.v') + $hdmi)

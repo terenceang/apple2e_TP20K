@@ -154,18 +154,32 @@ dump address to `$0000 $0100 $0400 $0800 $FA60 $FFF0` before `m`. The
 firmware's own `?` only lists six of them; `x`, `g` and `w` work and are not in
 its help text.
 
-**The slot 7 hard disk** (`disk.js` `parseHdStatus` / `queryHdStatus` /
-`mountHd`): its two volumes come from numbered slots on the TF card, which is
-written from a PC (`scripts/sdvol.py`), not over this link. `i` ends with
-`V1:ssss V2:ssss S:xx` -- the slot in each drive (`FFFF` = none) and
-`S = {loading, busy, err, estage[2:0], present[1:0]}`. `y`, the drive digit and
-four hex digits (`y1002A`) put a slot in a drive (`FFFF` ejects) and print a
-prompt at once; the load runs on, so poll `i` until busy clears (~30 s for a
-whole volume). `q` and four hex digits (`q002A`) copy an image into that slot
-through the board: `UPLOAD HD` (or `lost` with no card), then records -- `01`
-and 512 bytes for a block, `00 hi lo` for (hi:lo)+1 zero blocks, `02` to finish
--- with one `06` per record once it is on the card, then `done`. The serial
-link sets the pace: ~45 s per MB of non-zero blocks.
+**The TF card** holds every drive's image as an ordinary file on FAT32 (a PC
+formats it and can copy images on and off; cards over 32 GB must be
+reformatted FAT32, and a card in the old raw-slot layout must be reformatted).
+`A2CONFIG.TXT` in the root says what each drive loads, one line per drive by
+8.3 name (`S6D1=LODERU~1.DSK ; Lode Runner.dsk`; `src/config.js`). The board
+reads it at power-on and finds the files itself (`src/sd_vol.v`); a file must
+be in one run of clusters, which every file the page writes is. Everything
+else -- listing, copying, deleting, rewriting the config -- is the page's own
+FAT32 (`src/fat32.js`, `src/card.js`) over three debugger commands:
+
+- `i` ends with `S:ssss` = `{loading, busy, err, estage[2:0], fs_ok, 0,
+  fail[3:0], present[3:0]}`, drives in the order S6D1 S6D2 S7D1 S7D2
+  (`parseCardStatus`).
+- `b`, eight hex digits of LBA and four of count (`b000008000002`): `SECTORS`,
+  the raw bytes, then `done` (`lost` past the card's end) (`readSectors`).
+- `u` and eight hex digits of LBA: `UPLOAD HD` (or `lost` with no card), then
+  records -- `01` and 512 bytes for a sector, `00 hi lo` for (hi:lo)+1 zero
+  sectors, `02` to finish -- with one `06` per record once it is on the card,
+  then `done` (`writeSectors`). The serial link sets the pace: ~45 s per MB of
+  non-zero sectors, so a big volume is quicker through a card reader.
+- `y` and a drive digit 1-4 reloads that drive from `A2CONFIG.TXT` and prints
+  a prompt at once; the load runs on, so poll `i` until busy clears (~30 s for
+  a whole volume) (`reloadDrive`).
+
+A floppy the Apple writes goes back into its `.dsk` file by itself, about a
+second after the drive goes quiet (never during a debugger session).
 
 Commands are only accepted when the debugger's main state is idle, and anything
 sent sooner is dropped without a word. The banner prints **two** prompts -- one

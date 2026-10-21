@@ -9,7 +9,6 @@ import { DebuggerPane } from './components/DebuggerPane'
 import { Gamepad } from './components/Gamepad'
 import { FlashBar } from './components/FlashBar'
 import { DiskPane } from './components/DiskPane'
-import { DiskDrives } from './components/DiskDrives'
 
 import {
   PREF_CONSOLE,
@@ -150,11 +149,13 @@ export default function App() {
                 onUpload={apple.uploadDiskFile}
                 onDownload={apple.downloadDiskFile}
                 onEject={apple.ejectDisk}
-                hd={apple.hd}
-                hdBusy={apple.hdBusy}
-                onHdRefresh={apple.refreshHd}
-                onHdMount={apple.mountHdSlot}
-                onHdCopy={apple.copyHdFile}
+                card={apple.card}
+                cardBusy={apple.cardBusy}
+                onCardRefresh={apple.refreshCard}
+                onCardUpload={apple.uploadToCard}
+                onCardDownload={apple.downloadFromCard}
+                onCardDelete={apple.deleteFromCard}
+                onCardMount={apple.mountCard}
                 onClearError={apple.clearDiskError}
                 onClose={() => setShowDisks(false)}
                 disabled={apple.conn.state !== 'open'}
@@ -201,13 +202,6 @@ export default function App() {
               onClose={() => setShowPaddles(false)}
             />
           )}
-          <DiskDrives
-            drives={apple.drives}
-            diskError={apple.diskError}
-            onMount={apple.uploadDiskFile}
-            onClearError={apple.clearDiskError}
-            disabled={apple.conn.state !== 'open'}
-          />
           <Keyboard
             mode={apple.mode}
             onPress={press}
