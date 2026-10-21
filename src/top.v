@@ -489,7 +489,12 @@ module top (
         .rgb(bar_rgb)
     );
 
+    // Black while the TF card's volumes load: the CPU is held, so the ROM has
+    // not cleared the text page yet and the zeroed RAM would show as inverse @.
+    // hd_loading is a slow level from the system domain; a torn frame at its
+    // edge is harmless.
     wire [23:0] hdmi_rgb = test_pattern_enable ? bar_rgb
+                         : hd_loading          ? 24'h000000
                                                : {vid_red, vid_green, vid_blue};
 
     // HDMI audio: true stereo audio (Left & Right) from sound_generator,
