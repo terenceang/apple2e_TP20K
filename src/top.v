@@ -130,7 +130,8 @@ module top (
     // the driver's wait for a write-back, and aux_ram, which latches a request
     // on its go pulse, takes whichever pulsed.
     wire [1:0]  hd_present;
-    wire        hd_ack, hd_sd_busy, hd_loading, sd_err;
+    wire        hd_ack, hd_sd_busy, hd_loading, sd_err, hd_ld_drv;
+    wire [4:0]  hd_ld_prog;
     wire [15:0] hd_rdata;
     wire        core_hd_go, core_hd_we, sd_m_go, sd_m_we;
     wire [1:0]  core_hd_be;
@@ -335,7 +336,7 @@ module top (
         .m_go(sd_m_go), .m_addr(sd_m_addr), .m_we(sd_m_we), .m_wdata(sd_m_wdata),
         .m_rdata(hd_rdata), .m_ack(hd_ack),
         .slot0(sd_slot0), .slot1(sd_slot1), .present(hd_present),
-        .loading(hd_loading), .busy(hd_sd_busy), .err(sd_err), .estage(sd_estage),
+        .loading(hd_loading), .ld_drv(hd_ld_drv), .ld_prog(hd_ld_prog), .busy(hd_sd_busy), .err(sd_err), .estage(sd_estage),
         .wb_go(hd_wb_go), .wb_drv(hd_wb_drv), .wb_blk(hd_wb_blk),
         .mnt_go(sd_mnt_go), .mnt_drv(sd_mnt_drv), .mnt_slot(sd_mnt_slot),
         .x_go(sd_x_go), .x_slot(sd_x_slot), .x_blk(sd_x_blk), .x_zero(sd_x_zero),
@@ -371,6 +372,7 @@ module top (
         .vram_req(vram_req),
         .vram_addr(vram_addr),
         .vram_data(vram_data),
+        .osd_on(hd_loading), .osd_drv(hd_ld_drv), .osd_prog(hd_ld_prog),
         .char_rom_addr(char_rom_addr),
         .char_rom_data(char_rom_data),
         .aux_rd_want(aux_rd_want), .aux_rd_addr(aux_rd_addr),
@@ -489,12 +491,23 @@ module top (
         .rgb(bar_rgb)
     );
 
-    // Black while the TF card's volumes load: the CPU is held, so the ROM has
-    // not cleared the text page yet and the zeroed RAM would show as inverse @.
-    // hd_loading is a slow level from the system domain; a torn frame at its
-    // edge is harmless.
+    // The loading OSD (apple2_core, text page 1) is recoloured as a modal so it
+    // cannot be taken for the Apple: a box over text rows 7-14, cols 3-36
+    // (row r at y = 48 + 16r, col c at x = 80 + 14c), title bar over rows 7-8,
+    // drop shadow, dark backdrop.  vid_green[7] is a lit text dot.
+    wire osd_box   = pixel_x >= 10'd122 && pixel_x < 10'd598 && pixel_y >= 10'd160 && pixel_y < 10'd288;
+    wire osd_edge  = pixel_x <  10'd124 || pixel_x >= 10'd596 || pixel_y <  10'd162 || pixel_y >= 10'd286;
+    wire osd_title = pixel_y <  10'd200;
+    wire osd_bar   = pixel_y >= 10'd256 && pixel_y < 10'd272;   // row 13
+    wire osd_shade = pixel_x >= 10'd128 && pixel_x < 10'd604 && pixel_y >= 10'd166 && pixel_y < 10'd294;
+    wire [23:0] osd_rgb =
+        !osd_box     ? (osd_shade ? 24'h101418 : 24'h303848)
+      : osd_edge     ? 24'hF0F0F0
+      : osd_title    ? (vid_green[7] ? 24'hFFFFFF : 24'h1E50A0)
+      : vid_green[7] ? (osd_bar ? 24'h1E50A0 : 24'h101010)
+                     : 24'hD8D8D8;
     wire [23:0] hdmi_rgb = test_pattern_enable ? bar_rgb
-                         : hd_loading          ? 24'h000000
+                         : hd_loading          ? osd_rgb
                                                : {vid_red, vid_green, vid_blue};
 
     // HDMI audio: true stereo audio (Left & Right) from sound_generator,

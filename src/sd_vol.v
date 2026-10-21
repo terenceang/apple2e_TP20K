@@ -53,6 +53,8 @@ module sd_vol #(
     output reg  [15:0] slot1,
     output reg  [1:0]  present,
     output wire        loading,
+    output wire        ld_drv,         // drive being loaded, and how far (blk[15:11]), for the OSD
+    output wire [4:0]  ld_prog,
     output wire        busy,
     output reg         err,
     output reg  [2:0]  estage,
@@ -133,6 +135,8 @@ module sd_vol #(
         if (reset) dwait <= 26'd0;
         else if (!ddr_ready && !gave_up) dwait <= dwait + 1'b1;
 
+    assign ld_drv  = drv;
+    assign ld_prog = blk[15:11];
     assign loading = !gave_up && (!inited ? !err : (!cfg_rd || ld_pend != 2'b00));
     assign busy    = st != IDLE || ld_pend != 2'b00 || !cfg_rd;
     // the config sector's bytes

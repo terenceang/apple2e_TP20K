@@ -37,6 +37,9 @@ module apple2_core #(
     input  wire        vram_req,
     input  wire [15:0] vram_addr,
     output reg  [7:0]  vram_data,
+    input  wire        osd_on,        // the TF card is loading: text page 1 shows the OSD
+    input  wire        osd_drv,
+    input  wire [4:0]  osd_prog,
     input  wire [11:0] char_rom_addr,
     output wire [7:0]  char_rom_data,
 
@@ -467,12 +470,34 @@ module apple2_core #(
         .dout(ram_dout)
     );
 
+    // Loading OSD: while the TF card loads the CPU is held, so the ROM has not
+    // cleared the text page and the zeroed RAM would show as inverse @.  Text
+    // page 1 fetches read this instead, drawn by the real character ROM:
+    // the project name on row 8, "LOADING VOLUME S7,Dn" on row 11 and a
+    // 32-cell progress bar on row 13.
+    reg  [15:0] vaddr_q;
+    always @(posedge clk) if (vram_req) vaddr_q <= vram_addr;
+    wire [6:0]   osd_c   = vaddr_q[6:0] - 7'h28;    // column on rows 8-15 (others wrap past 39)
+    wire [239:0] osd_ttl = "Project QUERCETIN //e 20K Dock";      // 30 chars, cols 5-34
+    wire [159:0] osd_ld  = {"LOADING VOLUME S7,D", osd_drv ? "2" : "1"};   // 20, cols 10-29
+    reg  [7:0]   osd_byte;
+    always @* begin
+        osd_byte = 8'hA0;
+        if (vaddr_q[15:7] == 9'h008 && osd_c >= 7'd5 && osd_c < 7'd35)  // $428: row 8
+            osd_byte = osd_ttl[8*(34 - osd_c) +: 8] | 8'h80;
+        if (vaddr_q[15:7] == 9'h00B && osd_c >= 7'd10 && osd_c < 7'd30)  // $5A8: row 11
+            osd_byte = osd_ld[8*(29 - osd_c) +: 8] | 8'h80;
+        if (vaddr_q[15:7] == 9'h00D && osd_c >= 7'd4 && osd_c < 7'd36)  // $6A8: row 13
+            osd_byte = (osd_c[5:0] - 6'd4 < {1'b0, osd_prog}) ? 8'h20 : 8'hAE;  // inverse space : "."
+    end
+    wire osd_hit = osd_on && vaddr_q[15:10] == 6'b000001;   // $0400-$07FF
+
     // Latch Video RAM output when vram_req_d is active
     always @(posedge clk or posedge reset) begin
         if (reset)
             vram_data <= 8'hA0;
         else if (vram_req_d)
-            vram_data <= ram_dout;
+            vram_data <= osd_hit ? osd_byte : ram_dout;
     end
 
     // Latch CPU RAM output when not serving video
