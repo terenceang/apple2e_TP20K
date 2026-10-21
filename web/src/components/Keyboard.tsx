@@ -49,6 +49,11 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
   const ticker = useRef<number | null>(null)
   const repeatId = useRef<string | null>(null)
   const mods = useRef({ shift: false, ctrl: false })
+  // CONTROL and SHIFT clicked on screen: held for the next key, then let go,
+  // so a mouse alone can make CONTROL-RESET and control characters.
+  const [latch, setLatch] = useState({ shift: false, ctrl: false })
+  const latchRef = useRef(latch)
+  latchRef.current = latch
 
   const isConnected = conn?.state === 'open'
   const isConnecting = conn?.state === 'opening' || conn?.state === 'probing'
@@ -208,10 +213,22 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
 
   const capDown = (k: Cap, capEvent: 'down' | 'up') => {
     const buttons = heldButtons()
+    const ctrl = heldRef.current.ctrl || latchRef.current.ctrl
+    const shift = heldRef.current.shift || latchRef.current.shift
+    if (k.id === 'control' || k.id.startsWith('shift')) {
+      if (capEvent === 'down') {
+        const which = k.id === 'control' ? 'ctrl' : 'shift'
+        setLatch((l) => ({ ...l, [which]: !l[which] }))
+      }
+      return
+    }
+    if (capEvent === 'down' && (latchRef.current.ctrl || latchRef.current.shift)) {
+      setLatch({ shift: false, ctrl: false })
+    }
     if (k.id === 'reset') {
       // CONTROL-RESET, from the on-screen cap: only with CONTROL held
       if (capEvent === 'up') onReset?.(false, buttons)
-      else if (heldRef.current.ctrl) onReset?.(true, buttons)
+      else if (ctrl) onReset?.(true, buttons)
       setDown((d) => {
         const n = new Set(d)
         if (capEvent === 'down') n.add(k.id)
@@ -224,7 +241,7 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
       triggerActivity()
       setDown((d) => new Set(d).add(k.id))
       if (!isModifier(k.id)) charsDown.current.add(k.id)
-      onPress(k.id, { shift: heldRef.current.shift, caps: heldRef.current.caps, ctrl: heldRef.current.ctrl }, buttons)
+      onPress(k.id, { shift, caps: heldRef.current.caps, ctrl }, buttons)
     } else {
       charUp(k.id)
       setDown((d) => {
@@ -327,8 +344,8 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
           {KEYS.map((k) => {
             const isDown =
               down.has(k.id) ||
-              (k.id.startsWith('shift') && held.shift) ||
-              (k.id === 'control' && held.ctrl) ||
+              (k.id.startsWith('shift') && (held.shift || latch.shift)) ||
+              (k.id === 'control' && (held.ctrl || latch.ctrl)) ||
               (k.id === 'caps' && held.caps) ||
               (k.id === 'apple-o' && held.appleO) ||
               (k.id === 'apple-c' && held.appleC)

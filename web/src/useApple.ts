@@ -12,6 +12,11 @@ import {
   downloadDisk,
   diskChecksum,
   queryDiskSums,
+  queryHdStatus,
+  mountHd,
+  validateHardDiskImage,
+  copyToSlot,
+  type HdStatus,
 } from './disk.js'
 
 export type ConnState =
@@ -111,7 +116,7 @@ export interface DriveState {
 }
 
 export interface DiskProgress {
-  drive: 1 | 2
+  drive: 1 | 2 | 7 // 7: a copy into a TF card slot
   phase: 'uploading' | 'downloading'
   percent: number
   detail: string
@@ -600,9 +605,88 @@ export function useApple() {
     [conn.state, mode, send, release, drives],
   )
 
-  const ejectDisk = useCallback((drive: 1 | 2) => {
-    setDrives((d) => ({ ...d, [drive]: { filename: null, busy: false } }))
-  }, [])
+  const [hd, setHd] = useState<HdStatus | null>(null)
+  const [hdBusy, setHdBusy] = useState(false)
+
+  /** Talk to the slot 7 hard disk with the machine paused. */
+  const hdSession = useCallback(
+    async (run: (l: Link) => Promise<HdStatus>) => {
+      if (!link.current || conn.state !== 'open') {
+        throw new Error('Connect USB serial before using the hard disk.')
+      }
+      setDiskError(null)
+      setHdBusy(true)
+      const wasConsole = stream.current.mode === 'console'
+      try {
+        if (wasConsole) {
+          send([CTRL_B])
+          await new Promise((r) => setTimeout(r, QUIET_MS))
+        }
+        setHd(await run(link.current))
+      } catch (err: any) {
+        setDiskError(err?.message ?? String(err))
+        throw err
+      } finally {
+        setHdBusy(false)
+        if (wasConsole) release(CMD.cont.charCodeAt(0))
+      }
+    },
+    [conn.state, send, release],
+  )
+
+  const refreshHd = useCallback(() => hdSession((l) => queryHdStatus(l)), [hdSession])
+
+  /** Copy a .hdv/.po/.2mg file into TF card slot `slot` through the board (q). */
+  const copyHdFile = useCallback(
+    (slot: number, file: File) =>
+      hdSession(async (l) => {
+        const data = validateHardDiskImage(await file.arrayBuffer())
+        try {
+          setDiskProgress({ drive: 7, phase: 'uploading', percent: 0, detail: `Starting ${file.name}...` })
+          const t0 = Date.now()
+          await copyToSlot(l, slot, data, {
+            onProgress: (p) => {
+              const percent = Math.round((p.blocks / p.totalBlocks) * 100)
+              const left = p.blocks ? ((Date.now() - t0) / p.blocks) * (p.totalBlocks - p.blocks) : 0
+              setDiskProgress({
+                drive: 7,
+                phase: 'uploading',
+                percent,
+                detail: `${file.name} to slot ${slot}: block ${p.blocks}/${p.totalBlocks} (${percent}%, ~${Math.ceil(left / 60000)} min left)`,
+              })
+            },
+          })
+        } finally {
+          setDiskProgress(null)
+        }
+        return queryHdStatus(l)
+      }),
+    [hdSession],
+  )
+
+  /** Put TF card slot `slot` in drive 1 or 2 (null ejects); a load takes up to ~30 s. */
+  const mountHdSlot = useCallback(
+    (drive: 1 | 2, slot: number | null) => hdSession((l) => mountHd(l, drive, slot, { onPoll: setHd })),
+    [hdSession],
+  )
+
+  /** Take the disk out on the board too (the debugger's n1/n2), not just here. */
+  const ejectDisk = useCallback(
+    async (drive: 1 | 2) => {
+      setDrives((d) => ({ ...d, [drive]: { filename: null, busy: false } }))
+      if (!link.current || conn.state !== 'open') return
+      const wasConsole = stream.current.mode === 'console'
+      if (wasConsole) {
+        send([CTRL_B])
+        await new Promise((r) => setTimeout(r, QUIET_MS))
+      }
+      release(0x6e, drive === 2 ? 0x32 : 0x31) // 'n', drive digit
+      // separately: a 'c' that lands while the eject's prompt prints is dropped
+      await new Promise((r) => setTimeout(r, 3 * QUIET_MS))
+      if (wasConsole) release(CMD.cont.charCodeAt(0))
+    },
+    [conn.state, send, release],
+  )
 
   const clearDiskError = useCallback(() => setDiskError(null), [])
 
@@ -629,6 +713,11 @@ export function useApple() {
       diskError,
       uploadDiskFile,
       downloadDiskFile,
+      hd,
+      hdBusy,
+      refreshHd,
+      mountHdSlot,
+      copyHdFile,
       ejectDisk,
       clearDiskError,
       pressKey,
@@ -661,6 +750,11 @@ export function useApple() {
       diskError,
       uploadDiskFile,
       downloadDiskFile,
+      hd,
+      hdBusy,
+      refreshHd,
+      mountHdSlot,
+      copyHdFile,
       ejectDisk,
       clearDiskError,
       pressKey,

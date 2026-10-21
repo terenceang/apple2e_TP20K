@@ -43,6 +43,7 @@ module tb_top;
 
     top dut (.clk(clk), .key_s1_n(1'b1), .key_s2_n(1'b1), .led(led),
              .uart_rx(1'b1), .uart_tx(uart_tx),
+             .sd_clk(), .sd_mosi(), .sd_miso(1'b1), .sd_cs_n(),   // no TF card
              .tmds_clk_p(tmds_clk_p), .tmds_clk_n(tmds_clk_n),
              .tmds_d_p(tmds_d_p), .tmds_d_n(tmds_d_n),
              .i2s_bclk(i2s_bclk), .i2s_lrck(i2s_lrck), .i2s_din(i2s_din),

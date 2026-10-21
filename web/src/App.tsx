@@ -93,7 +93,9 @@ export default function App() {
 
   const press = useCallback(
     (id: string, mods: { shift: boolean; caps: boolean; ctrl: boolean }, btns: number) => {
-      apple.pressKey(id, mods, btns)
+      // the on-screen CAPS LOCK cap toggles, as the host's Caps Lock key does
+      if (id === 'caps') setHeld((s) => ({ ...s, caps: !s.caps }))
+      else apple.pressKey(id, mods, btns)
     },
     [apple],
   )
@@ -147,6 +149,11 @@ export default function App() {
                 onUpload={apple.uploadDiskFile}
                 onDownload={apple.downloadDiskFile}
                 onEject={apple.ejectDisk}
+                hd={apple.hd}
+                hdBusy={apple.hdBusy}
+                onHdRefresh={apple.refreshHd}
+                onHdMount={apple.mountHdSlot}
+                onHdCopy={apple.copyHdFile}
                 onClearError={apple.clearDiskError}
                 onClose={() => setShowDisks(false)}
                 disabled={apple.conn.state !== 'open'}

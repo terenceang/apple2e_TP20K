@@ -154,6 +154,19 @@ dump address to `$0000 $0100 $0400 $0800 $FA60 $FFF0` before `m`. The
 firmware's own `?` only lists six of them; `x`, `g` and `w` work and are not in
 its help text.
 
+**The slot 7 hard disk** (`disk.js` `parseHdStatus` / `queryHdStatus` /
+`mountHd`): its two volumes come from numbered slots on the TF card, which is
+written from a PC (`scripts/sdvol.py`), not over this link. `i` ends with
+`V1:ssss V2:ssss S:xx` -- the slot in each drive (`FFFF` = none) and
+`S = {loading, busy, err, estage[2:0], present[1:0]}`. `y`, the drive digit and
+four hex digits (`y1002A`) put a slot in a drive (`FFFF` ejects) and print a
+prompt at once; the load runs on, so poll `i` until busy clears (~30 s for a
+whole volume). `q` and four hex digits (`q002A`) copy an image into that slot
+through the board: `UPLOAD HD` (or `lost` with no card), then records -- `01`
+and 512 bytes for a block, `00 hi lo` for (hi:lo)+1 zero blocks, `02` to finish
+-- with one `06` per record once it is on the card, then `done`. The serial
+link sets the pace: ~45 s per MB of non-zero blocks.
+
 Commands are only accepted when the debugger's main state is idle, and anything
 sent sooner is dropped without a word. The banner prints **two** prompts -- one
 at the end of the banner string, one after the register dump -- so neither one

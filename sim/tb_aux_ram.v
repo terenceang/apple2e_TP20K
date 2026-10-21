@@ -32,6 +32,12 @@ module tb_aux_ram;
     reg [15:0] dsk_wdata = 16'd0;
     wire [15:0] dsk_rdata;
     wire dsk_ack, dsk_idle, ready;
+    reg hd_go = 1'b0, hd_we = 1'b0;
+    reg [24:0] hd_addr = 25'd0;
+    reg [1:0] hd_be = 2'b11;
+    reg [15:0] hd_wdata = 16'd0;
+    wire [15:0] hd_rdata;
+    wire hd_ack;
     wire [15:0] ddr_dq;
     wire [1:0] ddr_dqs, ddr_dqs_n;
 
@@ -42,7 +48,9 @@ module tb_aux_ram;
         .rd_want(rd_want), .rd_addr(rd_addr), .rd_data(rd_data), .rd_hit(rd_hit),
         .wr_go(wr_go), .wr_addr(wr_addr), .wr_data(wr_data), .wr_busy(wr_busy),
         .dsk_go(dsk_go), .dsk_addr(dsk_addr), .dsk_we(dsk_we), .dsk_wdata(dsk_wdata),
-        .dsk_rdata(dsk_rdata), .dsk_ack(dsk_ack), .dsk_idle(dsk_idle), .ready(ready),
+        .dsk_rdata(dsk_rdata), .dsk_ack(dsk_ack), .dsk_idle(dsk_idle),
+        .hd_go(hd_go), .hd_addr(hd_addr), .hd_we(hd_we), .hd_be(hd_be), .hd_wdata(hd_wdata),
+        .hd_rdata(hd_rdata), .hd_ack(hd_ack), .ready(ready),
         .ddr_memory_clk(mem_clk), .ddr_lock(1'b1),
         .DDR3_DQ(ddr_dq), .DDR3_DQS(ddr_dqs), .DDR3_DQS_n(ddr_dqs_n), .DDR3_A(), .DDR3_BA(),
         .DDR3_nCS(), .DDR3_nRAS(), .DDR3_nCAS(), .DDR3_nWE(), .DDR3_CK(), .DDR3_CK_n(),
@@ -61,6 +69,17 @@ module tb_aux_ram;
         end
     endtask
     reg [15:0] q;
+
+    // One hard-disk word, the way prodos_hd and sd_vol make them.
+    task hd(input we, input [24:0] a, input [1:0] be, input [15:0] d, output [15:0] r);
+        begin
+            @(posedge clk); hd_go <= 1'b1; hd_we <= we; hd_addr <= a; hd_be <= be; hd_wdata <= d;
+            @(posedge clk); hd_go <= 1'b0;
+            while (!hd_ack) @(posedge clk);
+            r = hd_rdata;
+        end
+    endtask
+    reg [15:0] r;
 
     // When the line fill actually ends (the test keeps the CPU busy past it).
     time t_fill = 0;
@@ -179,6 +198,20 @@ module tb_aux_ram;
         dsk(0, 18'h3FFFF, 16'h0, q);
         if (q !== 16'h1234) begin $display("FAIL: disk word 3FFFF = %04h", q); errors = errors + 1; end
         check_read(16'h0000);
+
+        // Hard-disk words: neighbours in one burst, a single byte of a word
+        // (the other must survive), a far block, and none of it aliases aux
+        // RAM or the disk store.
+        hd(1, 25'h0000000, 2'b11, 16'h2211, r); hd(1, 25'h0000001, 2'b11, 16'h4433, r);
+        hd(1, 25'h0000007, 2'b11, 16'h8877, r); hd(1, 25'h001FFFF, 2'b11, 16'hAA99, r);
+        hd(1, 25'h0000001, 2'b10, 16'hEEEE, r); hd(1, 25'h0000007, 2'b01, 16'hFFFF, r);
+        hd(0, 25'h0000000, 2'b11, 16'h0, r); if (r !== 16'h2211) begin $display("FAIL: hd word 0 = %04h", r); errors = errors + 1; end
+        hd(0, 25'h0000001, 2'b11, 16'h0, r); if (r !== 16'hEE33) begin $display("FAIL: hd word 1 = %04h", r); errors = errors + 1; end
+        hd(0, 25'h0000007, 2'b11, 16'h0, r); if (r !== 16'h88FF) begin $display("FAIL: hd word 7 = %04h", r); errors = errors + 1; end
+        hd(0, 25'h001FFFF, 2'b11, 16'h0, r); if (r !== 16'hAA99) begin $display("FAIL: hd word 1FFFF = %04h", r); errors = errors + 1; end
+        check_read(16'h0000); check_read(16'h0001);
+        dsk(0, 18'h00000, 16'h0, q);
+        if (q !== 16'hBEEF) begin $display("FAIL: disk word 0 = %04h after hd writes", q); errors = errors + 1; end
 
         errors = errors + mdl_errors;
 

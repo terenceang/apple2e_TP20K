@@ -21,6 +21,12 @@ module top (
     input  wire       spi_miso,   // N9
     output wire       spi_cs_n,   // N7
 
+    // TF card on the SOM (J2), SPI mode: the slot 7 hard disk's volumes (src/sd_vol.v)
+    output wire       sd_clk,     // N10 SDIO_CLK
+    output wire       sd_mosi,    // R14 SDIO_CMD
+    input  wire       sd_miso,    // M8  SDIO_D0
+    output wire       sd_cs_n,    // N11 SDIO_D3
+
     // HDMI TMDS output (J3); the tools place each _n leg from the pair
     output wire       tmds_clk_p,
     output wire       tmds_clk_n,
@@ -118,6 +124,25 @@ module top (
     assign img_dn_addr  = dbg_img_dn_addr;
     assign img_dn_last  = dbg_img_dn_last;
 
+    // The slot 7 hard disk's DDR3 port (aux_ram hd_*), shared by the card in
+    // the core and the TF card loader (src/sd_vol.v).  They never ask at once:
+    // the loader moves bytes only while the CPU is held (loading) or sits in
+    // the driver's wait for a write-back, and aux_ram, which latches a request
+    // on its go pulse, takes whichever pulsed.
+    wire [1:0]  hd_present;
+    wire        hd_ack, hd_sd_busy, hd_loading, sd_err;
+    wire [15:0] hd_rdata;
+    wire        core_hd_go, core_hd_we, sd_m_go, sd_m_we;
+    wire [1:0]  core_hd_be;
+    wire [24:0] core_hd_addr, sd_m_addr;
+    wire [15:0] core_hd_wdata, sd_m_wdata;
+    wire        hd_wb_go, hd_wb_drv, sd_mnt_go, sd_mnt_drv;
+    wire [15:0] hd_wb_blk, sd_mnt_slot, sd_slot0, sd_slot1;
+    wire [2:0]  sd_estage;
+    wire        sd_x_go, sd_x_zero, sd_x_valid, sd_x_take, sd_x_fin;
+    wire [15:0] sd_x_slot, sd_x_blk;
+    wire [7:0]  sd_x_byte;
+
     // Asserted by the debugger's "x" (CPU reset) command; consumed by the core
     wire        cpu_reset_req;
 
@@ -182,6 +207,14 @@ module top (
         .img_dn_data(img_dn_data),
         .img_dn_valid(img_dn_valid),
         .img_dn_done(img_dn_done),
+        .sd_mnt_go(sd_mnt_go),
+        .sd_mnt_drv(sd_mnt_drv),
+        .sd_mnt_slot(sd_mnt_slot),
+        .sd_slot0(sd_slot0),
+        .sd_slot1(sd_slot1),
+        .sd_stat({hd_loading, hd_sd_busy, sd_err, sd_estage, hd_present}),
+        .sd_x_go(sd_x_go), .sd_x_slot(sd_x_slot), .sd_x_blk(sd_x_blk), .sd_x_zero(sd_x_zero),
+        .sd_x_byte(sd_x_byte), .sd_x_valid(sd_x_valid), .sd_x_take(sd_x_take), .sd_x_fin(sd_x_fin),
         .cpu_pc(debug_cpu_pc),
         .dsk_head(debug_dsk_head),
         .cpu_a(debug_cpu_a),
@@ -279,6 +312,12 @@ module top (
         .dsk_go(dsk_store_go), .dsk_addr(dsk_store_addr), .dsk_we(dsk_store_we),
         .dsk_wdata(dsk_store_wdata), .dsk_rdata(dsk_store_rdata),
         .dsk_ack(dsk_store_ack), .dsk_idle(dsk_store_idle),
+        .hd_go(core_hd_go | sd_m_go),
+        .hd_addr(sd_m_go ? sd_m_addr : core_hd_addr),
+        .hd_we(sd_m_go ? sd_m_we : core_hd_we),
+        .hd_be(sd_m_go ? 2'b11 : core_hd_be),
+        .hd_wdata(sd_m_go ? sd_m_wdata : core_hd_wdata),
+        .hd_rdata(hd_rdata), .hd_ack(hd_ack),
         .ready(aux_ready), .diag(ddr_diag),
         .ddr_memory_clk(ddr_memory_clk), .ddr_lock(ddr_lock),
         .DDR3_DQ(DDR3_DQ), .DDR3_DQS(DDR3_DQS), .DDR3_DQS_n(DDR3_DQS_n),
@@ -286,6 +325,21 @@ module top (
         .DDR3_nRAS(DDR3_nRAS), .DDR3_nCAS(DDR3_nCAS), .DDR3_nWE(DDR3_nWE),
         .DDR3_CK(DDR3_CK), .DDR3_CK_n(DDR3_CK_n), .DDR3_CKE(DDR3_CKE), .DDR3_nRESET(DDR3_nRESET),
         .DDR3_ODT(DDR3_ODT), .DDR3_DM(DDR3_DM)
+    );
+
+    // The slot 7 hard disk's volumes, from the TF card
+    sd_vol u_sd_vol (
+        .clk(clk_pixel), .reset(sys_reset),
+        .sd_clk(sd_clk), .sd_mosi(sd_mosi), .sd_miso(sd_miso), .sd_cs_n(sd_cs_n),
+        .ddr_ready(aux_ready),
+        .m_go(sd_m_go), .m_addr(sd_m_addr), .m_we(sd_m_we), .m_wdata(sd_m_wdata),
+        .m_rdata(hd_rdata), .m_ack(hd_ack),
+        .slot0(sd_slot0), .slot1(sd_slot1), .present(hd_present),
+        .loading(hd_loading), .busy(hd_sd_busy), .err(sd_err), .estage(sd_estage),
+        .wb_go(hd_wb_go), .wb_drv(hd_wb_drv), .wb_blk(hd_wb_blk),
+        .mnt_go(sd_mnt_go), .mnt_drv(sd_mnt_drv), .mnt_slot(sd_mnt_slot),
+        .x_go(sd_x_go), .x_slot(sd_x_slot), .x_blk(sd_x_blk), .x_zero(sd_x_zero),
+        .x_byte(sd_x_byte), .x_valid(sd_x_valid), .x_take(sd_x_take), .x_fin(sd_x_fin)
     );
 
     // 1 = Disk II images come from the ESP32 over SPI (nibble tracks, src/spi_ctl.v);
@@ -327,7 +381,13 @@ module top (
         .dsk_store_we(dsk_store_we), .dsk_store_wdata(dsk_store_wdata),
         .dsk_store_rdata(dsk_store_rdata), .dsk_store_ack(dsk_store_ack),
         .dsk_store_idle(dsk_store_idle),
-        .cpu_rdy(cpu_rdy),
+        .hd_present(hd_present),
+        .hd_go(core_hd_go), .hd_addr(core_hd_addr), .hd_we(core_hd_we), .hd_be(core_hd_be),
+        .hd_wdata(core_hd_wdata), .hd_rdata(hd_rdata), .hd_ack(hd_ack),
+        .hd_wb_go(hd_wb_go), .hd_wb_drv(hd_wb_drv), .hd_wb_blk(hd_wb_blk),
+        .hd_sd_busy(hd_sd_busy),
+        // held while the TF card's volumes load, so the boot finds them
+        .cpu_rdy(cpu_rdy & !hd_loading),
         .dbg_mem_addr(dbg_mem_addr),
         .dbg_mem_din(dbg_mem_din),
         .dbg_mem_ready(dbg_mem_ready),

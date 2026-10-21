@@ -161,9 +161,11 @@ function screenFrame(flags, fill) {
   // Mark a hole, so the test proves holes are carried rather than skipped.
   page[40] = 0x5a
   const gfx = new Uint8Array(SCR_GFX_BYTES).fill(0x2a)
-  let s = `\r\n$SS ${flags.toString(16).toUpperCase().padStart(2, '0')}\r\n `
-  // The firmware breaks the hex run with CRLF every 40 bytes; the parser
-  // should not care where the lines fall, so follow that cadence.
+  // As the firmware sends it: the first 40 bytes follow the flags on the $SS
+  // line itself (a parser that dropped that line's tail lost them and drew the
+  // top eight rows at the bottom, 8 columns over), then CRLF every 40 bytes;
+  // the parser should not care where the lines fall.
+  let s = `\r\n$SS ${flags.toString(16).toUpperCase().padStart(2, '0')} `
   const hexOf = (bytes, at, n) =>
     [...bytes.slice(at, at + n)].map((v) => v.toString(16).toUpperCase().padStart(2, '0')).join('')
   for (let at = 0; at < SCR_TEXT_BYTES; at += 40) s += hexOf(page, at, 40) + '\r\n'
@@ -200,15 +202,15 @@ test('the dump does not leak into the console as text', () => {
   assert.equal(text, '', 'hex rows should not be shown as console output')
 })
 
-test('cells undo the row interleaving and split off inverse video', () => {
+test('cells undo the row interleaving and keep the whole byte', () => {
   const page = new Uint8Array(SCR_TEXT_BYTES)
-  // row 3, col 7 gets an inverse '$', at its interleaved address
+  // row 3, col 7 gets a normal '$' ($A4), at its interleaved address
   page[textPageIndex(3, 7)] = 0x80 | 0x24
   const rows = AppleStream.cells(page)
   assert.equal(rows.length, 24)
   assert.equal(rows[0].length, 40)
-  assert.deepEqual(rows[3][7], { code: 0x24, inverse: true })
-  assert.deepEqual(rows[0][0], { code: 0, inverse: false })
+  assert.deepEqual(rows[3][7], { code: 0xa4 }) // bit 7 set: a normal '$'
+  assert.deepEqual(rows[0][0], { code: 0 })
 })
 
 test('screenToText lays the cells out as lines', () => {

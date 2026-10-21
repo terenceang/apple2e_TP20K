@@ -160,10 +160,12 @@ export class AppleStream {
       const flags = parseInt(s.slice(4, 6), 16)
       this.frame = {
         flags: Number.isFinite(flags) ? flags : 0,
-        text: '',
+        // the firmware carries on with the first 40 bytes on this same line
+        text: s.slice(6).replace(/\s+/g, ''),
         gfx: '',
         rows: 0,
       }
+      if (this.frame.text.length >= HEX_RUN) this.frameText()
       return
     }
 
@@ -267,8 +269,9 @@ export class AppleStream {
    * The dump is in memory order ($0400 upward, interleaving holes included),
    * so each cell comes out through textPageIndex -- the same interleaving
    * video_generator.v reads the page with.
-   * Each cell is { code, inverse }: bit 7 of the stored byte is inverse
-   * video, not part of the character.
+   * Each cell is { code }, the stored byte whole: bits 7 and 6 are what pick
+   * normal, inverse or flashing glyphs, through the same character-ROM address
+   * the RTL makes (charset.js), so they are not split off here.
    */
   static cells(page) {
     const rows = []
@@ -276,7 +279,7 @@ export class AppleStream {
       const row = []
       for (let c = 0; c < SCR_COLS; c++) {
         const b = page[textPageIndex(r, c)]
-        row.push({ code: b & 0x7f, inverse: (b & 0x80) !== 0 })
+        row.push({ code: b })
       }
       rows.push(row)
     }

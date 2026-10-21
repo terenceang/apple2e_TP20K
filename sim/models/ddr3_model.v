@@ -58,15 +58,16 @@ module DDR3_Memory_Interface_Top #(
     end
 
     // aux region 0: word {9'd0, main LC, byte}; disk region 1: {4'b0001, 3'b010, w[18:1], 1'b0};
-    // self-test region 3: {4'b0011, 22'd0}.  Bursts of 8 words, indexed by burst.
+    // self-test region 3: {4'b0011, 22'd0}; hard disk {1'b1, byte}, of which the
+    // first 128 KB (blocks 0-255) are kept.  Bursts of 8 words, indexed by burst.
     reg [127:0] mem [0:65535];
     integer i, errors = 0, reads = 0, writes = 0, cnt = 0, busy = 0;
     initial for (i = 0; i < 65536; i = i + 1) mem[i] = 128'd0;
     function [15:0] bidx(input [25:0] a);
-        bidx = a[23] ? 16'hFFFF : a[22] ? {1'b1, a[18:4]} : {2'b00, a[16:3]};
+        bidx = a[25] ? {2'b01, a[16:3]} : a[23] ? 16'hFFFF : a[22] ? {1'b1, a[18:4]} : {2'b00, a[16:3]};
     endfunction
     function ok(input [25:0] a);
-        ok = (a[25:17] == 9'd0) ||
+        ok = (a[25] && a[24:17] == 8'd0) || (a[25:17] == 9'd0) ||
              (a[25:22] == 4'b0001 && a[21:19] == 3'b010) ||
              (a[25:22] == 4'b0011 && a[21:3] == 19'd0);
     endfunction

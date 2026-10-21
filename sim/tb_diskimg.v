@@ -574,8 +574,16 @@ module tb_diskimg;
         repeat (200) @(posedge clk);
         check(drv_present[0] === 1'b0, "an upload that lost bytes leaves the drive empty");
         check(drv_writable[0] === 1'b0, "an upload that lost bytes leaves it protected");
-        check(drv_present[1] === 1'b0, "the reset cleared drive 2 as well");
+        check(drv_present[1] === 1'b1, "the reset left drive 2's disk in (the image is still in DDR3)");
         check(u_dbg.dsk_sum0 === 32'd0, "an upload that lost bytes leaves no checksum");
+
+        // n2 ejects drive 2: empty, and no checksum
+        check(u_dbg.dsk_sum1 !== 32'd0, "drive 2 still has its checksum before the eject");
+        send_cmd("n");
+        send_cmd("2");
+        repeat (200) @(posedge clk);
+        check(drv_present[1] === 1'b0, "n2 empties drive 2");
+        check(u_dbg.dsk_sum1 === 32'd0, "n2 clears drive 2's checksum");
 
         // ==============================================================
         // 5. Every address in the image, driven straight into the store

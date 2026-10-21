@@ -17,6 +17,9 @@ sources:
   - src/disk2/disk2_card.v
   - src/disk2/disk2_store.v
   - src/disk2/disk2_trk.v
+  - src/prodos_hd.v
+  - src/spi_byte.v
+  - src/sd_vol.v
   - src/spi_master.v
   - src/spi_ctl.v
   - src/apple2_core.v

@@ -18,7 +18,18 @@
 //      1 or 2, one byte at a time, with no framing and no way to interrupt
 //   e1 e2  download a Disk ][ image: 143,360 bytes of drive 1 or 2 come back,
 //      then a prompt
-//   i  print the Disk ][ image checksums: "I1:xxxxxxxx I2:xxxxxxxx", 0 = empty
+//   n1 n2  eject Disk ][ drive 1 or 2 (its checksum goes to 0)
+//   i  print the Disk ][ image checksums: "I1:xxxxxxxx I2:xxxxxxxx", 0 = empty,
+//      then the head, then the slot 7 hard disk: "V1:ssss V2:ssss S:xx", the
+//      TF card slot in each drive (FFFF = none) and src/sd_vol.v's state
+//      ({loading, busy, err, estage[2:0], present[1:0]})
+//   qhhhh  copy an image into TF card slot hhhh: "UPLOAD HD", then records
+//      (01 + 512 bytes = the next block, 00 hi lo = (hi:lo)+1 zero blocks,
+//      02 = done), one 06 back per record once it is on the card, then
+//      "done" or "lost"; a drive holding the slot reloads it after
+//   y1hhhh y2hhhh  put TF card slot hhhh in hard-disk drive 1 or 2 (FFFF
+//      ejects); the load runs on after the prompt, so poll i until S says
+//      not busy
 //   k j  set the dump address to $E000 / $D000
 //   0 1 4 8 f v  set the memory dump address ($0000 $0100 $0400 $0800
 //      $FA60 $FFF0) before m
@@ -94,6 +105,22 @@ module serial_debugger (
     input  wire        img_dn_valid,  // img_dn_data is good
     input  wire        img_dn_done,   // img_dn_last and it has been served
 
+    // The slot 7 hard disk's TF card (src/sd_vol.v)
+    output reg         sd_mnt_go,
+    output reg         sd_mnt_drv,
+    output reg  [15:0] sd_mnt_slot,
+    input  wire [15:0] sd_slot0,
+    input  wire [15:0] sd_slot1,
+    input  wire [7:0]  sd_stat,
+    // ...and the q copy, straight into a slot (sd_vol x_*)
+    output reg         sd_x_go,
+    output reg  [15:0] sd_x_slot,
+    output reg  [15:0] sd_x_blk,
+    output reg         sd_x_zero,
+    output reg  [7:0]  sd_x_byte,
+    output reg         sd_x_valid,
+    input  wire        sd_x_take,
+    output reg         sd_x_fin,
 
     // Softswitch state, for the W (screen dump) command
     input  wire        text_mode,
@@ -243,7 +270,9 @@ module serial_debugger (
     localparam STR_DONE_LEN     = 8'd8;
     localparam STR_LOST_START   = 9'd244;
     localparam STR_LOST_LEN     = 8'd8;
-    reg [7:0] str_rom [0:251];
+    localparam STR_HDUP_START   = 9'd252;
+    localparam STR_HDUP_LEN     = 8'd13;
+    reg [7:0] str_rom [0:264];
     initial begin
         str_rom[0] = 8'h0D; str_rom[1] = 8'h0A; str_rom[2] = 8'h5B; str_rom[3] = 8'h20;
         str_rom[4] = 8'h41; str_rom[5] = 8'h70; str_rom[6] = 8'h70; str_rom[7] = 8'h6C;
@@ -321,6 +350,11 @@ module serial_debugger (
         // 244: "\r\nlost\r\n"
         str_rom[244] = 8'h0D; str_rom[245] = 8'h0A; str_rom[246] = 8'h6C; str_rom[247] = 8'h6F;
         str_rom[248] = 8'h73; str_rom[249] = 8'h74; str_rom[250] = 8'h0D; str_rom[251] = 8'h0A;
+        // 252: "\r\nUPLOAD HD\r\n"
+        str_rom[252] = 8'h0D; str_rom[253] = 8'h0A; str_rom[254] = 8'h55; str_rom[255] = 8'h50;
+        str_rom[256] = 8'h4C; str_rom[257] = 8'h4F; str_rom[258] = 8'h41; str_rom[259] = 8'h44;
+        str_rom[260] = 8'h20; str_rom[261] = 8'h48; str_rom[262] = 8'h44; str_rom[263] = 8'h0D;
+        str_rom[264] = 8'h0A;
     end
 
     // String printer sub-engine
@@ -359,6 +393,7 @@ module serial_debugger (
     localparam M_IMG     = 4'd7;   // a Disk ][ image, in or out
     localparam M_INFO    = 4'd8;   // the Disk ][ checksums (the i command)
     localparam M_HIST    = 4'd9;   // the last 32 instruction addresses before a BRK (p)
+    localparam M_SDW     = 4'd10;  // q: an image into a TF card slot
 
     // Disk ][ image: 143,360 bytes (35 tracks x 16 sectors x 256 bytes)
     localparam [17:0] IMG_BYTES = 18'd143360;
@@ -403,6 +438,8 @@ module serial_debugger (
     wire [31:0] dsk_cur = img_drv ? dsk_sum1 : dsk_sum0;
     wire [31:0] dsk_nxt = {dsk_cur[30:0], dsk_cur[31]} + {24'd0, img_byte};
     reg        img_cmd  = 1'b0;      // command seen; the next digit picks the drive
+    reg        ej_cmd   = 1'b0;      // n seen; the next digit is the drive to eject
+    reg        ej_pend  = 1'b0;      // img_drv is set; pulse img_up_bad next clock
 
     // Screen dump state. The W command streams the 1 KB text page the video
     // generator is showing, in memory order ($0400/$0800 upward, interleaving
@@ -445,6 +482,20 @@ module serial_debugger (
     reg        ph_frz = 1'b0;
     reg [5:0]  ph_n   = 6'd0;
     reg [2:0]  adr_n     = 3'd0;         // hex digits still owed after '@'
+    reg [2:0]  mnt_n     = 3'd0;         // drive digit + hex digits still owed after 'y'
+    reg [2:0]  q_n       = 3'd0;         // hex digits still owed after 'q'
+
+    // The q copy.  The card writes far faster than 115200 brings bytes, so a
+    // byte goes to sd_vol as soon as it arrives and nothing is buffered.
+    localparam [2:0] X_TAG = 3'd0, X_CHI = 3'd1, X_CLO = 3'd2, X_DATA = 3'd3,
+                     X_ZGO = 3'd4, X_WAIT = 3'd5;
+    reg [2:0]  x_ph   = X_TAG;
+    reg [9:0]  x_cnt  = 10'd0;           // bytes of the block handed over
+    reg [15:0] x_zn   = 16'd0;           // zero blocks still owed after this one
+    reg [1:0]  x_hold = 2'd0;            // clocks before sd_vol's busy means anything
+    reg        x_zrun = 1'b0;            // the block in flight is part of a zero run
+    wire       sd_busy_s = sd_stat[6];
+    wire       sd_err_s  = sd_stat[5];
     wire       rx_hex    = (rx_byte >= "0" && rx_byte <= "9") ||
                            (rx_byte >= "a" && rx_byte <= "f") ||
                            (rx_byte >= "A" && rx_byte <= "F");
@@ -550,12 +601,22 @@ module serial_debugger (
             img_up_bad     <= 1'b0;
             img_dn_go      <= 1'b0;
             img_rx         <= 22'd0;
-            dsk_sum0       <= 32'd0;
-            dsk_sum1       <= 32'd0;
+            // dsk_sum0/1 survive a reset, as the drives' disks do (disk2_store)
+            ej_cmd         <= 1'b0;
+            ej_pend        <= 1'b0;
         end else begin
             fifo_push_en <= 1'b0;
+            sd_mnt_go    <= 1'b0;
+            sd_x_go      <= 1'b0;
+            sd_x_fin     <= 1'b0;
             // Clear single-cycle strobe flags:
             img_up_bad <= 1'b0;
+            // An eject is an upload gone bad: disk2_store empties the drive.
+            // One clock after img_drv, which up_drive follows, has settled.
+            if (ej_pend) begin
+                ej_pend    <= 1'b0;
+                img_up_bad <= 1'b1;
+            end
 
             if (ce_1m && cpu_sync && !ph_frz) begin
                 ph[ph_i] <= cpu_pc;
@@ -632,7 +693,7 @@ module serial_debugger (
                 return_job <= M_REGS;
                 seq_step   <= 5'd0;
                 main_state <= M_STR;
-            end else if (rx_valid && (rx_byte == 8'h02) && (main_state != M_IMG)) begin
+            end else if (rx_valid && (rx_byte == 8'h02) && (main_state != M_IMG) && (main_state != M_SDW)) begin
                 if (!dbg_mode) begin
                     dbg_mode   <= 1'b1;
                     cpu_rdy    <= 1'b0;
@@ -669,8 +730,44 @@ module serial_debugger (
                         adr_n     <= adr_n - 1'b1;
                     end else
                         adr_n <= 3'd0;
+                end else if (q_n != 3'd0) begin
+                    // "q" and four hex digits: copy an image into that slot
+                    if (rx_hex) begin
+                        sd_x_slot <= {sd_x_slot[11:0], rx_nib};
+                        q_n       <= q_n - 1'b1;
+                        if (q_n == 3'd1) begin
+                            sd_x_blk   <= 16'd0;
+                            sd_x_valid <= 1'b0;
+                            x_ph       <= X_TAG;
+                            // no card, or still loading the volumes: say so
+                            str_pos    <= (sd_err_s || sd_busy_s) ? STR_LOST_START : STR_HDUP_START;
+                            str_cnt    <= (sd_err_s || sd_busy_s) ? STR_LOST_LEN   : STR_HDUP_LEN;
+                            return_job <= (sd_err_s || sd_busy_s) ? M_IDLE : M_SDW;
+                            main_state <= M_STR;
+                        end
+                    end else
+                        q_n <= 3'd0;
+                end else if (mnt_n != 3'd0) begin
+                    // "y", the drive digit and four hex digits mount a TF card slot
+                    mnt_n <= mnt_n - 1'b1;
+                    if (mnt_n == 3'd5) begin
+                        if (rx_byte == "1" || rx_byte == "2") sd_mnt_drv <= (rx_byte == "2");
+                        else mnt_n <= 3'd0;
+                    end else if (rx_hex) begin
+                        sd_mnt_slot <= {sd_mnt_slot[11:0], rx_nib};
+                        if (mnt_n == 3'd1) begin
+                            sd_mnt_go  <= 1'b1;
+                            str_pos    <= STR_PROMPT_START;
+                            str_cnt    <= STR_PROMPT_LEN;
+                            return_job <= M_IDLE;
+                            main_state <= M_STR;
+                        end
+                    end else
+                        mnt_n <= 3'd0;
                 end else case (rx_byte)
                     "@": adr_n <= 3'd4;
+                    "y": mnt_n <= 3'd5;
+                    "q": q_n   <= 3'd4;
                     "p": begin
                         ph_n       <= 6'd0;
                         seq_step   <= 5'd0;
@@ -704,13 +801,25 @@ module serial_debugger (
                     end
 
                     // d1/d2 upload Disk ][, e1/e2 download Disk ][.
+                    "n": ej_cmd <= 1'b1;
+
                     "d", "D", "e", "E": begin
                         img_cmd   <= 1'b1;
                         img_dir   <= (rx_byte == "e") || (rx_byte == "E");
                     end
 
                     "1", "2": begin
-                        if (img_cmd) begin
+                        if (ej_cmd) begin
+                            ej_cmd  <= 1'b0;
+                            img_drv <= (rx_byte == "2");
+                            ej_pend <= 1'b1;
+                            if (rx_byte == "2") dsk_sum1 <= 32'd0;
+                            else                dsk_sum0 <= 32'd0;
+                            str_pos    <= STR_PROMPT_START;
+                            str_cnt    <= STR_PROMPT_LEN;
+                            return_job <= M_IDLE;
+                            main_state <= M_STR;
+                        end else if (img_cmd) begin
                             img_cmd    <= 1'b0;
                             img_drv    <= (rx_byte == "2");
                             img_addr   <= 21'd0;
@@ -791,7 +900,9 @@ module serial_debugger (
 
                 // Any of the six preset addresses above starts a dump; "m"
                 // reuses the last address. Only the address differs.
-                if (mem_preset && !img_cmd && adr_n == 3'd0) begin
+                // (not a digit that belongs to d/e, @, n, y or q)
+                if (mem_preset && !img_cmd && !ej_cmd && adr_n == 3'd0 &&
+                    mnt_n == 3'd0 && q_n == 3'd0) begin
                     main_state <= M_MEM;
                     seq_step   <= 5'd0;
                     mem_col    <= 4'd0;
@@ -1164,7 +1275,30 @@ module serial_debugger (
                             hex_val <= {dsk_head, 8'h00}; hex_digits <= 3'd2;
                             return_job <= M_INFO; seq_step <= 5'd16; main_state <= M_HEX;
                         end
-                        5'd16: begin
+                        5'd16: if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd17; end
+                        5'd17: if (!tx_fifo_full) begin fifo_push("V"); seq_step <= 5'd18; end
+                        5'd18: if (!tx_fifo_full) begin fifo_push("1"); seq_step <= 5'd19; end
+                        5'd19: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd20; end
+                        5'd20: begin
+                            hex_val <= sd_slot0; hex_digits <= 3'd4;
+                            return_job <= M_INFO; seq_step <= 5'd21; main_state <= M_HEX;
+                        end
+                        5'd21: if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd22; end
+                        5'd22: if (!tx_fifo_full) begin fifo_push("V"); seq_step <= 5'd23; end
+                        5'd23: if (!tx_fifo_full) begin fifo_push("2"); seq_step <= 5'd24; end
+                        5'd24: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd25; end
+                        5'd25: begin
+                            hex_val <= sd_slot1; hex_digits <= 3'd4;
+                            return_job <= M_INFO; seq_step <= 5'd26; main_state <= M_HEX;
+                        end
+                        5'd26: if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd27; end
+                        5'd27: if (!tx_fifo_full) begin fifo_push("S"); seq_step <= 5'd28; end
+                        5'd28: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd29; end
+                        5'd29: begin
+                            hex_val <= {sd_stat, 8'h00}; hex_digits <= 3'd2;
+                            return_job <= M_INFO; seq_step <= 5'd30; main_state <= M_HEX;
+                        end
+                        5'd30: begin
                             str_pos    <= STR_PROMPT_START;
                             str_cnt    <= STR_PROMPT_LEN;
                             return_job <= M_IDLE;
@@ -1387,6 +1521,69 @@ module serial_debugger (
                             img_ask   <= 1'b1;
                         end
                     end
+                end
+
+                // -------------------------------------------------------------
+                // q: an image into a TF card slot (record format at q above)
+                // -------------------------------------------------------------
+                M_SDW: begin
+                    if (x_hold != 2'd0) x_hold <= x_hold - 1'b1;
+                    if (sd_x_take) sd_x_valid <= 1'b0;
+                    case (x_ph)
+                        X_TAG, X_CHI, X_CLO:
+                            if (rx_valid) case (x_ph)
+                                X_TAG:
+                                    if (rx_byte == 8'h01) begin
+                                        // sd_vol is idle: the last record was acked
+                                        // only once its write had finished
+                                        sd_x_go <= 1'b1; sd_x_zero <= 1'b0; x_zrun <= 1'b0;
+                                        x_cnt <= 10'd0; x_hold <= 2'd3; x_ph <= X_DATA;
+                                    end else if (rx_byte == 8'h00) x_ph <= X_CHI;
+                                    else begin
+                                        // 02 ends the copy; anything else is lost
+                                        sd_x_fin   <= (rx_byte == 8'h02);
+                                        str_pos    <= (rx_byte == 8'h02) ? STR_DONE_START : STR_LOST_START;
+                                        str_cnt    <= (rx_byte == 8'h02) ? STR_DONE_LEN   : STR_LOST_LEN;
+                                        return_job <= M_IDLE;
+                                        main_state <= M_STR;
+                                    end
+                                X_CHI: begin x_zn[15:8] <= rx_byte; x_ph <= X_CLO; end
+                                default: begin x_zn[7:0] <= rx_byte; x_ph <= X_ZGO; end
+                            endcase
+                        X_DATA: begin
+                            if (rx_valid) begin
+                                sd_x_byte  <= rx_byte;
+                                sd_x_valid <= 1'b1;
+                                if (sd_x_valid && !sd_x_take) begin   // the last one is still waiting
+                                    str_pos <= STR_LOST_START; str_cnt <= STR_LOST_LEN;
+                                    return_job <= M_IDLE; main_state <= M_STR;
+                                end
+                            end
+                            if (sd_x_take) begin
+                                x_cnt <= x_cnt + 1'b1;
+                                if (x_cnt == 10'd511) x_ph <= X_WAIT;
+                            end
+                        end
+                        X_ZGO:
+                            if (!sd_busy_s && x_hold == 2'd0) begin
+                                sd_x_go <= 1'b1; sd_x_zero <= 1'b1; x_zrun <= 1'b1;
+                                x_hold <= 2'd3; x_ph <= X_WAIT;
+                            end
+                        default:   // X_WAIT: the block is on the card
+                            if (x_hold == 2'd0 && !sd_busy_s) begin
+                                sd_x_blk <= sd_x_blk + 1'b1;
+                                if (sd_err_s) begin
+                                    str_pos <= STR_LOST_START; str_cnt <= STR_LOST_LEN;
+                                    return_job <= M_IDLE; main_state <= M_STR;
+                                end else if (x_zrun && x_zn != 16'd0 && sd_x_blk != 16'hFFFF) begin
+                                    x_zn <= x_zn - 1'b1;
+                                    x_ph <= X_ZGO;
+                                end else begin
+                                    fifo_push(8'h06);
+                                    x_ph <= X_TAG;
+                                end
+                            end
+                    endcase
                 end
 
                 default: main_state <= M_IDLE;

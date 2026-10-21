@@ -166,11 +166,11 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
       }
       for (let col = 0; col < SCR_COLS; col++) {
         const cell = cells[row][col]
-        // Inverse video swaps the lit and unlit colours, and the //e draws
-        // flashing characters by toggling that bit, so it drives both.
-        const inverse = cell.inverse !== flash
-        const on = inverse ? offRgb : onRgb
-        const off = inverse ? onRgb : offRgb
+        // Inverse and flashing come out of the glyph itself: dotRow addresses
+        // the ROM as video_generator.v does, bits 7/6 and the flash clock
+        // included, so the colours are never swapped here.
+        const on = onRgb
+        const off = offRgb
         for (let r = 0; r < GLYPH_H; r++) {
           const bits = dotRow(cell.code, r, flash ? 1 : 0)
           const y = (row * GLYPH_H + r) * SCALE

@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react'
 import type { DriveState, DiskProgress } from '../useApple'
+import type { HdStatus } from '../disk.js'
+import { CardPrep } from './CardPrep'
 
 interface Props {
   drives: Record<1 | 2, DriveState>
@@ -8,6 +10,11 @@ interface Props {
   onUpload: (drive: 1 | 2, file: File) => Promise<void>
   onDownload: (drive: 1 | 2, format: 'dsk' | 'po') => Promise<void>
   onEject: (drive: 1 | 2) => void
+  hd: HdStatus | null
+  hdBusy: boolean
+  onHdRefresh: () => Promise<void>
+  onHdMount: (drive: 1 | 2, slot: number | null) => Promise<void>
+  onHdCopy: (slot: number, file: File) => Promise<void>
   onClearError: () => void
   onClose: () => void
   disabled?: boolean
@@ -20,10 +27,66 @@ export function DiskPane({
   onUpload,
   onDownload,
   onEject,
+  hd,
+  hdBusy,
+  onHdRefresh,
+  onHdMount,
+  onHdCopy,
   onClearError,
   onClose,
   disabled = false,
 }: Props) {
+  const [hdSlot, setHdSlot] = useState<Record<1 | 2, string>>({ 1: '', 2: '' })
+  const [copySlot, setCopySlot] = useState('')
+  const copyInput = useRef<HTMLInputElement>(null)
+  const copyN = Number(copySlot)
+  const copyValid = copySlot !== '' && Number.isInteger(copyN) && copyN >= 0 && copyN < 0xffff
+  const quiet = (p: Promise<void>) => void p.catch(() => {}) // the error banner shows it
+
+  const renderHdDrive = (drive: 1 | 2) => {
+    const slot = hd?.slots[drive - 1] ?? null
+    const loaded = hd?.present[drive - 1] ?? false
+    const n = Number(hdSlot[drive])
+    const valid = hdSlot[drive] !== '' && Number.isInteger(n) && n >= 0 && n < 0xffff
+    return (
+      <div className="disk-info" key={drive}>
+        <span className={`disk-led ${hdBusy ? 'busy' : loaded ? 'active' : 'off'}`} />
+        <div className="disk-details">
+          <span className="disk-filename">Drive {drive}: {slot === null ? 'empty' : `TF slot ${slot}`}</span>
+          <span className="disk-meta">
+            {slot === null ? 'no volume' : loaded ? '32 MB ProDOS volume, loaded' : 'not loaded'}
+          </span>
+        </div>
+        <input
+          type="number"
+          min={0}
+          max={65534}
+          placeholder="slot"
+          value={hdSlot[drive]}
+          onChange={(e) => setHdSlot((s) => ({ ...s, [drive]: e.target.value }))}
+          style={{ width: '5em' }}
+          disabled={disabled || hdBusy}
+        />
+        <button
+          type="button"
+          className="btn-disk-action"
+          onClick={() => quiet(onHdMount(drive, n))}
+          disabled={disabled || hdBusy || !valid}
+          title="Load this TF card slot into the drive (a full volume takes about 30 s)"
+        >
+          Mount
+        </button>
+        <button
+          type="button"
+          className="btn-disk-action secondary"
+          onClick={() => quiet(onHdMount(drive, null))}
+          disabled={disabled || hdBusy || slot === null}
+        >
+          ⏏ Eject
+        </button>
+      </div>
+    )
+  }
   const fileInputFloppy1 = useRef<HTMLInputElement>(null)
   const fileInputFloppy2 = useRef<HTMLInputElement>(null)
 
@@ -190,7 +253,7 @@ export function DiskPane({
           <div className="disk-progress-labels">
             <span className="progress-phase">
               {progress.phase === 'uploading' ? 'Uploading to' : 'Downloading from'}{' '}
-              Slot 6 Drive {progress.drive}
+              {progress.drive === 7 ? 'TF card' : `Slot 6 Drive ${progress.drive}`}
             </span>
             <span className="progress-detail">{progress.detail}</span>
           </div>
@@ -206,11 +269,76 @@ export function DiskPane({
       <div className="disk-drives-grid">
         {renderDriveCard(1, fileInputFloppy1, dragOver1, setDragOver1)}
         {renderDriveCard(2, fileInputFloppy2, dragOver2, setDragOver2)}
+        <div className={`disk-drive-card ${hd?.present.some(Boolean) ? 'has-disk' : 'empty'} ${hdBusy ? 'busy' : ''}`}>
+          <div className="disk-drive-header">
+            <div className="disk-drive-title">
+              <span className={`disk-led ${hdBusy ? 'busy' : hd?.present.some(Boolean) ? 'active' : 'off'}`} />
+              <h3>Slot 7 Hard Disk (TF card)</h3>
+            </div>
+            <span className="disk-status-tag">
+              {hdBusy || hd?.busy
+                ? 'Busy'
+                : hd === null
+                  ? 'Unknown'
+                  : hd.error !== null
+                    ? `TF error ${hd.error}`
+                    : 'Ready'}
+            </span>
+          </div>
+          <div className="disk-drive-body">
+            {renderHdDrive(1)}
+            {renderHdDrive(2)}
+          </div>
+          <div className="disk-drive-actions">
+            <input
+              type="number"
+              min={0}
+              max={65534}
+              placeholder="slot"
+              value={copySlot}
+              onChange={(e) => setCopySlot(e.target.value)}
+              style={{ width: '5em' }}
+              disabled={disabled || hdBusy}
+            />
+            <button
+              type="button"
+              className="btn-disk-action"
+              onClick={() => copyInput.current?.click()}
+              disabled={disabled || hdBusy || !copyValid}
+              title="Copy a .hdv / .po / .2mg image into this TF card slot, through the board. Empty blocks are quick; a full 32 MB volume takes about 48 minutes."
+            >
+              ⇪ Copy image to slot
+            </button>
+            <input
+              ref={copyInput}
+              type="file"
+              accept=".hdv,.po,.2mg"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (f && copyValid) quiet(onHdCopy(copyN, f))
+              }}
+            />
+            <button
+              type="button"
+              className="btn-disk-action secondary"
+              onClick={() => quiet(onHdRefresh())}
+              disabled={disabled || hdBusy}
+            >
+              ↻ Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="disk-drives-grid">
+        <CardPrep />
       </div>
 
       <footer className="disk-pane-footer">
         <span className="disk-tip">
-          Supported: 140 KB 5.25" floppy images (143,360 bytes). Logical sector order (.dsk, .do) is automatically translated to physical order for the FPGA.
+          Supported: 140 KB 5.25" floppy images (143,360 bytes). Logical sector order (.dsk, .do) is automatically translated to physical order for the FPGA. The slot 7 hard disk loads 32 MB ProDOS volumes from numbered slots on the TF card, which you write from a PC with scripts/sdvol.py; ProDOS writes go back to the card.
         </span>
       </footer>
     </section>

@@ -380,3 +380,230 @@ export async function queryDiskSums(link, opts = {}) {
     reader.restore()
   }
 }
+
+// ============================================================================
+//  Slot 7 ProDOS hard disk: two 32 MB volumes from TF card slots (src/sd_vol.v)
+// ============================================================================
+
+/**
+ * @typedef {{
+ *   slots: [number | null, number | null],
+ *   present: [boolean, boolean],
+ *   busy: boolean,
+ *   loading: boolean,
+ *   error: number | null,
+ * }} HdStatus
+ * `slots` is the TF card slot in each drive (null = none), `present` whether it
+ * has loaded, `error` the command that failed (sd_vol.v estage) or null.
+ */
+
+/**
+ * The hard-disk part of the debugger's `i` line: "V1:ssss V2:ssss S:xx", S =
+ * {loading, busy, err, estage[2:0], present[1:0]}.
+ *
+ * @param {string} text
+ * @returns {HdStatus | null} null for firmware without it
+ */
+export function parseHdStatus(text) {
+  const m = /V1:([0-9A-F]{4}) V2:([0-9A-F]{4}) S:([0-9A-F]{2})/.exec(text)
+  if (!m) return null
+  const slot = (h) => (h === 'FFFF' ? null : parseInt(h, 16))
+  const s = parseInt(m[3], 16)
+  return {
+    slots: [slot(m[1]), slot(m[2])],
+    present: [Boolean(s & 1), Boolean(s & 2)],
+    busy: Boolean(s & 0x40),
+    loading: Boolean(s & 0x80),
+    error: s & 0x20 ? (s >> 2) & 7 : null,
+  }
+}
+
+/**
+ * Ask the (paused) debugger what the hard disk holds.
+ *
+ * @param {{ write: (b: Uint8Array | number[]) => void, onBytes: (b: Uint8Array) => void }} link
+ * @param {{ timeoutMs?: number }} [opts]
+ * @returns {Promise<HdStatus>}
+ */
+export async function queryHdStatus(link, opts = {}) {
+  const reader = new LinkStreamReader(link)
+  const decoder = new TextDecoder()
+  try {
+    link.write([0x69]) // 'i'
+    await reader.waitFor(() => parseHdStatus(decoder.decode(reader.buffer)) !== null, opts.timeoutMs ?? 3000)
+    return /** @type {HdStatus} */ (parseHdStatus(decoder.decode(reader.buffer)))
+  } finally {
+    reader.restore()
+  }
+}
+
+/**
+ * Put TF card slot `slot` in hard-disk drive 1 or 2 (null ejects) with the
+ * debugger's `y`, then wait for the load: a whole volume takes ~30 s.
+ *
+ * @param {{ write: (b: Uint8Array | number[]) => void, onBytes: (b: Uint8Array) => void }} link
+ * @param {1 | 2} drive
+ * @param {number | null} slot
+ * @param {{ timeoutMs?: number, pollMs?: number, onPoll?: (s: HdStatus) => void }} [opts]
+ * @returns {Promise<HdStatus>}
+ */
+export async function mountHd(link, drive, slot, opts = {}) {
+  if (slot !== null && !(Number.isInteger(slot) && slot >= 0 && slot < 0xffff)) {
+    throw new Error(`Slot must be 0-65534, got ${slot}`)
+  }
+  const hex = (slot ?? 0xffff).toString(16).toUpperCase().padStart(4, '0')
+  link.write([...new TextEncoder().encode(`y${drive}${hex}`)])
+  const deadline = Date.now() + (opts.timeoutMs ?? 120000)
+  for (;;) {
+    await sleep(opts.pollMs ?? 1000)
+    const st = await queryHdStatus(link)
+    opts.onPoll?.(st)
+    if (!st.busy) {
+      if (st.error !== null) throw new Error(`TF card error (stage ${st.error}).`)
+      return st
+    }
+    if (Date.now() > deadline) throw new Error('TF card load did not finish.')
+  }
+}
+
+export const HD_BLOCK_BYTES = 512
+export const HD_MAX_BLOCKS = 65536
+
+/** The TF card's layout, as src/sd_vol.v reads it (and scripts/sdvol.py writes it). */
+export const CARD_SLOT_BASE = 2048 // sector of slot 0
+export const CARD_SLOT_SECTORS = 65536 // a slot is one 32 MB volume
+
+/**
+ * A whole TF card as a raw image, for writing to a card on this PC with an
+ * imaging tool (a browser cannot write a disk itself): sector 0 is the config
+ * ("A2HD", the slot in each drive, $FFFF = none), slot N starts at sector
+ * 2048 + N * 65,536.  Returned as Blob parts so 32 MB of padding costs nothing:
+ * the one zero buffer is reused.  The image ends with the last slot's data.
+ *
+ * @param {(Uint8Array | null)[]} slots   images from validateHardDiskImage, by slot; null = empty
+ * @param {[number | null, number | null]} drives  the slot each drive loads at power-on
+ * @returns {{ parts: Uint8Array[], size: number }}
+ */
+export function buildCardImage(slots, drives) {
+  const last = slots.reduce((n, s, i) => (s ? i : n), -1)
+  if (last < 0) throw new Error('Pick at least one image.')
+  for (const d of drives) {
+    if (d !== null && !slots[d]) throw new Error(`A drive is set to slot ${d}, which has no image.`)
+  }
+  if (drives[0] !== null && drives[0] === drives[1]) throw new Error('One slot cannot be in both drives.')
+  const cfg = new Uint8Array(HD_BLOCK_BYTES)
+  cfg.set([0x41, 0x32, 0x48, 0x44]) // "A2HD"
+  const dv = new DataView(cfg.buffer)
+  dv.setUint16(4, drives[0] ?? 0xffff, true)
+  dv.setUint16(6, drives[1] ?? 0xffff, true)
+  const zeros = new Uint8Array(1 << 20)
+  const parts = [cfg]
+  let size = HD_BLOCK_BYTES
+  const pad = (to) => {
+    while (size < to) {
+      const n = Math.min(zeros.length, to - size)
+      parts.push(n === zeros.length ? zeros : zeros.subarray(0, n))
+      size += n
+    }
+  }
+  for (let i = 0; i <= last; i++) {
+    pad((CARD_SLOT_BASE + i * CARD_SLOT_SECTORS) * HD_BLOCK_BYTES)
+    if (slots[i]) {
+      parts.push(slots[i])
+      size += slots[i].length
+    }
+  }
+  return { parts, size }
+}
+
+/**
+ * A ProDOS-order hard-disk image: raw (.hdv, .po) or 2IMG (.2mg, ProDOS order
+ * only), a whole number of blocks up to 32 MB.
+ *
+ * @param {ArrayBuffer | Uint8Array} buffer
+ * @returns {Uint8Array} the blocks
+ */
+export function validateHardDiskImage(buffer) {
+  let data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+  if (data.length >= 64 && String.fromCharCode(...data.subarray(0, 4)) === '2IMG') {
+    const v = new DataView(data.buffer, data.byteOffset, data.byteLength)
+    if (v.getUint32(0x0c, true) !== 1) throw new Error('2IMG image is not in ProDOS order.')
+    const off = v.getUint32(0x18, true)
+    data = data.subarray(off, off + v.getUint32(0x1c, true))
+  }
+  if (data.length === 0 || data.length % HD_BLOCK_BYTES || data.length > HD_MAX_BLOCKS * HD_BLOCK_BYTES) {
+    throw new Error(
+      `Invalid hard-disk image: expected a whole number of 512-byte blocks up to 32 MB, got ${data.length.toLocaleString()} bytes.`,
+    )
+  }
+  return data
+}
+
+/**
+ * The records the debugger's q takes (serial_debugger.v): 01 + 512 bytes for a
+ * block, 00 (n-1 hi) (n-1 lo) for n zero blocks, then 02 at the image's end.
+ *
+ * @param {Uint8Array} data
+ * @returns {Generator<{ bytes: Uint8Array, blocks: number }>}
+ */
+export function* hdRecords(data) {
+  const blocks = data.length / HD_BLOCK_BYTES
+  const isZero = (b) => {
+    for (let i = b * HD_BLOCK_BYTES; i < (b + 1) * HD_BLOCK_BYTES; i++) if (data[i]) return false
+    return true
+  }
+  for (let b = 0; b < blocks; ) {
+    if (!isZero(b)) {
+      const bytes = new Uint8Array(1 + HD_BLOCK_BYTES)
+      bytes[0] = 0x01
+      bytes.set(data.subarray(b * HD_BLOCK_BYTES, (b + 1) * HD_BLOCK_BYTES), 1)
+      yield { bytes, blocks: 1 }
+      b++
+    } else {
+      let n = 1
+      while (b + n < blocks && n < 65536 && isZero(b + n)) n++
+      yield { bytes: Uint8Array.of(0x00, (n - 1) >> 8, (n - 1) & 0xff), blocks: n }
+      b += n
+    }
+  }
+}
+
+/**
+ * Copy an image into TF card slot `slot` over the serial link (`q`): one ACK per
+ * record, once it is on the card.  The serial link is the limit: about 45 s
+ * per MB of non-zero blocks, so a full 32 MB volume is ~48 min.  A drive that
+ * holds the slot reloads it afterwards.
+ *
+ * @param {{ write: (b: Uint8Array | number[]) => void, onBytes: (b: Uint8Array) => void }} link
+ * @param {number} slot
+ * @param {Uint8Array} data from validateHardDiskImage
+ * @param {{ onProgress?: (p: { blocks: number, totalBlocks: number }) => void, timeoutMs?: number }} [opts]
+ */
+export async function copyToSlot(link, slot, data, opts = {}) {
+  if (!(Number.isInteger(slot) && slot >= 0 && slot < 0xffff)) throw new Error(`Slot must be 0-65534, got ${slot}`)
+  const timeoutMs = opts.timeoutMs ?? 6000
+  const total = data.length / HD_BLOCK_BYTES
+  const reader = new LinkStreamReader(link)
+  const decoder = new TextDecoder()
+  try {
+    link.write([...new TextEncoder().encode(`q${slot.toString(16).toUpperCase().padStart(4, '0')}`)])
+    await reader.waitFor(() => /UPLOAD HD|lost/.test(decoder.decode(reader.buffer)), timeoutMs)
+    if (!decoder.decode(reader.buffer).includes('UPLOAD HD')) {
+      throw new Error('The board refused the copy: no TF card, or it is still loading.')
+    }
+    reader.buffer = new Uint8Array(0)
+    let done = 0
+    for (const r of hdRecords(data)) {
+      link.write(r.bytes)
+      // a zero block takes the card a few ms to write
+      await reader.readAck(timeoutMs + r.blocks * 10)
+      done += r.blocks
+      opts.onProgress?.({ blocks: done, totalBlocks: total })
+    }
+    link.write([0x02])
+    await reader.waitFor(() => /done|lost/.test(decoder.decode(reader.buffer)), timeoutMs)
+    if (decoder.decode(reader.buffer).includes('lost')) throw new Error('Copy failed: the board reported lost bytes.')
+  } finally {
+    reader.restore()
+  }
+}

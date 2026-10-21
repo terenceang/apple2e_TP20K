@@ -99,7 +99,8 @@ Implemented in [`src/aux_ram.v`](file:///C:/Users/teren/source/repos/apple2e_TP2
 | **Region 0 (Upper)** | `0x010000`–`0x01FFFF` | 64 KB | 16 KB | **Main Language Card:** RAM `$D000`–`$FFFF` + Bank 2 `$D000`–`$DFFF` |
 | **Region 1** | `0x1000000`–`0x13FFFFF` | 4 MB | 280 KB | **Disk II Storage:** Backing store for Drive 1 & 2 floppy images |
 | **Region 3** | `0x3000000`+ | 128 B | 128 B | **Power-On Self-Test (POST):** Memory calibration pattern |
-| **Free / Unused** | Remaining space | **~123.8 MB** | — | Unallocated DDR3 space |
+| **Upper half** | `0x2000000`–`0x3FFFFFF` (words) | 64 MB | 64 MB | **Slot 7 ProDOS volumes:** two drives x 65,536 blocks, two bytes per 16-bit word, loaded from the TF card (`src/prodos_hd.v`, `src/sd_vol.v`) |
+| **Free / Unused** | Remaining space | **~59.8 MB** | — | Unallocated DDR3 space |
 
 ---
 

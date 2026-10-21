@@ -95,18 +95,21 @@ if (-not (Test-Path -LiteralPath (Join-Path $root 'roms\disk2_p6.hex'))) {
 }
 
 # What apple2_core instantiates, hand-made: the core, the CPU, the slot bus, the
-# memory, the slot-6 card, and the slot-4 Mockingboard card.  tb_cpu_trace and
+# memory, the slot-6 card, the slot-4 Mockingboard card and the slot-7 hard disk.  tb_cpu_trace and
 # tb_auxsw both elaborate apple2_core, so both need the cards with it; tb_disk2
 # drives the card on its own and does not want the core.
 $disk2 = @('src/disk2/disk2_card.v', 'src/disk2/disk2_store.v')
 $mockingboard = @('src/mockingboard/mockingboard_card.v', 'src/mockingboard/via6522.v', 'src/mockingboard/ay8910.v')
 $core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v',
-           'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v') + $disk2 + $mockingboard
+           'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v') + $disk2 + $mockingboard
 Run-Tb 'tb_disk2'        $disk2 -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_diskimg'      @('src/serial_debugger.v', 'src/disk2/disk2_store.v') -Gen '2012'
+Run-Tb 'tb_sdvol'        @('sim/models/sdcard.v', 'src/sd_vol.v', 'src/spi_byte.v') -Gen '2012'
+Run-Tb 'tb_sdcopy'       @('sim/models/sdcard.v', 'src/sd_vol.v', 'src/spi_byte.v', 'src/serial_debugger.v') -Gen '2012'
 Run-Tb 'tb_video_hdmi'   (@('src/video_generator.v', 'src/colorbar_gen.v') + $hdmi)
 Run-Tb 'tb_cpu_trace'    $core -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_auxsw'        $core -Gen '2012' -Defines $disk2Defines
+Run-Tb 'tb_prodos_hd'    $core -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_p6boot'       $core -Gen '2012' -Defines $disk2Defines
 
 Run-Tb 'tb_spi_master'   @('src/spi_master.v') -Gen '2012'

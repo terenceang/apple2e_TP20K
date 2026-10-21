@@ -319,10 +319,9 @@ module disk2_store (
             sec_addr_q     <= 19'd0;
             sec_hit_ok     <= 1'b0;
             want_low       <= 1'b0;
-            present[0]     <= 1'b0;
-            present[1]     <= 1'b0;
-            writable_q[0]  <= 1'b0;
-            writable_q[1]  <= 1'b0;
+            // A reset does not take the disks out: the images are in DDR3,
+            // which keeps them, so a drive changes only on an upload or an
+            // eject (up_bad).  present[] starts empty at configuration.
         end else begin
             if (up_bad) begin
                 present[up_drive]    <= 1'b0;

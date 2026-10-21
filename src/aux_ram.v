@@ -21,8 +21,10 @@
 //    address is stable ~25 clocks before its cycle, so a stall is rare.
 //  * CPU writes: a one-entry buffer. wr_go latches it at the CPU cycle;
 //    wr_busy is high until the DDR3 has taken it and blocks a second one.
-//  * The Disk ][ image store (src/disk2/disk2_store.v), lowest priority: it
-//    moves whole sectors, and a floppy sector has milliseconds of slack.
+//  * The Disk ][ image store (src/disk2/disk2_store.v): it moves whole
+//    sectors, and a floppy sector has milliseconds of slack.
+//  * The slot 7 ProDOS hard disk (src/prodos_hd.v) and its TF card loader
+//    (src/sd_vol.v), lowest priority: a word per request, with byte enables.
 //
 // Two clock domains. The arbiter and every client port run on clk (27 MHz);
 // the IP's user side runs on its own clk_out (memory clock / 4, ~100 MHz),
@@ -47,6 +49,8 @@
 //   main LC byte b      {9'd0, 1'b1, b}             region 0, the next 64K words
 //   disk store word w   {4'b0001, w[21:0]}          region 1, w as disk2_store makes it
 //   init self-test      {4'b0011, 22'd0}            region 3, one burst
+//   hard disk word w    {1'b1, w[24:0]}             the upper 64 MB: two 32 MB
+//                                                   volumes, {drive, block, word}
 //
 // The IP refreshes by itself.  It is not re-initialised on warm resets, so
 // aux RAM and the disk images survive them.
@@ -82,6 +86,17 @@ module aux_ram (
     output wire [15:0] dsk_rdata,
     output wire        dsk_ack,
     output wire        dsk_idle,
+
+    // ProDOS hard disk: the same latch-on-go, ack-pulse rules as the disk
+    // store.  A word address, and on a write the bytes to change (bit 0 =
+    // the low byte, the even one).
+    input  wire        hd_go,
+    input  wire [24:0] hd_addr,
+    input  wire        hd_we,
+    input  wire [1:0]  hd_be,
+    input  wire [15:0] hd_wdata,
+    output wire [15:0] hd_rdata,
+    output wire        hd_ack,
 
     // 1 once the DDR3 has calibrated and passed its self-test (clk domain)
     output wire        ready,
@@ -126,6 +141,7 @@ module aux_ram (
     reg  [1:0]  req_op = OP_RD;
     reg  [25:0] req_addr = 26'd0;
     reg  [15:0] req_wdata = 16'd0;
+    reg  [1:0]  req_be = 2'b11;         // bytes of the word a write changes
     wire        ack_t_m;                // ack_t from the DDR side, synchronised below
     reg  [2:0]  ack_s = 3'd0;
     reg  [1:0]  rdy_s = 2'd0;
@@ -139,7 +155,7 @@ module aux_ram (
     assign ready = rdy_s[1];
     wire   ack_edge = ack_s[2] ^ ack_s[1];
 
-    localparam [2:0] K_FILL = 3'd1, K_WR = 3'd2, K_RD = 3'd3, K_DSK = 3'd5;
+    localparam [2:0] K_FILL = 3'd1, K_WR = 3'd2, K_RD = 3'd3, K_DSK = 3'd5, K_HD = 3'd6;
 
     reg        op_busy = 1'b0;
     reg [2:0]  kind = K_RD;
@@ -174,12 +190,24 @@ module aux_ram (
     assign dsk_ack  = dsk_ack_q;
     assign dsk_rdata= dsk_r_q;
 
+    // Hard disk port
+    reg        hd_pend  = 1'b0;
+    reg [24:0] hd_a_q   = 25'd0;
+    reg        hd_we_q  = 1'b0;
+    reg [1:0]  hd_be_q  = 2'b11;
+    reg [15:0] hd_d_q   = 16'd0;
+    reg [15:0] hd_r_q   = 16'd0;
+    reg        hd_ack_q = 1'b0;
+    assign hd_ack   = hd_ack_q;
+    assign hd_rdata = hd_r_q;
+
     // Being a fill means the line buffer is mid-write; fill_active is for
     // testbenches that want to wait for it.
     wire fill_active = fill_pend || (op_busy && kind == K_FILL);
 
     always @(posedge clk) begin
         dsk_ack_q <= 1'b0;
+        hd_ack_q  <= 1'b0;
 
         // An operation in flight is never abandoned (the DDR side would still
         // answer it); reset only drops what is waiting.
@@ -188,6 +216,20 @@ module aux_ram (
             fill_pend   <= 1'b0;
             wr_pend     <= 1'b0;
             dsk_pend    <= 1'b0;
+            hd_pend     <= 1'b0;
+        end
+
+        if (hd_go) begin
+            if (ready) begin
+                hd_pend <= 1'b1;
+                hd_a_q  <= hd_addr;
+                hd_we_q <= hd_we;
+                hd_be_q <= hd_be;
+                hd_d_q  <= hd_wdata;
+            end else begin
+                hd_ack_q <= 1'b1;
+                hd_r_q   <= 16'hFFFF;
+            end
         end
 
         if (dsk_go) begin
@@ -230,6 +272,11 @@ module aux_ram (
                         dsk_pend  <= 1'b0;
                         dsk_ack_q <= 1'b1;
                     end
+                    K_HD: begin
+                        hd_r_q   <= ddr_rdata;
+                        hd_pend  <= 1'b0;
+                        hd_ack_q <= 1'b1;
+                    end
                     default: ;
                 endcase
             end
@@ -243,6 +290,7 @@ module aux_ram (
                 kind <= K_WR; req_op <= OP_WR;
                 req_addr  <= {9'd0, wr_a};
                 req_wdata <= {8'd0, wr_d};
+                req_be    <= 2'b11;
                 op_busy <= 1'b1; req_t <= ~req_t;
             end else if (rd_want && !rd_hit) begin
                 kind <= K_RD; req_op <= OP_RD;
@@ -254,6 +302,13 @@ module aux_ram (
                 kind <= K_DSK; req_op <= dsk_we_q ? OP_WR : OP_RD;
                 req_addr  <= {4'b0001, dsk_a_q};
                 req_wdata <= dsk_d_q;
+                req_be    <= 2'b11;
+                op_busy <= 1'b1; req_t <= ~req_t;
+            end else if (hd_pend && !hd_go) begin    // a new hd_go waits a clock
+                kind <= K_HD; req_op <= hd_we_q ? OP_WR : OP_RD;
+                req_addr  <= {1'b1, hd_a_q};
+                req_wdata <= hd_d_q;
+                req_be    <= hd_be_q;
                 op_busy <= 1'b1; req_t <= ~req_t;
             end
         end
@@ -340,7 +395,7 @@ module aux_ram (
                     m_addr <= req_addr;
                     m_wd   <= req_wdata;
                     m_wr   <= (req_op == OP_WR);
-                    m_mask <= ~(16'h0003 << {req_addr[2:0], 1'b0});
+                    m_mask <= ~({14'd0, req_be} << {req_addr[2:0], 1'b0});
                     fb     <= 3'd0;
                     open   <= 1'b1;
                     e <= E_CMD;

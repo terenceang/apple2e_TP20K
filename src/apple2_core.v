@@ -63,6 +63,22 @@ module apple2_core #(
     input  wire        dsk_store_ack,
     input  wire        dsk_store_idle,
 
+    // ProDOS hard disk in slot 7 (src/prodos_hd.v); its DDR3 port goes to
+    // aux_ram at the top level, shared there with the TF card (src/sd_vol.v),
+    // which also takes the block write-backs.
+    input  wire [1:0]  hd_present,
+    output wire        hd_go,
+    output wire [24:0] hd_addr,
+    output wire        hd_we,
+    output wire [1:0]  hd_be,
+    output wire [15:0] hd_wdata,
+    input  wire [15:0] hd_rdata,
+    input  wire        hd_ack,
+    output wire        hd_wb_go,
+    output wire        hd_wb_drv,
+    output wire [15:0] hd_wb_blk,
+    input  wire        hd_sd_busy,
+
     // SPI link to the ESP32 companion (DSK_TRK = 1; idle otherwise)
     output wire        spi_sck,
     output wire        spi_mosi,
@@ -173,6 +189,7 @@ module apple2_core #(
     wire [7:0]  slot_dout;
     wire [6:0]  devsel_n;
     wire [6:0]  iosel_n;
+    wire        mock_irq_n;     // slot 4's IRQ, which the CPU below also takes
 
     wire addr_is_c0 = (cpu_addr[15:8] == 8'hC0);
     assign io_addr  = cpu_addr[7:0];
@@ -319,13 +336,19 @@ module apple2_core #(
     // slot_bus uses throughout.
     wire [7:0]  d2_rom_data;
     wire [7:0]  mock_rom_data;
-    wire        mock_irq_n;
+    wire [7:0]  hd_rom_data;
+    wire [7:0]  hd_io_data;
+    wire        d2_any_disk;    // a Disk ][ drive holds an image (gates the $C600 ROM)
     wire [6:0]  card_present;
     // A byte per card, so 56 bits wide, not 7:
     // Slot 4 (index 3) is Mockingboard C.
     // Slot 6 (index 5) is the Disk ][.
+    // Slot 7 (index 6) is the ProDOS hard disk.
     wire [55:0] card_data;
-    assign card_data = ({48'd0, d2_rom_data} << (5 * 8)) |
+    assign card_data = ({48'd0, hd_rom_data} << (6 * 8)) |
+                       // no disk in either drive: slot 6 reads as empty, so the
+                       // Autostart scan passes it by and falls into BASIC
+                       ({48'd0, d2_any_disk ? d2_rom_data : 8'h00} << (5 * 8)) |
                        ({48'd0, mock_rom_data} << (3 * 8));
 
     // The card's registers are on the $C0Ex bus, which the read mux claims
@@ -517,6 +540,8 @@ module apple2_core #(
                 // The Disk ][ controller's registers: the data register at Q6L
                 // and Q6, and the floating bus at the rest of $C0E0-$C0EF.
                 cpu_din_comb = d2_io_data;
+            end else if (effective_cpu_addr[7:4] == 4'hF) begin
+                cpu_din_comb = hd_io_data;      // slot 7, $C0F0-$C0FF
             end else if (mock_devsel_hit) begin
                 // Mockingboard alternate I/O registers at $C0C0-$C0CF
                 cpu_din_comb = mock_rom_data;
@@ -573,9 +598,8 @@ module apple2_core #(
     wire [7:0]  d2_wr_byte;
     wire        d2_wr_in_data;
     wire [8:0]  d2_wr_off;
-    wire        d2_any_disk;
 
-    assign card_present = 7'b0101000;   // slot 6 (bit 5): the Disk ][, slot 4 (bit 3): Mockingboard
+    assign card_present = 7'b1101000;   // slot 7 (bit 6): ProDOS hard disk, slot 6 (bit 5): the Disk ][, slot 4 (bit 3): Mockingboard
     wire [6:0]  d2_dbg_track;
     wire [7:0]  d2_dbg_head;
     assign debug_dsk_head = d2_dbg_head;
@@ -597,6 +621,32 @@ module apple2_core #(
         .irq_n(mock_irq_n),
         .audio_left(mock_audio_left),
         .audio_right(mock_audio_right)
+    );
+
+    // ------------------------------------------------------------------
+    // ProDOS hard disk, slot 7
+    // ------------------------------------------------------------------
+    prodos_hd u_prodos_hd (
+        .clk(clk),
+        .reset(reset),
+        .bus_cycle(cpu_go),
+        .cpu_we(cpu_we),
+        .addr(effective_cpu_addr),
+        .cpu_di(cpu_dout),
+        .present(hd_present),
+        .rom_data(hd_rom_data),
+        .io_data(hd_io_data),
+        .hd_go(hd_go),
+        .hd_addr(hd_addr),
+        .hd_we(hd_we),
+        .hd_be(hd_be),
+        .hd_wdata(hd_wdata),
+        .hd_rdata(hd_rdata),
+        .hd_ack(hd_ack),
+        .wb_go(hd_wb_go),
+        .wb_drv(hd_wb_drv),
+        .wb_blk(hd_wb_blk),
+        .sd_busy(hd_sd_busy)
     );
 
     // DSK_TRK = 0: the sector card + store above (byte-level uploads over the
