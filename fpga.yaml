@@ -11,6 +11,9 @@ sources:
   - src/ddr3_memory_interface/ddr3_memory_interface.v   # Gowin DDR3 IP, see its README
   - src/aux_ram.v
   - src/slot_bus.v
+  - src/mockingboard/via6522.v
+  - src/mockingboard/ay8910.v
+  - src/mockingboard/mockingboard_card.v
   - src/disk2/disk2_card.v
   - src/disk2/disk2_store.v
   - src/disk2/disk2_trk.v

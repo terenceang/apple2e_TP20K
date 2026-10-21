@@ -78,6 +78,9 @@ Run-Tb 'tb_data_island'  $island
 Run-Tb 'tb_sound'        @('src/sound_generator.v')
 Run-Tb 'tb_input'        @('src/input_controller.v')
 Run-Tb 'tb_slots'        @('src/slot_bus.v')
+Run-Tb 'tb_ay8910'       @('src/mockingboard/ay8910.v')
+Run-Tb 'tb_via6522'      @('src/mockingboard/via6522.v')
+Run-Tb 'tb_mockingboard' @('src/mockingboard/mockingboard_card.v', 'src/mockingboard/via6522.v', 'src/mockingboard/ay8910.v')
 
 # The card's $C600 boot ROM is Apple copyright and is not in the repo (see
 # roms/README.md), so it is loaded only if the user has put it there, the same
@@ -92,12 +95,13 @@ if (-not (Test-Path -LiteralPath (Join-Path $root 'roms\disk2_p6.hex'))) {
 }
 
 # What apple2_core instantiates, hand-made: the core, the CPU, the slot bus, the
-# memory and the slot-6 card.  tb_cpu_trace and tb_auxsw both elaborate
-# apple2_core, so both need the card with it; tb_disk2 drives the card on its
-# own and does not want the core.
+# memory, the slot-6 card, and the slot-4 Mockingboard card.  tb_cpu_trace and
+# tb_auxsw both elaborate apple2_core, so both need the cards with it; tb_disk2
+# drives the card on its own and does not want the core.
 $disk2 = @('src/disk2/disk2_card.v', 'src/disk2/disk2_store.v')
+$mockingboard = @('src/mockingboard/mockingboard_card.v', 'src/mockingboard/via6522.v', 'src/mockingboard/ay8910.v')
 $core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v',
-           'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v') + $disk2
+           'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v') + $disk2 + $mockingboard
 Run-Tb 'tb_disk2'        $disk2 -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_diskimg'      @('src/serial_debugger.v', 'src/disk2/disk2_store.v') -Gen '2012'
 Run-Tb 'tb_video_hdmi'   (@('src/video_generator.v', 'src/colorbar_gen.v') + $hdmi)

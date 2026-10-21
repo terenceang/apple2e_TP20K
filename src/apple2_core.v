@@ -18,6 +18,10 @@ module apple2_core #(
     // Speaker toggle pulse to Sound Generator
     output reg         spkr_pulse,
 
+    // Mockingboard C Stereo Sound Output
+    output wire signed [15:0] mock_audio_left,
+    output wire signed [15:0] mock_audio_right,
+
     // Softswitches to Video Generator
     output reg         text_mode,
     output reg         mixed_mode,
@@ -188,7 +192,7 @@ module apple2_core #(
         .DI(cpu_din),
         .DO(cpu_dout),
         .WE(cpu_we),
-        .IRQ(~slot_irq_n),   // the core is active-high, the bus active-low
+        .IRQ((~slot_irq_n) | (~mock_irq_n)),   // Active-high IRQ into 65C02 (core active-high, bus active-low)
         .NMI(~slot_nmi_n),
         .RDY(cpu_go),
         .SYNC(cpu_sync),
@@ -314,11 +318,15 @@ module apple2_core #(
     // Index 5 of a seven-slot vector is slot 6, which is the indexing
     // slot_bus uses throughout.
     wire [7:0]  d2_rom_data;
+    wire [7:0]  mock_rom_data;
+    wire        mock_irq_n;
     wire [6:0]  card_present;
     // A byte per card, so 56 bits wide, not 7:
+    // Slot 4 (index 3) is Mockingboard C.
     // Slot 6 (index 5) is the Disk ][.
     wire [55:0] card_data;
-    assign card_data = {48'd0, d2_rom_data} << (5 * 8);
+    assign card_data = ({48'd0, d2_rom_data} << (5 * 8)) |
+                       ({48'd0, mock_rom_data} << (3 * 8));
 
     // The card's registers are on the $C0Ex bus, which the read mux claims
     // after the motherboard's own $C0xx addresses and before the $00 an
@@ -326,6 +334,17 @@ module apple2_core #(
     wire [7:0]  d2_io_data;
     wire        d2_io_hit = (effective_cpu_addr[15:8] == 8'hC0) &&
                             (effective_cpu_addr[7:4] == 4'hE);
+
+    // Mockingboard Slot 4 decode:
+    // /IOSEL ($C400-$C4FF): VIA 1 ($C400-$C47F) & VIA 2 ($C480-$C4FF)
+    // /DEVSEL ($C0C0-$C0CF): VIA 1 ($C0C0-$C0C7) & VIA 2 ($C0C8-$C0CF)
+    wire        mock_iosel_hit  = (effective_cpu_addr[15:8] == 8'hC4);
+    wire        mock_devsel_hit = (effective_cpu_addr[15:8] == 8'hC0) &&
+                                  (effective_cpu_addr[7:4] == 4'hC);
+    wire        mock_iosel_n    = !(bus_cycle && mock_iosel_hit);
+    wire        mock_devsel_n   = !(bus_cycle && mock_devsel_hit);
+
+    wire [6:0]  card_irq_n = {1'b1, 1'b1, 1'b1, mock_irq_n, 1'b1, 1'b1, 1'b1};
 
     slot_bus u_slot_bus (
         .clk(clk),
@@ -339,7 +358,7 @@ module apple2_core #(
         .card_exprom(7'd0),      // a Disk ][ has no $C800 expansion ROM
         .card_data(card_data),
         .int_in_n(1'b1),
-        .card_irq_n(7'h7F),      // the controller never interrupts
+        .card_irq_n(card_irq_n),
         .card_nmi_n(7'h7F),
         .card_dma_n(7'h7F),
         .devsel_n(devsel_n),     // the card listens to its own /DEVSEL
@@ -498,14 +517,18 @@ module apple2_core #(
                 // The Disk ][ controller's registers: the data register at Q6L
                 // and Q6, and the floating bus at the rest of $C0E0-$C0EF.
                 cpu_din_comb = d2_io_data;
+            end else if (mock_devsel_hit) begin
+                // Mockingboard alternate I/O registers at $C0C0-$C0CF
+                cpu_din_comb = mock_rom_data;
             end else begin
                 cpu_din_comb = 8'h00;
             end
         end else if (is_slot_rom) begin
-            // The slot bus arbitrates: the internal $C100-$CFFF ROM when a
-            // softswitch selects it, otherwise the addressed card's byte, or
-            // $00 where the floating bus of an empty slot used to be.
-            cpu_din_comb = slot_int_rom ? rom_dout : slot_dout;
+            // Slot 4 Mockingboard registers override internal ROM when accessed
+            if (mock_iosel_hit)
+                cpu_din_comb = mock_rom_data;
+            else
+                cpu_din_comb = slot_int_rom ? rom_dout : slot_dout;
         end else if (is_lc_area) begin
             if (lc_read_ram)
                 cpu_din_comb = aux_rd_data; // Language Card RAM, main or aux: both in DDR3
@@ -552,10 +575,29 @@ module apple2_core #(
     wire [8:0]  d2_wr_off;
     wire        d2_any_disk;
 
-    assign card_present = 7'b0100000;   // slot 6 (bit 5): the Disk ][
+    assign card_present = 7'b0101000;   // slot 6 (bit 5): the Disk ][, slot 4 (bit 3): Mockingboard
     wire [6:0]  d2_dbg_track;
     wire [7:0]  d2_dbg_head;
     assign debug_dsk_head = d2_dbg_head;
+
+    // ------------------------------------------------------------------
+    // Mockingboard "C" Sound Card, slot 4
+    // ------------------------------------------------------------------
+    mockingboard_card u_mockingboard (
+        .clk(clk),
+        .reset(reset),
+        .ce_1m(ce_1m),
+        .bus_cycle(bus_cycle),
+        .cpu_we(cpu_we),
+        .addr(effective_cpu_addr),
+        .din(cpu_dout),
+        .devsel_n(mock_devsel_n),
+        .iosel_n(mock_iosel_n),
+        .dout(mock_rom_data),
+        .irq_n(mock_irq_n),
+        .audio_left(mock_audio_left),
+        .audio_right(mock_audio_right)
+    );
 
     // DSK_TRK = 0: the sector card + store above (byte-level uploads over the
     // debugger).  DSK_TRK = 1: nibble tracks loaded from the ESP32 over SPI

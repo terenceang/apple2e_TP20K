@@ -141,6 +141,8 @@ module top (
 
     // Softswitch state wires
     wire        spkr_pulse;
+    wire signed [15:0] mock_left;
+    wire signed [15:0] mock_right;
     wire        text_mode;
     wire        mixed_mode;
     wire        page2;
@@ -301,6 +303,8 @@ module top (
         .io_read(io_read),
         .io_write(io_write),
         .spkr_pulse(spkr_pulse),
+        .mock_audio_left(mock_left),
+        .mock_audio_right(mock_right),
         .text_mode(text_mode),
         .mixed_mode(mixed_mode),
         .page2(page2),
@@ -428,18 +432,19 @@ module top (
     wire [23:0] hdmi_rgb = test_pattern_enable ? bar_rgb
                                                : {vid_red, vid_green, vid_blue};
 
-    // HDMI audio: the same speaker-model PCM that goes to the I2S amplifier
-    // (sound_generator.audio_sample, updated at 46.875 kHz), sampled at
-    // VM_AUDIO_HZ = 48 kHz. 27 MHz / 48 kHz = 562.5 clocks, so a fractional
-    // accumulator alternates 562 and 563.
+    // HDMI audio: true stereo audio (Left & Right) from sound_generator,
+    // sampled at VM_AUDIO_HZ = 48 kHz. 27 MHz / 48 kHz = 562.5 clocks, so a
+    // fractional accumulator alternates 562 and 563.
     //
-    // The two rates are coupled: sound_generator holds audio_sample for one
+    // The two rates are coupled: sound_generator holds audio samples for one
     // I2S frame of exactly 576 clocks, so it must stay at 46.875 kHz or this
     // resampler plays it at the wrong speed. sim/tb_sound.v checks that.
-    wire signed [15:0] spkr_sample;
+    wire signed [15:0] audio_sample_l;
+    wire signed [15:0] audio_sample_r;
     reg  [24:0]        hdmi_audio_acc   = 25'd0;
     reg                hdmi_audio_valid = 1'b0;
-    reg  [15:0]        hdmi_audio_pcm   = 16'd0;
+    reg  [15:0]        hdmi_audio_pcm_l = 16'd0;
+    reg  [15:0]        hdmi_audio_pcm_r = 16'd0;
 
     always @(posedge clk_pixel) begin
         if (!hdmi_rst_n) begin
@@ -450,7 +455,8 @@ module top (
             if (hdmi_audio_acc + `VM_AUDIO_HZ >= `VM_PIXEL_HZ) begin
                 hdmi_audio_acc   <= hdmi_audio_acc + `VM_AUDIO_HZ - `VM_PIXEL_HZ;
                 hdmi_audio_valid <= 1'b1;
-                hdmi_audio_pcm   <= spkr_sample;
+                hdmi_audio_pcm_l <= audio_sample_l;
+                hdmi_audio_pcm_r <= audio_sample_r;
             end else begin
                 hdmi_audio_acc <= hdmi_audio_acc + `VM_AUDIO_HZ;
             end
@@ -473,8 +479,8 @@ module top (
         .pixel_y(pixel_y),
         .video_rgb(hdmi_rgb),
         .audio_valid(hdmi_audio_valid),
-        .audio_l(hdmi_audio_pcm),
-        .audio_r(hdmi_audio_pcm),
+        .audio_l(hdmi_audio_pcm_l),
+        .audio_r(hdmi_audio_pcm_r),
         .tmds(tmds[29:0])
     );
 
@@ -509,14 +515,16 @@ module top (
         .reset(sys_reset),
         .spkr_pulse(spkr_pulse),
         .test_tone_enable(test_pattern_enable),
+        .mock_left(mock_left),
+        .mock_right(mock_right),
         .i2s_bclk(i2s_bclk),
         .i2s_lrck(i2s_lrck),
         .i2s_din(i2s_din),
         .pa_en(pa_en),
-        // No on-board consumer: the 1-bit speaker toggle reaches the outside
-        // world only through audio_sample (I2S + HDMI); tb_sound watches it.
         .spkr_out(),
-        .audio_sample(spkr_sample)
+        .audio_sample(),
+        .audio_sample_l(audio_sample_l),
+        .audio_sample_r(audio_sample_r)
     );
 
     // Diagnostic LEDs (active-low)
