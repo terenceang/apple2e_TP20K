@@ -1,5 +1,6 @@
 `timescale 1ns / 1ps
 `default_nettype none
+`include "src/uart_defs.vh"
 
 // ============================================================================
 //  tb_input.v -- input_controller UART protocol
@@ -24,7 +25,7 @@
 module tb_input;
 
     localparam CLK_HZ = 27000000;
-    localparam BIT   = 234;      // input_controller's CLKS_PER_BIT
+    localparam BIT   = `UART_CLKS_PER_BIT;      // input_controller's CLKS_PER_BIT
     localparam SETTLE = 16;      // cycles after a byte before the parser lands
 
     reg clk = 1'b0;

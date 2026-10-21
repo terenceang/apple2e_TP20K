@@ -46,7 +46,7 @@ def open_channel_b():
         raise RuntimeError(f"Failed to open FTDI device index {target_idx}")
 
     ftdi.FT_ResetDevice(h)
-    ftdi.FT_SetBaudRate(h, 115200)
+    ftdi.FT_SetBaudRate(h, 1000000)
     ftdi.FT_SetDataCharacteristics(h, 8, 0, 0)
     ftdi.FT_SetFlowControl(h, 0, 0, 0)
     ftdi.FT_SetTimeouts(h, 100, 100)

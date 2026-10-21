@@ -1533,3 +1533,80 @@ button.opt-pill.selected {
   border: 0;
   cursor: pointer;
 }
+
+/* --- Flashbar Progress ---------------------------------------------------- */
+
+.flashbar-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1b1915;
+  border: 1px solid #3d3830;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.flashbar-progress:hover {
+  border-color: #f59e0b;
+}
+
+.flashbar-progress-label {
+  color: #f59e0b;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.flashbar-progress-track {
+  width: 70px;
+  height: 6px;
+  background: #231f1a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.flashbar-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f59e0b, #10b981);
+  transition: width 0.2s ease-out;
+}
+
+/* --- Hard Disk Copy Progress Card ----------------------------------------- */
+
+.hd-copy-progress {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #151310;
+  border: 1px solid #3a3227;
+  border-radius: 4px;
+}
+
+.hd-copy-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+
+.hd-copy-tag {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.hd-copy-percent {
+  font-family: var(--mono);
+  color: #10b981;
+  font-weight: 600;
+}
+
+.hd-copy-detail {
+  font-size: 10px;
+  color: #a39c90;
+  margin-top: 5px;
+  word-break: break-all;
+  font-family: var(--mono);
+}

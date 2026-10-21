@@ -120,6 +120,9 @@ export interface DiskProgress {
   phase: 'uploading' | 'downloading'
   percent: number
   detail: string
+  slot?: number
+  blocks?: number
+  totalBlocks?: number
 }
 
 const MAX_LINES = 4000
@@ -642,17 +645,33 @@ export function useApple() {
       hdSession(async (l) => {
         const data = validateHardDiskImage(await file.arrayBuffer())
         try {
-          setDiskProgress({ drive: 7, phase: 'uploading', percent: 0, detail: `Starting ${file.name}...` })
+          setDiskProgress({
+            drive: 7,
+            phase: 'uploading',
+            percent: 0,
+            detail: `Starting ${file.name}...`,
+            slot,
+            blocks: 0,
+            totalBlocks: data.length / 512,
+          })
           const t0 = Date.now()
           await copyToSlot(l, slot, data, {
             onProgress: (p) => {
               const percent = Math.round((p.blocks / p.totalBlocks) * 100)
-              const left = p.blocks ? ((Date.now() - t0) / p.blocks) * (p.totalBlocks - p.blocks) : 0
+              const elapsed = (Date.now() - t0) / 1000
+              const leftSec = p.blocks && elapsed > 0 ? ((p.totalBlocks - p.blocks) / (p.blocks / elapsed)) : 0
+              const timeStr = leftSec >= 60
+                ? `~${Math.floor(leftSec / 60)}m ${Math.round(leftSec % 60)}s left`
+                : `~${Math.round(leftSec)}s left`
+              const speedKb = elapsed > 0 ? (p.blocks * 0.512 / elapsed).toFixed(0) : 0
               setDiskProgress({
                 drive: 7,
                 phase: 'uploading',
                 percent,
-                detail: `${file.name} to slot ${slot}: block ${p.blocks}/${p.totalBlocks} (${percent}%, ~${Math.ceil(left / 60000)} min left)`,
+                detail: `${file.name} to slot ${slot}: block ${p.blocks}/${p.totalBlocks} (${percent}%, ${speedKb} KB/s, ${timeStr})`,
+                slot,
+                blocks: p.blocks,
+                totalBlocks: p.totalBlocks,
               })
             },
           })

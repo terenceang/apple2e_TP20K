@@ -1,10 +1,11 @@
-import type { Conn } from '../useApple'
+import type { Conn, DiskProgress } from '../useApple'
 import { formatConnState } from '../prefs.js'
 
 interface Props {
   conn: Conn
   canSerial: boolean
   baud: number
+  progress?: DiskProgress | null
   showScreen: boolean
   showConsole: boolean
   showDebugger: boolean
@@ -31,6 +32,7 @@ export function FlashBar({
   conn,
   canSerial,
   baud,
+  progress,
   showScreen,
   showConsole,
   showDebugger,
@@ -53,6 +55,20 @@ export function FlashBar({
       <span className={'dot ' + (up ? 'open' : conn.state)} aria-hidden />
       <span className="state">{formatConnState(conn, baud)}</span>
       {conn.transport && <span className="tag">USB serial</span>}
+      {progress && (
+        <div
+          className="flashbar-progress"
+          onClick={() => { if (!showDisks) onToggleDisks() }}
+          title={progress.detail}
+        >
+          <span className="flashbar-progress-label">
+            {progress.drive === 7 ? 'TF Copy' : `Drive ${progress.drive}`} {progress.percent}%
+          </span>
+          <div className="flashbar-progress-track">
+            <div className="flashbar-progress-fill" style={{ width: `${progress.percent}%` }} />
+          </div>
+        </div>
+      )}
 
       {conn.state === 'idle' ? (
         <span className="chooser">

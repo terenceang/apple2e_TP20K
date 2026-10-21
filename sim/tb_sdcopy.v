@@ -102,7 +102,7 @@ module tb_sdcopy;
         begin
             @(posedge clk); rx_byte <= v; rx_valid <= 1'b1;
             @(posedge clk); rx_valid <= 1'b0;
-            repeat (400) @(posedge clk);       // a host faster than 115200, slower than the card
+            repeat (270) @(posedge clk);       // 1 Mbps host: 270 clocks/byte, slower than the card
         end
     endtask
 

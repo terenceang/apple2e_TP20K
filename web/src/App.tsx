@@ -122,6 +122,7 @@ export default function App() {
         conn={apple.conn}
         canSerial={apple.canSerial}
         baud={apple.baud}
+        progress={apple.diskProgress}
         showScreen={showScreen}
         showConsole={showConsole}
         showDebugger={showDebugger}

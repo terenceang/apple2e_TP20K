@@ -364,8 +364,8 @@ module apple2_core #(
     wire        mock_iosel_hit  = (effective_cpu_addr[15:8] == 8'hC4);
     wire        mock_devsel_hit = (effective_cpu_addr[15:8] == 8'hC0) &&
                                   (effective_cpu_addr[7:4] == 4'hC);
-    wire        mock_iosel_n    = !(bus_cycle && mock_iosel_hit);
-    wire        mock_devsel_n   = !(bus_cycle && mock_devsel_hit);
+    wire        mock_iosel_n    = !mock_iosel_hit;
+    wire        mock_devsel_n   = !mock_devsel_hit;
 
     wire [6:0]  card_irq_n = {1'b1, 1'b1, 1'b1, mock_irq_n, 1'b1, 1'b1, 1'b1};
 

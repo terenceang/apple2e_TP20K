@@ -2,11 +2,11 @@
 """
 scripts/upload_disk.py - Upload a Disk II image (.dsk or .po) to Tang Primer 20K DDR3.
 
-Handles DOS 3.3 logical-to-physical sector interleaving and uploads over the 115200 baud UART
+Handles DOS 3.3 logical-to-physical sector interleaving and uploads over the 1Mbps UART
 via the hardware debugger 'd1' or 'd2' command.
 
 Usage:
-    python scripts/upload_disk.py <image.dsk> [--drive 1|2] [--port COM47] [--baud 115200]
+    python scripts/upload_disk.py <image.dsk> [--drive 1|2] [--port COM47] [--baud 1000000]
 """
 
 import sys
@@ -63,7 +63,7 @@ def main():
     parser.add_argument("disk", help="Path to .dsk or .po image")
     parser.add_argument("--drive", type=int, choices=[1, 2], default=1, help="Drive number (1 or 2)")
     parser.add_argument("--port", default="COM47", help="Serial COM port")
-    parser.add_argument("--baud", type=int, default=115200, help="Baud rate")
+    parser.add_argument("--baud", type=int, default=1000000, help="Baud rate (default: 1000000)")
     parser.add_argument("--order", choices=["auto", "dos", "prodos", "raw"], default="auto",
                         help="Sector interleaving order (default: auto based on extension)")
     args = parser.parse_args()

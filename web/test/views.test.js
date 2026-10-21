@@ -33,7 +33,7 @@ test('formatConnState produces human-readable strings for every connection state
   assert.equal(formatConnState({ state: 'open-unchecked' }), 'port open, checking that this is the //e...')
   assert.equal(formatConnState({ state: 'probing' }), 'asking the //e who is there...')
   assert.equal(formatConnState({ state: 'open', detail: 'FT2232C Channel B' }), 'connected to FT2232C Channel B')
-  assert.equal(formatConnState({ state: 'open', detail: null }, 115200), 'connected at 115200')
+  assert.equal(formatConnState({ state: 'open', detail: null }, 1000000), 'connected at 1000000')
   assert.equal(formatConnState({ state: 'wrong-port' }), 'that is the wrong USB channel -- pick the other one')
   assert.equal(formatConnState({ state: 'error', detail: 'Device disconnected' }), 'Device disconnected')
   assert.equal(formatConnState({ state: 'error', error: 'Port access denied' }), 'Port access denied')

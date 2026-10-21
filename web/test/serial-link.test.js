@@ -155,13 +155,13 @@ test('a dismissed picker is not treated as an error', async () => {
   assert.equal(link.state, 'idle')
 })
 
-test('the port is opened at 115200 8N1, not the FT2232C default of 9600', async () => {
+test('the port is opened at 1000000 8N1, not the FT2232C default of 9600', async () => {
   const port = fakePort({ immediate: enc('') })
   const link = new SerialLink({ serial: fakeSerial([port]) })
   link.onState = () => {}
   await link.open({ verify: false })
   assert.equal(port.openOptions.baudRate, BAUD)
-  assert.equal(BAUD, 115200)
+  assert.equal(BAUD, 1000000)
   assert.equal(port.openOptions.dataBits, 8)
   assert.equal(port.openOptions.stopBits, 1)
   assert.equal(port.openOptions.parity, 'none')
@@ -183,7 +183,7 @@ test('a port that refuses the long open form is retried with the short one', asy
   link.onState = () => {}
   await link.open({ verify: false })
   assert.equal(tries.length, 2)
-  assert.equal(tries[1].baudRate, 115200)
+  assert.equal(tries[1].baudRate, 1000000)
   await link.close()
 })
 

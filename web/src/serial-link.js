@@ -9,7 +9,7 @@
 //  Two things make this more than a three-line change:
 //
 //  * The baud rate has to be set explicitly. The FT2232C comes up at 9600 and
-//    the FPGA's UART is 115200 8N1, and nothing else will tell you so.
+//    the FPGA's UART is 1000000 8N1, and nothing else will tell you so.
 //
 //  * The FT2232C has two channels and only one of them is the FPGA's UART. The
 //    other is the BL616's own console. They are indistinguishable in the
@@ -23,7 +23,7 @@
 
 import { CTRL_B, CMD, HANDSHAKE } from './protocol.js'
 
-export const BAUD = 115200
+export const BAUD = 1000000
 const PROBE_TIMEOUT_MS = 2500
 /** Ctrl+B then '?', which makes the debugger print its help line. */
 const PROBE_BYTE = CMD.help.charCodeAt(0)
@@ -139,7 +139,7 @@ export class SerialLink {
     this.emit('open-unchecked')
     try {
       // open() is on the port, not on navigator.serial. Being explicit about
-      // 8N1 matters: the FT2232C comes up at 9600 and the FPGA's UART is 115200
+      // 8N1 matters: the FT2232C comes up at 9600 and the FPGA's UART is 1000000
       // 8N1, and if the extra fields are refused the short form still sets the
       // baud rate, which is the part that cannot be wrong.
       await this.port.open({

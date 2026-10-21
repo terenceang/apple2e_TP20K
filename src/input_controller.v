@@ -1,7 +1,7 @@
-// Apple //e Input Controller for Tang Nano 20K
-// Handles UART RX (115200 baud) for Bluetooth-to-UART / USB-C keyboard & gamepad
+// Apple //e Input Controller for Tang Nano 20K / Tang Primer 20K
+// Handles UART RX (1 Mbps baud) for Bluetooth-to-UART / USB-C keyboard & gamepad
 //
-// Host-to-Apple protocol, all at 115200 8N1:
+// Host-to-Apple protocol, all at 1 Mbps (1000000 baud) 8N1:
 //
 //   0x02                     toggle the hardware debugger in serial_debugger
 //   0xFE <code> <buttons>    one keypress: <code> is the final 7-bit Apple II
@@ -49,7 +49,7 @@ module input_controller (
     output wire        kbd_reset      // RESET key held
 );
 
-    // 115200 baud receiver at 27 MHz; the divisor is src/uart_defs.vh
+    // 1 Mbps baud receiver at 27 MHz; the divisor is src/uart_defs.vh
     localparam [8:0] CLKS_PER_BIT = `UART_CLKS_PER_BIT;
     localparam [8:0] HALF_BIT     = `UART_CLKS_HALF_BIT;
 

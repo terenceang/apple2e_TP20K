@@ -76,7 +76,10 @@ module mockingboard_card (
 
     assign via1_port_a_in = psg1_da_out;
 
-    wire psg1_reset = reset | ~via1_port_b_out[2];
+    // Reset is driven by system reset only. On authentic Mockingboards, PB2 was
+    // not wired to active-low reset, and standard software writes 0x00 for bus
+    // inactive (which would hold the PSG in permanent reset if PB2 were inverted to reset).
+    wire psg1_reset = reset;
     wire psg1_bdir  = via1_port_b_out[1];
     wire psg1_bc1   = via1_port_b_out[0];
 
@@ -128,7 +131,7 @@ module mockingboard_card (
 
     assign via2_port_a_in = psg2_da_out;
 
-    wire psg2_reset = reset | ~via2_port_b_out[2];
+    wire psg2_reset = reset;
     wire psg2_bdir  = via2_port_b_out[1];
     wire psg2_bc1   = via2_port_b_out[0];
 

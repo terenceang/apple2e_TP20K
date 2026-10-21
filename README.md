@@ -8,7 +8,7 @@ An Apple //e implemented in Verilog for the [Sipeed Tang Nano 20K](https://wiki.
 - **64 KB RAM** in block RAM, with a **language card** for $D000–$FFFF bank switching
 - **HDMI video** at 720×480p60 (CEA-861 VIC 2), with the 560×384 Apple display centered; text, lo-res and hi-res (HGR) modes, including mixed mode and page 2; hi-res colour is an NTSC-style decode of the dot stream, so solid fills, edge fringes and the blue/orange palette bit look as they do on a TV
 - **Audio** from the $C030 speaker toggle, sent both over HDMI (48 kHz L-PCM in data islands) and through the onboard MAX98357A I2S amplifier
-- **UART keyboard** at 115200 baud over the USB-C serial bridge (or a Bluetooth-to-UART module); ANSI arrow keys are mapped to Apple control codes, and a three-byte key packet lets the Open-Apple and Solid-Apple keys drive the game paddles. There is a [browser front end](web/README.md) — keyboard, screen and debugger — in `web/`
+- **UART keyboard** at 1 Mbps (1000000 baud) over the USB-C serial bridge (or a Bluetooth-to-UART module); ANSI arrow keys are mapped to Apple control codes, and a three-byte key packet lets the Open-Apple and Solid-Apple keys drive the game paddles. There is a [browser front end](web/README.md) — keyboard, screen and debugger — in `web/`
 - **Gamepad over UART**: pushbuttons $C061–$C063 and paddles 0/1
 - **Built-in hardware debugger**: press Ctrl+B to freeze the CPU and inspect registers, single-step, or dump memory
 - **Diagnostic LEDs**: heartbeat, PLL lock, reset, CPU write, text mode, key strobe
@@ -90,7 +90,7 @@ HDMI audio needs a display that accepts HDMI audio (not a DVI-only input). Hold 
 ## Using it
 
 1. Connect HDMI and USB-C, then flash the bitstream.
-2. Open a serial terminal on the board's UART at **115200 8N1**, for example `picocom -b 115200 /dev/ttyUSB1`.
+2. Open a serial terminal on the board's UART at **1000000 8N1** (1 Mbps), for example `picocom -b 1000000 /dev/ttyUSB1`.
 3. Type to send keystrokes to the Apple //e. Text the machine prints through COUT is echoed back to the terminal.
 
 ### Debugger

@@ -116,6 +116,17 @@ module tb_via6522;
         read_via(4'hD, rdata);
         check("Initial IFR is 0", rdata == 8'h00);
 
+        // 1b. Verify Timer 1 decrements at startup (Skyfox Mockingboard detection)
+        read_via(4'h4, rdata); // First read of T1C_L
+        begin : test_startup_t1
+            reg [7:0] rdata2;
+            integer t;
+            // Advance simulation time across several ce_1m cycles (~3.7 us)
+            for (t = 0; t < 150; t = t + 1) @(posedge clk);
+            read_via(4'h4, rdata2); // Second read of T1C_L
+            check("Timer 1 decrements at startup (Skyfox detection)", rdata2 < rdata);
+        end
+
         // 2. Port A and B Direction and Data
         write_via(4'h3, 8'hFF); // DDRA = all outputs
         write_via(4'h1, 8'h5A); // ORA = 0x5A

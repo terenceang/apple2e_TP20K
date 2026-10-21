@@ -9,6 +9,6 @@
 //  from the repo root. The web side's rate is web/src/serial-link.js BAUD.
 // ============================================================================
 
-// 27 MHz / 115200 baud = 234.375, truncated to 234 (0.16% fast, fine for 8N1)
-`define UART_CLKS_PER_BIT 9'd234
-`define UART_CLKS_HALF_BIT 9'd117
+// 27 MHz / 1000000 baud = 27.0 (exact, 0% error for 8N1)
+`define UART_CLKS_PER_BIT 9'd27
+`define UART_CLKS_HALF_BIT 9'd13

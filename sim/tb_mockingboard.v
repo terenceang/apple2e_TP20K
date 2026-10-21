@@ -157,12 +157,22 @@ module tb_mockingboard;
         // 1. Initialize VIA 1 (Left, $C400)
         bus_write(16'hC402, 8'h07); // DDRB = bits [2:0] outputs
         bus_write(16'hC403, 8'hFF); // DDRA = all outputs
-        bus_write(16'hC400, 8'h04); // Take PSG 1 out of reset (RESET_N=1)
+        bus_write(16'hC400, 8'h00); // Standard Apple II inactive bus (PB2=0)
 
         // 2. Initialize VIA 2 (Right, $C480)
         bus_write(16'hC482, 8'h07); // DDRB = bits [2:0] outputs
         bus_write(16'hC483, 8'hFF); // DDRA = all outputs
-        bus_write(16'hC480, 8'h04); // Take PSG 2 out of reset (RESET_N=1)
+        bus_write(16'hC480, 8'h00); // Standard Apple II inactive bus (PB2=0)
+
+        // 2b. Verify Timer 1 decrements on Slot 4 without prior timer configuration
+        begin : test_timer_countdown
+            reg [7:0] t1_val1, t1_val2;
+            integer w;
+            bus_read(16'hC404, t1_val1);
+            for (w = 0; w < 100; w = w + 1) @(posedge clk);
+            bus_read(16'hC404, t1_val2);
+            check("Slot 4 VIA 1 Timer 1 decrements at startup (Skyfox detection)", t1_val2 < t1_val1);
+        end
 
         // 3. Test PSG Register Readback through VIA (Detection Routine)
         psg_write(16'hC400, 4'h8, 8'h0B); // Channel A Amplitude = 11 on Left PSG

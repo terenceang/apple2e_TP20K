@@ -111,7 +111,7 @@ local build has the real glyphs; a published one does not.
 
 ## The wire protocol
 
-Host to //e, at 115200 8N1. Everything except the two packets is a plain ASCII
+Host to //e, at 1000000 (1 Mbps) 8N1. Everything except the two packets is a plain ASCII
 keystroke, so a Bluetooth-to-UART module or `picocom` still works.
 
 | Bytes | Meaning |

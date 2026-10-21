@@ -4,7 +4,7 @@ import threading
 import base64
 
 port_name = sys.argv[1] if len(sys.argv) > 1 else '/dev/ttyUSB1'
-baud = int(sys.argv[2]) if len(sys.argv) > 2 else 115200
+baud = int(sys.argv[2]) if len(sys.argv) > 2 else 1000000
 
 try:
     ser = serial.Serial(port_name, baud, timeout=0.1)

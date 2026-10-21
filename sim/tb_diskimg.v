@@ -20,6 +20,7 @@
 // byte in hand, and it ends up with an image the board believes in.
 
 `timescale 1ns/1ps
+`include "src/uart_defs.vh"
 
 module tb_diskimg;
 
@@ -249,10 +250,10 @@ module tb_diskimg;
         reg [9:0] sh;
         begin
             while (uart_tx !== 1'b0) @(posedge clk);   // wait for the start bit
-            #(37 * 117);                                // into the middle of it
+            #(37 * `UART_CLKS_HALF_BIT);                // into the middle of it
             sh[0] = uart_tx;
             for (k = 1; k < 10; k = k + 1) begin
-                #(37 * 234);
+                #(37 * `UART_CLKS_PER_BIT);
                 sh[k] = uart_tx;
             end
             b = sh[1];

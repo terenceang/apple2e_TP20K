@@ -40,8 +40,10 @@ module via6522 (
     reg [6:0]  ifr;       // 0xD: Interrupt Flag Register (bits 6:0)
     reg [6:0]  ier;       // 0xE: Interrupt Enable Register (bits 6:0)
 
-    reg        t1_active;
-    reg        t2_active;
+    reg        t1_loaded;
+    reg        t1_int_arm;
+    reg        t2_loaded;
+    reg        t2_int_arm;
     reg [11:0] cb1_delay;
 
     // Pin drivers
@@ -98,11 +100,13 @@ module via6522 (
             sr        <= 8'h00;
             acr       <= 8'h00;
             pcr       <= 8'h00;
-            ifr       <= 7'h00;
-            ier       <= 7'h00;
-            t1_active <= 1'b0;
-            t2_active <= 1'b0;
-            cb1_delay <= 12'd0;
+            ifr        <= 7'h00;
+            ier        <= 7'h00;
+            t1_loaded  <= 1'b0;
+            t1_int_arm <= 1'b0;
+            t2_loaded  <= 1'b0;
+            t2_int_arm <= 1'b0;
+            cb1_delay  <= 12'd0;
         end else begin
             // -----------------------------------------------------------------
             // CB1 Speech Acknowledge (Mockingboard Sound/Speech Handshake)
@@ -127,31 +131,40 @@ module via6522 (
             // -----------------------------------------------------------------
             // Timer 1 and Timer 2 Countdown on ce_1m (1.023 MHz)
             // -----------------------------------------------------------------
+            // Both timers decrement continuously on ce_1m at all times, including
+            // immediately after reset before any configuration writes occur.
+            // This enables Apple II Mockingboard detection routines (e.g. Skyfox)
+            // to measure timer decrements across successive reads of T1C_L ($C404).
             if (ce_1m) begin
-                if (t1_active) begin
+                if (t1_loaded && acr[6]) begin
+                    // Free-running continuous mode: reload from latch at 0
                     if (t1c == 16'd0) begin
-                        ifr[6] <= 1'b1; // Timer 1 interrupt
-                        if (acr[6]) begin
-                            // Free-running continuous mode: reload from latch
-                            t1c <= t1l;
-                        end else begin
-                            // One-shot mode: underflow to 0xFFFF and stop firing
-                            t1c <= 16'hFFFF;
-                            t1_active <= 1'b0;
+                        ifr[6] <= 1'b1;
+                        t1c    <= t1l;
+                    end else begin
+                        t1c <= t1c - 16'd1;
+                    end
+                end else begin
+                    // One-shot mode or unconfigured: continuous countdown
+                    if (t1c == 16'd0) begin
+                        if (t1_loaded && t1_int_arm) begin
+                            ifr[6]     <= 1'b1;
+                            t1_int_arm <= 1'b0;
                         end
+                        t1c <= 16'hFFFF;
                     end else begin
                         t1c <= t1c - 16'd1;
                     end
                 end
 
-                if (t2_active) begin
-                    if (t2c == 16'd0) begin
-                        ifr[5] <= 1'b1; // Timer 2 interrupt
-                        t2c <= 16'hFFFF;
-                        t2_active <= 1'b0;
-                    end else begin
-                        t2c <= t2c - 16'd1;
+                if (t2c == 16'd0) begin
+                    if (t2_loaded && t2_int_arm) begin
+                        ifr[5]     <= 1'b1;
+                        t2_int_arm <= 1'b0;
                     end
+                    t2c <= 16'hFFFF;
+                end else begin
+                    t2c <= t2c - 16'd1;
                 end
             end
 
@@ -189,29 +202,33 @@ module via6522 (
                     end
                     4'h5: begin
                         // Write T1 High Latch, load counter, clear interrupt, arm
-                        t1l[15:8] <= din;
-                        t1c       <= {din, t1l[7:0]};
-                        ifr[6]    <= 1'b0;
-                        t1_active <= 1'b1;
+                        t1l[15:8]  <= din;
+                        t1c        <= {din, t1l[7:0]};
+                        ifr[6]     <= 1'b0;
+                        t1_loaded  <= 1'b1;
+                        t1_int_arm <= 1'b1;
                     end
                     4'h6: begin
                         // Write T1 Low Latch
                         t1l[7:0] <= din;
                     end
                     4'h7: begin
-                        // Write T1 High Latch and clear interrupt
-                        t1l[15:8] <= din;
-                        ifr[6]    <= 1'b0;
+                        // Write T1 High Latch, clear interrupt, arm
+                        t1l[15:8]  <= din;
+                        ifr[6]     <= 1'b0;
+                        t1_loaded  <= 1'b1;
+                        t1_int_arm <= 1'b1;
                     end
                     4'h8: begin
                         // Write T2 Low Latch
                         t2l_l <= din;
                     end
                     4'h9: begin
-                        // Write T2 High Counter, load low counter from latch, clear interrupt
-                        t2c       <= {din, t2l_l};
-                        ifr[5]    <= 1'b0;
-                        t2_active <= 1'b1;
+                        // Write T2 High Counter, load low counter from latch, clear interrupt, arm
+                        t2c        <= {din, t2l_l};
+                        ifr[5]     <= 1'b0;
+                        t2_loaded  <= 1'b1;
+                        t2_int_arm <= 1'b1;
                     end
                     4'hA: sr  <= din;
                     4'hB: acr <= din;

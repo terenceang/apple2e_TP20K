@@ -21,7 +21,7 @@ async function run() {
   const uartProcess = spawn(python, [
     join(HERE, 'uart_pipe.py'),
     port,
-    '115200'
+    '1000000'
   ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
   uartProcess.stderr.on('data', (d) => {

@@ -252,8 +252,12 @@ export function DiskPane({
         <div className="disk-progress-bar-container">
           <div className="disk-progress-labels">
             <span className="progress-phase">
-              {progress.phase === 'uploading' ? 'Uploading to' : 'Downloading from'}{' '}
-              {progress.drive === 7 ? 'TF card' : `Slot 6 Drive ${progress.drive}`}
+              {progress.drive === 7
+                ? 'Copying to TF card'
+                : progress.phase === 'uploading'
+                  ? 'Uploading to'
+                  : 'Downloading from'}{' '}
+              {progress.drive === 7 ? (progress.slot !== undefined ? `slot ${progress.slot}` : '') : `Slot 6 Drive ${progress.drive}`}
             </span>
             <span className="progress-detail">{progress.detail}</span>
           </div>
@@ -288,6 +292,23 @@ export function DiskPane({
           <div className="disk-drive-body">
             {renderHdDrive(1)}
             {renderHdDrive(2)}
+            {progress?.drive === 7 && (
+              <div className="hd-copy-progress">
+                <div className="hd-copy-progress-header">
+                  <span className="hd-copy-tag">
+                    Copying to slot {progress.slot ?? copySlot}
+                  </span>
+                  <span className="hd-copy-percent">{progress.percent}%</span>
+                </div>
+                <div className="progress-track">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${progress.percent}%` }}
+                  />
+                </div>
+                <div className="hd-copy-detail">{progress.detail}</div>
+              </div>
+            )}
           </div>
           <div className="disk-drive-actions">
             <input
@@ -305,9 +326,11 @@ export function DiskPane({
               className="btn-disk-action"
               onClick={() => copyInput.current?.click()}
               disabled={disabled || hdBusy || !copyValid}
-              title="Copy a .hdv / .po / .2mg image into this TF card slot, through the board. Empty blocks are quick; a full 32 MB volume takes about 48 minutes."
+              title="Copy a .hdv / .po / .2mg image into this TF card slot, through the board. Empty blocks are quick; at 1 Mbps a full 32 MB volume takes about 5.5 minutes."
             >
-              ⇪ Copy image to slot
+              {progress?.drive === 7
+                ? `⏳ Copying ${progress.percent}%...`
+                : '⇪ Copy image to slot'}
             </button>
             <input
               ref={copyInput}

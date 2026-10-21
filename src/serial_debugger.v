@@ -1,5 +1,5 @@
 // Apple //e Dual-Mode Serial Console & Hardware Debugger for Tang Nano 20K
-// Operates over 115200 baud UART (Pin 69 TX, Pin 70 RX)
+// Operates over 1 Mbps (1000000 baud) UART (Pin 69 TX, Pin 70 RX)
 //
 // Modes:
 // 1. Console Mode (Default):
@@ -485,7 +485,7 @@ module serial_debugger (
     reg [2:0]  mnt_n     = 3'd0;         // drive digit + hex digits still owed after 'y'
     reg [2:0]  q_n       = 3'd0;         // hex digits still owed after 'q'
 
-    // The q copy.  The card writes far faster than 115200 brings bytes, so a
+    // The q copy.  The card writes far faster than 1Mbps brings bytes, so a
     // byte goes to sd_vol as soon as it arrives and nothing is buffered.
     localparam [2:0] X_TAG = 3'd0, X_CHI = 3'd1, X_CLO = 3'd2, X_DATA = 3'd3,
                      X_ZGO = 3'd4, X_WAIT = 3'd5;
