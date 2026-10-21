@@ -832,24 +832,6 @@ module tb_disk2;
                             diff_n), diff_n == 0);
         end
 
-        // ---- golden track: the card's whole track-0 stream, for mcu/ ----
-        // mcu/test_nibble.c encodes the same image (img_byte, drive 0, track 0,
-        // physical order) and must match this byte for byte.  The write test above
-        // overwrote sector 0, so the image is restored first.
-        begin : golden
-            integer gfd, gi;
-            for (jj = 0; jj < 256; jj = jj + 1)
-                shadow[img_idx(0, 0, 0, jj)] = img_byte(0, 0, 0, jj);
-            reset = 1'b1; #40; @(posedge clk); reset = 1'b0; #40;
-            xfer(4'h9, 1'b0, 8'h00);   // motor on
-            gfd = $fopen("build/golden_track0.hex", "w");
-            for (gi = 0; gi < 7040; gi = gi + 1) begin
-                read_byte(rb);
-                $fwrite(gfd, "%02x\n", rb);
-            end
-            $fclose(gfd);
-        end
-
         if (fails == 0) $display("tb_disk2: PASS (%0d checks)", checks);
         else             $display("tb_disk2: FAIL (%0d of %0d checks failed)", fails, checks);
         $finish;

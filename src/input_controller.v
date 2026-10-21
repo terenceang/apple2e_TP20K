@@ -1,4 +1,4 @@
-// Apple //e Input Controller for Tang Nano 20K / Tang Primer 20K
+// Apple //e Input Controller for Tang Primer 20K
 // Handles UART RX (1 Mbps baud) for Bluetooth-to-UART / USB-C keyboard & gamepad
 //
 // Host-to-Apple protocol, all at 1 Mbps (1000000 baud) 8N1:

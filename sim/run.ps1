@@ -117,8 +117,6 @@ Run-Tb 'tb_auxsw'        $core -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_prodos_hd'    $core -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_p6boot'       $core -Gen '2012' -Defines $disk2Defines
 
-Run-Tb 'tb_spi_master'   @('src/spi_master.v') -Gen '2012'
-Run-Tb 'tb_spi_ctl'      (@('src/spi_ctl.v', 'src/spi_master.v', 'src/disk2/disk2_trk.v')) -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_aux_ram'     @('sim/models/ddr3_model.v', 'src/aux_ram.v') -Gen '2012'
 
 # The DDR3 IP is encrypted; sim/models/ddr3_model.v stands in for it.

@@ -46,9 +46,9 @@ foreach ($d in @('build\gowin','build\bitstream','build\logs')) {
 # $readmemh is a hard error on a missing file, and a fresh clone must still
 # build.  With INTCXROM on, which is the reset default, the //e's own ROM at
 # $C600 boots a Disk II without it.  gw_sh has no command-line define, so
-# without the ROM the two card files are built from copies that start with
+# without the ROM the card file is built from a copy that starts with
 # `define DSK2_NO_P6_ROM.
-$p6cards = @('src/disk2/disk2_card.v', 'src/disk2/disk2_trk.v')
+$p6cards = @('src/disk2/disk2_card.v')
 $noP6 = -not (Test-Path -LiteralPath (Join-Path $root 'roms\disk2_p6.hex'))
 if ($noP6) {
     Write-Host "== no roms\disk2_p6.hex: the card's `$C600 stays zero (INTCXROM boots DOS anyway)"
@@ -73,7 +73,7 @@ $tcl += @(
     "set_option -output_base_name top",
     "set_option -verilog_std sysv2017",
     "set_option -include_path {.}",
-    "set_option -use_sspi_as_gpio 1",     # T10 key S1, N9 SPI MISO
+    "set_option -use_sspi_as_gpio 1",     # T10 key S1, M8 TF card MISO
     "set_option -use_done_as_gpio 1",     # C13 LED0
     "set_option -use_ready_as_gpio 1",    # A13 LED1
     "run all"

@@ -1,8 +1,8 @@
 # web/ -- Apple //e keyboard, console and debugger
 
-A browser front end for the Apple //e on the [Tang Nano 20K](../README.md). It
-puts the machine's own keyboard, its text screen and its hardware debugger in
-the browser.
+A browser front end for the Apple //e on the [Tang Primer 20K](../README.md). It
+puts the machine's own keyboard, its text screen, its hardware debugger and its
+disk drives in the browser.
 
 ```
 browser ──Web Serial──▶  USB ──▶  BL616  ──▶  FPGA
@@ -31,18 +31,16 @@ into:
 python3 -m http.server -d web/dist 8000   # then open http://localhost:8000
 ```
 
-Press **Connect USB** and pick the FT2232C channel that turns out to be the
-//e's. Then type.
+Press **Connect USB** and pick the Dock's serial port. Then type.
 
-### Which USB channel?
+### Which port?
 
-The board's BL616 is an FT2232C with two serial channels, and only one of them
-is the FPGA's UART; the other is the BL616's own console. They look identical
-in the browser's device picker, so the app cannot tell them apart by name — it
-asks instead. On connecting it sends the debugger's own handshake (`Ctrl+B`,
-then `?`) and looks for the help line that comes back. If the wrong channel was
-picked it says so and closes the port, because there is nothing on that end
-that would answer. The probe leaves the //e exactly as it found it.
+The Dock's BL702 shows one serial port, but the picker may list others (and on
+the Tang Nano 20K the FT2232's two channels looked identical), so the app does
+not trust the name -- it asks. On connecting it sends the debugger's own
+handshake (`Ctrl+B`, then `?`) and looks for the help line that comes back. If
+the wrong port was picked it says so and closes it, because there is nothing on
+that end that would answer. The probe leaves the //e exactly as it found it.
 
 That is the only way to be sure, and it costs about 20 ms.
 
@@ -185,7 +183,7 @@ Commands are only accepted when the debugger's main state is idle, and anything
 sent sooner is dropped without a word. The banner prints **two** prompts -- one
 at the end of the banner string, one after the register dump -- so neither one
 on its own means idle. `useApple.ts` therefore releases queued commands after
-200 ms of silence, which at 115200 is many times longer than a 45-byte register
+200 ms of silence, which at 1 Mbps is many times longer than a 45-byte register
 line takes.
 
 ## The screen
@@ -225,7 +223,11 @@ src/
     layouts.js      the 63 keys as x/y/w/h + legends; the only place the
                     physical arrangement lives
   protocol.js       byte encoding and the firmware's literal strings
-  disk.js           Disk II image validation, interleaving (.dsk/.do <-> .po) & UART protocol
+  disk.js           Disk II image validation, interleaving (.dsk/.do <-> .po) & UART protocol,
+                    the TF card's sector commands (b/u/y/i)
+  fat32.js          the TF card's FAT32, in the page: list, create (contiguous), delete
+  config.js         A2CONFIG.TXT, what each drive loads
+  card.js           the card as the Disks pane uses it: upload, download, mount
   stream.js         the one incoming stream, classified
   serial-link.js    Web Serial: the whole transport, straight to the board
   charset.js        the character ROM, addressed as the RTL addresses it
@@ -233,7 +235,8 @@ src/
   components/       Keyboard, Console, Screen, DebuggerPane, Gamepad, FlashBar, DiskPane
 scripts/charset.mjs roms/apple2e_char.hex -> src/generated/charset.json
 scripts/pages.mjs   build the Pages bundle, check it, copy to docs/
-test/               node --test
+scripts/simcard.mjs the FAT32 card image sim/tb_sdvol.v boots from
+test/               node --test (board.js: a fake board with a TF card)
 ```
 
 ## Security
@@ -262,7 +265,7 @@ G.
 
 `charset.test.js` pins the video ROM convention. `stream.test.js` drives the
 parser with the exact bytes the firmware emits, chunked every 1, 3, 7, 16, 40
-and 4096 bytes, because at 115200 nothing lands in one read. `serial-link.test.js`
+and 4096 bytes, because over a serial link nothing lands in one read. `serial-link.test.js`
 drives the whole Web Serial path against an injected fake, because that is the
 only way to get at it outside a browser — and it is how the `open()`-on-the-port
 bug and the dropped 8N1 were found.
@@ -271,11 +274,9 @@ bug and the dropped 8N1 were found.
 
 - **A live screen.** No polling, by agreement. The //e stays free-running; the
   screen updates when you ask.
-- **BLE.** The BL616 has a radio, but the browser would need Chrome and HTTPS
-  for Web Bluetooth, and USB is already wired up.
 - **A //e emulator.** This is a front end to the real machine, not a copy of it.
 - **A third game button.** The RTL decodes one at `$C063`, but no //e key closes
   it: the Open-Apple and Solid-Apple keys are hand-control buttons 0 and 1, and
   that is the whole of the machine's game input.
-- **Flash buttons.** Programming runs `openFPGALoader`, and the browser cannot
-  start a subprocess. Use `make flash-sram` / `make flash` from a terminal.
+- **Flash buttons.** Programming runs Gowin's `programmer_cli`, and the browser
+  cannot start a subprocess. Use `make flash-sram` / `make flash` from a terminal.

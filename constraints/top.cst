@@ -34,17 +34,6 @@ IO_PORT "uart_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC "uart_tx" M11;
 IO_PORT "uart_tx" IO_TYPE=LVCMOS33 DRIVE=8;
 
-// SPI link to the ESP32 companion: PMOD J5 pins 5-8 (the RGB LCD's R0-R3,
-// unused). Only live with DSK_TRK=1 in top.v.
-IO_LOC "spi_sck" L9;
-IO_PORT "spi_sck" IO_TYPE=LVCMOS33 DRIVE=8;
-IO_LOC "spi_mosi" N8;
-IO_PORT "spi_mosi" IO_TYPE=LVCMOS33 DRIVE=8;
-IO_LOC "spi_miso" N9;
-IO_PORT "spi_miso" IO_TYPE=LVCMOS33 PULL_MODE=DOWN;
-IO_LOC "spi_cs_n" N7;
-IO_PORT "spi_cs_n" IO_TYPE=LVCMOS33 DRIVE=8 PULL_MODE=UP;
-
 // HDMI TMDS, true LVDS (TLVDS_OBUF), AC-coupled on the Dock. Both balls of
 // each pair on the _p port; the tools place _n.
 IO_LOC "tmds_clk_p" G16,H15;

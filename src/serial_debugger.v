@@ -1,4 +1,4 @@
-// Apple //e Dual-Mode Serial Console & Hardware Debugger for Tang Nano 20K
+// Apple //e Dual-Mode Serial Console & Hardware Debugger for Tang Primer 20K
 // Operates over 1 Mbps (1000000 baud) UART (Pin 69 TX, Pin 70 RX)
 //
 // Modes:

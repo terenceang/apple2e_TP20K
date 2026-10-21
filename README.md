@@ -1,242 +1,136 @@
-# Apple //e on Tang Nano 20K
+# Apple //e on Tang Primer 20K
 
-An Apple //e implemented in Verilog for the [Sipeed Tang Nano 20K](https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/nano-20k.html) (Gowin GW2AR-18). It is built entirely with the open-source Yosys / nextpnr / Apicula toolchain.
+An Apple //e implemented in Verilog for the [Sipeed Tang Primer 20K](https://wiki.sipeed.com/hardware/en/tang/tang-primer-20k/primer-20k.html) (Gowin GW2A-LV18PG256C8/I7) on its Dock board, built with Gowin EDA.
+
+This project's code was written with AI assistance.
 
 ## Features
 
 - **65C02 CPU** at 1.023 MHz (Arlet Ottens' core with 65C02 extensions)
-- **64 KB RAM** in block RAM, with a **language card** for $D000–$FFFF bank switching
-- **HDMI video** at 720×480p60 (CEA-861 VIC 2), with the 560×384 Apple display centered; text, lo-res and hi-res (HGR) modes, including mixed mode and page 2; hi-res colour is an NTSC-style decode of the dot stream, so solid fills, edge fringes and the blue/orange palette bit look as they do on a TV
-- **Audio** from the $C030 speaker toggle, sent both over HDMI (48 kHz L-PCM in data islands) and through the onboard MAX98357A I2S amplifier
-- **UART keyboard** at 1 Mbps (1000000 baud) over the USB-C serial bridge (or a Bluetooth-to-UART module); ANSI arrow keys are mapped to Apple control codes, and a three-byte key packet lets the Open-Apple and Solid-Apple keys drive the game paddles. There is a [browser front end](web/README.md) — keyboard, screen and debugger — in `web/`
-- **Gamepad over UART**: pushbuttons $C061–$C063 and paddles 0/1
-- **Built-in hardware debugger**: press Ctrl+B to freeze the CPU and inspect registers, single-step, or dump memory
-- **Diagnostic LEDs**: heartbeat, PLL lock, reset, CPU write, text mode, key strobe
+- **128 KB**: 48 KB main RAM and the 16 KB ROM in block RAM; the aux 64 KB and the language card in the SOM's DDR3
+- **HDMI video** at 720×480p60 (CEA-861 VIC 2), with the 560×384 Apple display centered: text (40 and 80 column, MouseText), lo-res, hi-res and double hi-res, mixed mode and page 2; colour is an NTSC-style decode of the dot stream, so fills, fringes and the palette bit look as they do on a TV
+- **Audio** from the $C030 speaker and a **Mockingboard C** in slot 4, over HDMI (48 kHz L-PCM) and through the Dock's PT8211 DAC and amplifier to the 3.5 mm jack
+- **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files
+- **Keyboard, gamepad and debugger over USB serial** at 1 Mbps; the [browser front end](web/README.md) in `web/` has the keyboard, the text screen, the debugger and the disk drives
+- **Built-in hardware debugger**: Ctrl+B freezes the CPU to inspect registers, single-step and dump memory
+- **Loading screen** while the TF card's images load at power-on, so a 32 MB volume (~30 s) does not look like a hang
 
-Auxiliary 64 KB (in the board's on-board SDRAM, via the GPL-3 controller in `src/sdram/`) and 80-column text are implemented; double hi-res and MouseText (ALTCHARSET) are too, as is the //e's peripheral slot bus (address decode, $C800 expansion space, IRQ/NMI wiring) with no cards in it; not yet: peripheral cards themselves, disk drives, and interrupts. The browser front end shows the text screen only, not hi-res.
+## Requirements
+
+- Tang Primer 20K with the Dock board, and a TF card (FAT32, so 32 GB or smaller, or a bigger one reformatted FAT32)
+- Gowin EDA 1.9.12.04 (`gw_sh` and `programmer_cli`, at the paths in `scripts/build.ps1` and `scripts/prog.ps1`)
+- [Icarus Verilog](https://github.com/steveicarus/iverilog) for the testbenches (the OSS CAD Suite's, found by `scripts/toolchain.ps1`)
+- Windows PowerShell 5.1; [GNU make](https://www.gnu.org/software/make/) is optional, as a shorthand (`winget install GnuWin32.Make`)
+- Node 20.19+ for the web front end
+- Apple //e ROM images. **These are not included**; see [`roms/README.md`](roms/README.md)
+
+## Building
+
+```sh
+make            # synthesis, place & route, bitstream => build/bitstream/apple2e_TP20K.fs
+make flash-sram # load into SRAM (lost on power cycle)
+make flash      # write to the configuration flash (persistent)
+make clean
+```
+
+`make` only wraps `scripts/build.ps1` and `scripts/prog.ps1`, which can be run directly. The build generates its Gowin Tcl from `fpga.yaml` (add new source files there), also writes `apple2e_TP20K.gprj` so the Gowin IDE opens the same project, and fails if the timing report shows negative setup slack. Programming uses the Dock's USB-JTAG; keep DIP switch 1 on.
+
+```sh
+powershell -File sim\run.ps1            # every testbench (tb_top needs the ROMs)
+powershell -File sim\run.ps1 -Target tb_sdvol
+```
+
+`scripts/hdmi_diff.ps1 -Check` verifies that `src/hdmi/` still matches its recorded snapshot, and `-Upstream` reports what has changed in the TN20K-HDMI project since.
+
+## Using it
+
+1. Copy disk images onto a FAT32 TF card on a PC (`.dsk`/`.do`/`.po` floppies, `.hdv`/`.po` hard-disk volumes) and put it in the SOM's slot.
+2. Connect HDMI and the Dock's USB-C, and flash the bitstream.
+3. Open the [web front end](web/README.md) in Chrome or Edge and press Connect. The Disks pane lists the card's images; click one and pick a drive. The board remembers the choice in `A2CONFIG.TXT` on the card and loads it at every power-on.
+
+A plain serial terminal at **1000000 8N1** works too: what you type goes to the Apple, and what it prints through COUT comes back.
+
+**Keys on the Dock:** S1 resets the Apple (the TF card's images reload); hold S2 for HDMI colour bars and a 1 kHz tone, which checks the HDMI link independently of the Apple core. HDMI audio needs a display that accepts it (not a DVI-only input).
+
+### Debugger
+
+Press **Ctrl+B** to pause the CPU and enter the debugger; press it again (or `c`) to leave.
+
+| Key | Action |
+|-----|--------|
+| `r` | CPU registers (PC, A, X, Y, SP, P, opcode) |
+| `s` | Single-step one instruction |
+| `c` | Continue (also `g`) |
+| `m` | Dump 16 bytes of memory; `@hhhh` or `0 1 4 8 f v k j` set the address |
+| `t` | Hardware status (video mode, PLL and DDR3) |
+| `w` | Dump the text page, and the graphics page in mixed mode |
+| `i` | What the drives hold, and the TF card's state |
+| `x` | Reset the CPU |
+| `h` | Help (also `?`) |
+
+The disk commands the web page uses (`d e n` for floppy images over the link, `b u y` for the TF card) are described in [`web/README.md`](web/README.md). Commands are only read when the debugger is idle, so anything sent while it is still printing is dropped; the web page waits for 200 ms of silence.
+
+### The TF card
+
+An ordinary FAT32 card, readable on any PC. Images go in the root directory; `A2CONFIG.TXT` there names each drive's file by its 8.3 name (`S6D1=LODERU~1.DSK`), and the web page writes it for you. The FPGA has no file system of its own: at power-on it finds the config and the four files by name, checks each is in one piece on the card and of the right size, and streams it in. A file that is missing, fragmented or the wrong kind leaves its drive empty, and the page says why. Slot 6 takes 143,360-byte `.dsk`/`.do`/`.po` images; slot 7 takes `.hdv`/`.po` volumes up to 32 MB (a `.dsk` is in DOS sector order, so it cannot be a ProDOS block device).
+
+Copying through the board runs at the serial link's speed, about 13 s for a floppy and up to ~48 minutes for a full 32 MB volume, so big volumes are best copied with a card reader.
+
+### LEDs
+
+| LED | Meaning |
+|-----|---------|
+| 0 | Heartbeat |
+| 1 | PLLs locked and DDR3 calibrated |
+| 2 | Running (out of reset) |
+| 3 | CPU memory write |
+| 4 | Text mode |
+| 5 | Keyboard strobe pending |
 
 ## Web front end
 
-`web/` is a React app that puts the //e's keyboard, its text screen and its
-hardware debugger in the browser, over the same USB serial link. With the board
-plugged into the machine running the browser it needs **nothing installed**:
-Web Serial opens the port, and the app is just a static bundle. Chrome or Edge,
-served over https or localhost.
+`web/` is a React app that puts the //e's keyboard, its text screen, the debugger and the disk drives in the browser, over the same USB serial link. It needs nothing installed: Web Serial opens the port, and the app is a static bundle (Chrome or Edge, over https or localhost).
 
 ```sh
 cd web && npm install && npm run build
 python3 -m http.server -d web/dist 8000   # http://localhost:8000
 ```
 
-To publish it: `cd web && npm run pages`, which builds without the Apple
-character ROM, checks that it really is not in there, and copies the result to
-`docs/`, which is the site's root. Commit that and set **Settings &rarr;
-Pages** to serve `/docs` from `main`; the site will be at
-`https://terenceang.github.io/Apple_TN20K/`.
+`cd web && npm run pages` builds it without the Apple character ROM, checks that it really is not in there, and copies it to `docs/`, the GitHub Pages root. Everything in `docs/` is published; the board documentation lives in `Documents/`. The screen is drawn from the same 2732 video ROM the FPGA reads, so a local build needs the ROM supplied first — see [`web/README.md`](web/README.md).
 
-`docs/` is entirely published, so nothing that should not be public goes there
-— the board documentation lives in `Documents/`.
+## Video and HDMI
 
-The app talks to the board over Web Serial directly, so it needs a
-Chromium-based browser and the board plugged into the machine it runs on.
-
-The screen is drawn from the same 2732 video ROM the FPGA reads, so it needs the
-ROM supplied first — see [`web/README.md`](web/README.md).
-
-## Requirements
-
-- Tang Nano 20K board
-- [Yosys](https://github.com/YosysHQ/yosys), [nextpnr-gowin](https://github.com/YosysHQ/nextpnr), [Apicula](https://github.com/YosysHQ/apicula) (`gowin_pack`)
-- [openFPGALoader](https://github.com/trabucayre/openFPGALoader)
-- [GNU make](https://www.gnu.org/software/make/) and Windows PowerShell 5.1, for the commands below. `make` is only the documented entry point — the build itself does not need it, since `scripts/build.ps1` and the OpenFPGA Deck both call the toolchain directly — but it is what every command here is spelled with. On Windows, GnuWin32 Make is enough: `winget install GnuWin32.Make`.
-- Apple //e ROM images. **These are not included**; see [`roms/README.md`](roms/README.md)
-
-## Building
-
-```sh
-make            # synthesize, place & route, pack => build/bitstream/Apple_TN20K.fs
-make synth      # yosys only (build/yosys/top.json)
-make pnr        # place & route only (build/pnr/top.pnr.json)
-make flash-sram # load into SRAM (lost on power cycle)
-make flash      # write to onboard flash (persistent)
-make clean
-```
-
-`make` is a thin wrapper around `scripts/build.ps1`, which is the single build implementation, so the Makefile and the **OpenFPGA Deck** extension produce the same netlist at the same paths. The RTL file list lives in `fpga.yaml`; add new source files there. `scripts/build.ps1` fails the build if the achieved Fmax falls below the 27 MHz target, and `constraints/top.sdc` is available for a stricter two-domain timing analysis.
-
-The Makefile sets `SHELL := cmd.exe`: its recipes are cmd.exe commands, and GNU make otherwise switches to POSIX `sh` if an `sh.exe` is on `PATH` (Git Bash or MSYS2 would add one), which breaks `make clean`. Place and route is allowed to warn, so read the nextpnr report after making changes.
-
-To keep the HDMI core honest, `scripts/hdmi_diff.ps1 -Check` verifies `src/hdmi/` still matches its recorded snapshot, and `-Upstream` reports what has changed in the TN20K-HDMI project since.
-
-```sh
-powershell -File sim\run.ps1    # run all testbenches with iverilog (~80 s; tb_top needs the ROMs)
-```
-
-If building with the **OpenFPGA Deck** extension in VS Code or `scripts/build.ps1` (which writes to `build\bitstream\Apple_TN20K.fs`), use the programming script:
-
-```powershell
-scripts\prog.ps1           # load Deck bitstream into SRAM (volatile)
-scripts\prog.ps1 -Flash    # write Deck bitstream to onboard flash (persistent)
-```
-
-You can also run the stages separately with `make synth` and `make pnr`. Timing failures are allowed in place & route, so check the nextpnr report after making changes.
-
-```sh
-sim/run.ps1      # run all testbenches with iverilog (~1 min; tb_top needs the ROMs)
-```
-
-HDMI audio needs a display that accepts HDMI audio (not a DVI-only input). Hold **S1** to switch the output to color bars and a 1 kHz tone, to check the HDMI link independently of the Apple core.
-
-## Using it
-
-1. Connect HDMI and USB-C, then flash the bitstream.
-2. Open a serial terminal on the board's UART at **1000000 8N1** (1 Mbps), for example `picocom -b 1000000 /dev/ttyUSB1`.
-3. Type to send keystrokes to the Apple //e. Text the machine prints through COUT is echoed back to the terminal.
-
-### Debugger
-
-Press **Ctrl+B** to pause the CPU and enter the debugger. Press it again to leave.
-
-| Key | Action                                         |
-|-----|------------------------------------------------|
-| `r` | Show CPU registers (PC, A, X, Y, SP, P, opcode) |
-| `s` | Single-step one instruction                    |
-| `c` | Continue execution (also `g`)                  |
-| `m` | Dump 16 bytes of memory                        |
-| `4` | Point the dump at $0400 (also `0 1 8 f v`)     |
-| `t` | Show hardware status (video mode, PLL lock)    |
-| `w` | Dump the text page, and the graphics page in mixed mode |
-| `h` | Help (also `?`)                                |
-| `x` | Reset the CPU and show the registers           |
-
-Commands are only read when the debugger is idle, so anything sent before the
-previous command has finished printing is dropped. The banner prints two
-prompts; neither one alone means it is ready. `web/` waits for 200 ms of
-silence instead, which is why its buttons are reliable.
-
-### Gamepad protocol
-
-The gamepad sends a 5-byte packet on the same UART: `FF 01 <buttons> <x> <y>`. Bits 0–2 of `<buttons>` map to PB0–PB2. `<x>` and `<y>` are paddle positions from 0 to 255.
-
-### LEDs
-
-| LED | Meaning                  |
-|-----|--------------------------|
-| 0   | Heartbeat                |
-| 1   | PLL locked               |
-| 2   | Running (out of reset)   |
-| 3   | CPU memory write         |
-| 4   | Text mode                |
-| 5   | Keyboard strobe pending  |
-
-## Video Programming to HDMI AV
-
-The Apple //e display pipeline is interfaced to the HDMI transmitter (`hdmi_tx`) in `src/hdmi/`, outputting standard CEA-861 720×480p @ 59.94 Hz (VIC 2) with embedded 48 kHz stereo audio.
-
-### Video Architecture & Centering
-
-The authentic Apple II display is 560×384 pixels, derived from 40 character columns (14 pixel clocks per column) and 192 Apple scanlines doubled to 384 lines. This active display is centered inside the standard 720×480 HDMI frame:
-
-- **Horizontal**: Active visible area from $X = 80 \dots 639$ (560 pixels wide). Columns $0 \dots 79$ and $640 \dots 719$ form the left and right borders (black).
-- **Vertical**: Active visible area from $Y = 48 \dots 431$ (384 lines high). Lines $0 \dots 47$ and $432 \dots 479$ form the top and bottom borders (black).
-- **VBL Flag**: Line $Y \ge 432$ asserts Apple II vertical blanking status ($C019 bit 7).
-
-### Interfacing & 1-Clock Lookahead Pipelining
-
-`hdmi_tx` drives the master raster counters `pixel_x` ($0 \dots 719$) and `pixel_y` ($0 \dots 479$), requesting the 24-bit `{R, G, B}` pixel value combinationally on the same clock cycle.
-
-Because [`video_generator.v`](src/video_generator.v) registers its output colors (`red`, `green`, `blue`) to achieve high Fmax, [`top.v`](src/top.v) supplies the **lookahead position** of the next pixel:
-- `h_cnt = pixel_x + 10'd1`
-- `v_cnt = pixel_y`
-
-The color computed during cycle $N$ for `h_cnt` appears at the registered output on cycle $N+1$, exactly aligned with `hdmi_tx`'s raster.
-
-```verilog
-video_generator u_video (
-    .clk_pixel  (clk_pixel),
-    .reset      (sys_reset),
-    .flash_clk  (flash_clk),
-    .h_cnt      (pixel_x + 10'd1),  // 1-pixel lookahead for registered RGB
-    .v_cnt      (pixel_y),
-    .text_mode  (text_mode),
-    .mixed_mode (mixed_mode),
-    .page2      (page2),
-    .hires_mode (hires_mode),
-    ...
-    .red        (vid_red),
-    .green      (vid_green),
-    .blue       (vid_blue),
-    .vbl        (vbl)
-);
-```
-
-### Memory & Prefetch Pipeline
-
-Each Apple II character column occupies 14 pixel clock cycles ($27\text{ MHz} / 14 \approx 1.928\text{ MHz}$):
-1. **Cycle 9**: `vram_req` asserts; `vram_addr` is presented using Apple II interleaved memory offsets ($0400–$07FF or Page 2 $0800–$0BFF).
-2. **Cycle 10**: VRAM serves the address.
-3. **Cycle 11**: Latch `vram_data` into `char_code`.
-4. **Cycle 12**: `char_rom_addr` presented to Character ROM based on ASCII code and `glyph_row` (with flash blink support).
-5. **Cycle 13**: Latch `char_rom_data` into `glyph_byte` and `char_code_display`.
-6. **Cycles 0–13**: Seven dot pairs (2 pixel clocks per dot) are sequentially rendered for text, mapped to the 16-color Lo-Res palette, or, in hi-res, decoded to colour (below).
-
-### Hi-Res (HGR)
-
-With `hires_mode` set (and the line not one of the mixed-mode text rows), the same prefetch fetches the HGR byte instead of a character code. `vram_addr` uses the hi-res interleave: page 1 at `$2000` or page 2 at `$4000`, eight lines `$400` apart, then the same 128-byte row groups and 40-byte group offset as text. The character ROM lookup is unused for these lines.
-
-One HGR byte is 7 dots, and each dot is 2 pixels of the 560-pixel raster, so a byte fills exactly one 14-pixel slot. Bit 7 is the palette/delay bit: a set bit shifts that byte's pixels right by one pixel, which is the half-dot delay of the real hardware.
-
-Colour comes from decoding the 560-sample dot stream the way an NTSC set does. One colour-subcarrier cycle is 4 samples, so each pixel looks at the window `s[n-2..n+1]`: luma is the number of lit samples, and chroma is `I = s@phase0 - s@phase2`, `Q = s@phase1 - s@phase3` with the phase of sample `m` being `m mod 4`. The window's look-ahead sample is the next byte, already latched at cycle 12. The channel weights are `R = 64Y + 80I`, `G = 64Y - 41I - 20Q`, `B = 64Y + 101Q` (clamped), which give violet `D043E5`, green `30BD1B`, blue `3095E5`, orange `D06B1B` and white for `1100`, `0011`, their delayed forms and `1111`. A `0101` dot pattern therefore fills solid, and colour edges fringe, as on a TV. This costs no block RAM.
-
-Mixed mode keeps the bottom four lines on the text page. Hi-res was checked on the board with page 1 mixed, page 1 full-screen, page 2, and lo-res and text as regressions; `sim/tb_video_hdmi.v` checks a whole page-2 mixed frame pixel by pixel against an independent model.
-
-### Full-Range RGB Quantization
-
-CEA-861 video modes (such as 720×480p) default to limited-range RGB ($16 \dots 235$), which would cause monitors and TVs to crush blacks and clip whites for Apple II colors. To ensure accurate color reproduction, `hdmi_tx` is instantiated with:
-
-```verilog
-hdmi_tx #(
-    .RGB_QUANT(2'b10)  // Full-range RGB (0..255)
-) u_hdmi ( ... );
-```
-
-This sets the Q1..Q0 flags in the AVI InfoFrame to Full Range, instructing the HDMI sink to accept $0 \dots 255$ levels without contrast compression.
-
-### HDMI Audio Integration & Clock Regeneration
-
-- **PCM Audio Stream**: Sound generated by the $C030 speaker toggle is captured by [`sound_generator.v`](src/sound_generator.v) as 16-bit signed PCM.
-- **Sample Rate Conversion**: A fractional accumulator resamples the audio from 46.875 kHz to 48.000 kHz (`VM_AUDIO_HZ = 48000`). Since $27\text{ MHz} / 48\text{ kHz} = 562.5$ clock cycles, the accumulator alternates sample intervals between 562 and 563 clock cycles.
-- **Data Islands**: `hdmi_tx` buffers the samples and transmits them as Audio Sample Packets (Layout 0, stereo) along with Audio Clock Regeneration (ACR) packets ($N = 6144, \text{CTS} = 27000$) during horizontal blanking.
-
-### Hardware Bring-Up & Test Pattern (Button S1)
-
-To isolate the HDMI physical link and serializer chain from the Apple core logic during testing:
-- Hold button **S1** to bypass the Apple framebuffer and switch the HDMI video and audio to [`colorbar_gen.v`](src/colorbar_gen.v) (SMPTE 8-color bars with a 1px border and blinking liveness indicator) accompanied by a 1 kHz test tone.
-- If the test pattern renders cleanly, the PLL, clock divider, TMDS encoders, OSER10 serializers, and TLVDS output buffers are verified.
+The 560×384 Apple raster (40 columns × 14 pixel clocks, 192 lines doubled) is centered in the 720×480 frame at x = 80..639, y = 48..431; lines from 432 on are vertical blanking ($C019). `hdmi_tx` owns the raster and asks for each pixel combinationally, and `video_generator.v` registers its colour output, so `top.v` feeds it the next pixel (`h_cnt = pixel_x + 1`). Hi-res colour comes from decoding the 560-sample dot stream the way an NTSC set does: each pixel looks at a 4-sample window, luma is the lit count and chroma comes from the sample phases, so a `0101` pattern fills solid and colour edges fringe. The AVI InfoFrame declares full-range RGB (`RGB_QUANT = 2'b10`) so a TV does not crush the Apple's blacks. Audio is resampled from the DAC's 46.875 kHz to 48 kHz and sent in HDMI data islands (ACR N = 6144, CTS = 27000).
 
 ## Project layout
 
 ```
-src/top.v               top level: wires everything together, LEDs, reset
-src/apple2_core.v       CPU, address decode, softswitches, language card
-src/apple2_mem.v        RAM and ROM block-RAM modules
-src/clk_gen.v           PLL (135 MHz TMDS) and 1 MHz / 14 MHz clock enables
-src/video_generator.v   Apple II raster into the 720x480 frame
-src/colorbar_gen.v      HDMI bring-up color bars (hold S1)
+src/top.v               top level: clocks, HDMI serializers, DDR3, TF card, LEDs, reset, loading screen colours
+src/apple2_core.v       CPU, address decode, softswitches, language card, slots, loading screen text
+src/apple2_mem.v        block-RAM RAM and ROMs
+src/aux_ram.v           aux RAM, language card, Disk II and hard-disk storage in DDR3
+src/video_generator.v   Apple raster into the 720x480 frame
 src/hdmi/               HDMI transmitter: timing, TMDS, data islands, audio/InfoFrame packets
-sim/                    iverilog testbenches (sim/run.ps1)
-src/sound_generator.v   speaker to I2S
+src/sound_generator.v   speaker and Mockingboard to the PT8211 DAC
+src/mockingboard/       Mockingboard C (two 6522 VIAs, two AY-3-8910s), slot 4
+src/disk2/              Disk II card and image store, slot 6
+src/prodos_hd.v         ProDOS block device, slot 7
+src/sd_vol.v            the TF card: finds the drives' files on FAT32, loads them, writes them back
 src/input_controller.v  UART RX, keyboard, gamepad, $C0xx input registers
-src/serial_debugger.v   UART TX, console mirror, hardware debugger, screen dump
+src/serial_debugger.v   UART TX, console mirror, hardware debugger
 src/cpu/                65C02 core
 constraints/top.cst     pin assignments
+sim/                    iverilog testbenches (sim/run.ps1)
 roms/                   ROM images (supply your own)
-scripts/                build, programming, verification and snapshot scripts
-web/                    React keyboard, screen and debugger (see web/README.md)
+scripts/                build, programming and snapshot scripts
+web/                    the browser front end (see web/README.md)
+Documents/              board documentation, memory architecture, design notes
 ```
 
 ## License
 
-[MIT](LICENSE) © 2026 Terence Ang.
+The version is in [`VERSION`](VERSION).
 
-The HDMI transmitter in `src/hdmi/` is a local copy of the one from the TN20K-HDMI project, taken at commit `388b39e` and differing only in `hdmi_tx`'s `RGB_QUANT` parameter. `scripts/hdmi_snapshot.sha256` records the snapshot and `scripts/hdmi_diff.ps1 -Check` fails if it is edited locally without being re-baselined; `-Upstream` reports what has changed in the other project since. The 65C02 core in `src/cpu/` is by Arlet Ottens, David Banks and Ed Spittles, and stays under its original permissive terms (see the file headers). Apple //e ROMs are copyright Apple and are not part of this project.
+[MIT](LICENSE) © 2026 Terence Ang / motionfxdesign.
+
+The HDMI transmitter in `src/hdmi/` is a local copy of the one from the TN20K-HDMI project, taken at commit `388b39e` and differing only in `hdmi_tx`'s `RGB_QUANT` parameter. The 65C02 core in `src/cpu/` is by Arlet Ottens, David Banks and Ed Spittles, and stays under its original permissive terms (see the file headers). The DDR3 controller in `src/ddr3_memory_interface/` is Gowin's generated IP netlist, taken from Sipeed's BSD-3-Clause TangPrimer-20K-example (see its README). Apple //e ROMs are copyright Apple and are not part of this project.

@@ -1,4 +1,4 @@
-// Apple //e Video Display Generator for Tang Nano 20K
+// Apple //e Video Display Generator for Tang Primer 20K
 // Formats 560x384 Apple II raster into standard CEA-861 720x480 @ 60Hz HDMI frame
 //
 // Raster timing, sync and blanking belong to hdmi_tx, which asks for each

@@ -1,4 +1,4 @@
-// Apple //e on Tang Nano 20K - Clock Generator
+// Apple //e on Tang Primer 20K - Clock Generator
 // Generates 135 MHz TMDS clock, 27 MHz pixel clock, and 1.023 MHz CPU clock enable
 
 module clk_gen (

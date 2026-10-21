@@ -15,12 +15,6 @@ module top (
     input  wire       uart_rx,    // T13
     output wire       uart_tx,    // M11
 
-    // SPI link to the ESP32 companion (PMOD J5 pins 5-8, see src/spi_ctl.v)
-    output wire       spi_sck,    // L9
-    output wire       spi_mosi,   // N8
-    input  wire       spi_miso,   // N9
-    output wire       spi_cs_n,   // N7
-
     // TF card on the SOM (J2), SPI mode: the slot 7 hard disk's volumes (src/sd_vol.v)
     output wire       sd_clk,     // N10 SDIO_CLK
     output wire       sd_mosi,    // R14 SDIO_CMD
@@ -368,12 +362,7 @@ module top (
         .r_take(sd_r_take), .r_done(sd_r_done), .r_ok(sd_r_ok)
     );
 
-    // 1 = Disk II images come from the ESP32 over SPI (nibble tracks, src/spi_ctl.v);
-    // 0 = the sector card fed by the debugger's d/e upload.
-    localparam DSK_TRK = 1'b0;
-
-    apple2_core #(.DSK_TRK(DSK_TRK)) u_core (
-        .spi_sck(spi_sck), .spi_mosi(spi_mosi), .spi_miso(spi_miso), .spi_cs_n(spi_cs_n),
+    apple2_core u_core (
         .clk(clk_pixel),
         .reset(sys_reset | cpu_reset_req | kbd_reset),
         .ce_1m(ce_1m),

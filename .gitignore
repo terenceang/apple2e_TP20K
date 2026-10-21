@@ -39,3 +39,12 @@ __pycache__/
 /impl/
 /*.gprj
 *.gprj.user
+
+# Logs
+*.log
+
+# AI tooling artifacts (kept local, never committed)
+CLAUDE.md
+.claude/
+.agents/
+.jules/

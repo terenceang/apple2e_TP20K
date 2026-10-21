@@ -1,4 +1,4 @@
-// HDMI bring-up test pattern generator for Tang Nano 20K
+// HDMI bring-up test pattern generator for Tang Primer 20K
 //
 // Generates a standard 8-bar color pattern for hdmi_tx's 720x480p60 raster,
 // with no dependency on the CPU, RAM or video_generator. Used to isolate the
