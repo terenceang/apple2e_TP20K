@@ -126,13 +126,10 @@ export interface DriveState {
 }
 
 export interface DiskProgress {
-  drive: 1 | 2 | 7 // 7: a copy into a TF card slot
+  drive: 1 | 2 | 7 // 7: the TF card
   phase: 'uploading' | 'downloading'
   percent: number
   detail: string
-  slot?: number
-  blocks?: number
-  totalBlocks?: number
 }
 
 const MAX_LINES = 4000

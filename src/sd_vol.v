@@ -237,7 +237,8 @@ module sd_vol #(
     // requests waiting
     reg        wb_req = 1'b0, wb_d = 1'b0, x_req = 1'b0, r_req = 1'b0;
     reg [15:0] wb_b = 16'd0;
-    reg [1:0]  rl_d = 2'd0;
+    reg [3:0]  rl_req = 4'd0;           // drives to reload
+    reg [1:0]  rl_d = 2'd0;             // ...the one being looked at
     reg        ej_pend = 1'b0;          // pulse f_up_bad next clock (f_up_drive is set)
     // floppy write-back
     reg [34:0] dirty0 = 0, dirty1 = 0;
@@ -250,7 +251,6 @@ module sd_vol #(
     reg [2:0]  fw_j = 3'd0;
     wire [34:0] dsel   = fs_drv ? dirty1 : dirty0;
     wire        fs_hit = dsel[fs_trk];
-    reg  [3:0]  rl_req = 4'd0;
     // a reload waits for its drive's tracks; otherwise ~1 s after the last write
     wire        fs_go  = fs_hit && (rl_req[fs_drv] || (quiet_up && !bg_hold));
 

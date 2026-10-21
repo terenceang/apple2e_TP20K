@@ -29,7 +29,7 @@ export function fitsDrive(file, d) {
 }
 
 /** A file the page lists: a disk image of some kind, not the config or a directory. */
-export const isImage = (f) => !f.dir && f.name.toUpperCase() !== CONFIG_NAME && (fitsDrive(f, 0) || fitsDrive(f, 2))
+const isImage = (f) => !f.dir && f.name.toUpperCase() !== CONFIG_NAME && (fitsDrive(f, 0) || fitsDrive(f, 2))
 
 /**
  * What to store for an uploaded file: the bytes, and the name (a .2mg becomes

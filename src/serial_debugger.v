@@ -500,7 +500,7 @@ module serial_debugger (
     reg [3:0]  rd_n      = 4'd0;         // ...and after 'b' (8 of LBA, 4 of count)
     reg        r_fin     = 1'b0;         // the b read has ended (its last byte may still be out)
 
-    // The q copy.  The card writes far faster than 1Mbps brings bytes, so a
+    // The u write.  The card writes far faster than 1Mbps brings bytes, so a
     // byte goes to sd_vol as soon as it arrives and nothing is buffered.
     localparam [2:0] X_TAG = 3'd0, X_CHI = 3'd1, X_CLO = 3'd2, X_DATA = 3'd3,
                      X_ZGO = 3'd4, X_WAIT = 3'd5;
@@ -926,7 +926,7 @@ module serial_debugger (
 
                 // Any of the six preset addresses above starts a dump; "m"
                 // reuses the last address. Only the address differs.
-                // (not a digit that belongs to d/e, @, n, y or q)
+                // (not a digit that belongs to d/e, @, n, y, u or b)
                 if (mem_preset && !img_cmd && !ej_cmd && adr_n == 3'd0 &&
                     !mnt_n && q_n == 4'd0 && rd_n == 4'd0) begin
                     main_state <= M_MEM;

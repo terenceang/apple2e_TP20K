@@ -510,8 +510,7 @@ button.opt-pill.selected {
   margin: 6px 0 0;
 }
 
-.screen-fallback,
-.screen-text pre {
+.screen-fallback {
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.25;
@@ -521,13 +520,6 @@ button.opt-pill.selected {
   border-radius: 4px;
   overflow: auto;
   margin: 6px 0 0;
-}
-
-.screen-text summary {
-  cursor: pointer;
-  font-size: 11px;
-  color: var(--dim);
-  margin-top: 6px;
 }
 
 /* --- debugger ------------------------------------------------------------ */

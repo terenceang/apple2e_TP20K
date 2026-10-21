@@ -388,9 +388,6 @@ export const HD_MAX_BLOCKS = 65536
 //  The TF card: drive images as files on FAT32 (src/sd_vol.v, src/fat32.js)
 // ============================================================================
 
-/** Drives as the debugger's y and the S: status number them: S6D1 S6D2 S7D1 S7D2. */
-export const CARD_DRIVES = ['S6D1', 'S6D2', 'S7D1', 'S7D2']
-
 /**
  * @typedef {{
  *   present: boolean[],
@@ -400,7 +397,7 @@ export const CARD_DRIVES = ['S6D1', 'S6D2', 'S7D1', 'S7D2']
  *   loading: boolean,
  *   error: number | null,
  * }} CardStatus
- * Per drive (CARD_DRIVES order): `present` it holds its file, `fail` the config
+ * Per drive (config.js DRIVES order: S6D1 S6D2 S7D1 S7D2): `present` it holds its file, `fail` the config
  * names a file that cannot be used (missing, fragmented, wrong size).  `error`
  * is the card command that failed (sd_vol.v estage) or null.
  */
@@ -447,7 +444,7 @@ export async function queryCardStatus(link, opts = {}) {
 }
 
 /**
- * Reload drive `drive` (1-4, CARD_DRIVES order) from A2CONFIG.TXT with the
+ * Reload drive `drive` (1-4: S6D1 S6D2 S7D1 S7D2) from A2CONFIG.TXT with the
  * debugger's `y`, then wait for the load: a whole 32 MB volume takes ~30 s.
  *
  * @param {{ write: (b: Uint8Array | number[]) => void, onBytes: (b: Uint8Array) => void }} link
