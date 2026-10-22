@@ -10,7 +10,7 @@ This project's code was written with AI assistance.
 - **128 KB**: 48 KB main RAM and the 16 KB ROM in block RAM; the aux 64 KB and the language card in the SOM's DDR3
 - **HDMI video** at 720×480p60 (CEA-861 VIC 2), with the 560×384 Apple display centered: text (40 and 80 column, MouseText), lo-res, hi-res and double hi-res, mixed mode and page 2; colour is an NTSC-style decode of the dot stream, so fills, fringes and the palette bit look as they do on a TV
 - **Audio** from the $C030 speaker and a **Mockingboard C** in slot 4, over HDMI (48 kHz L-PCM) and through the Dock's PT8211 DAC and amplifier to the 3.5 mm jack
-- **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes, also answering as a SmartPort), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files
+- **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes, also answering as a SmartPort), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files. Floppy emulation includes 74LS123 motor spin-down timing and flux dynamics for fast, accurate DOS 3.3 and ProDOS loading
 - **Clock** in slot 5 that ProDOS uses as a Thunderclock, so files get dated; the web page sets the time when it connects (there is no battery, so it is lost at power-off)
 - **Keyboard, gamepad and debugger over USB serial** at 1 Mbps; the [browser front end](web/README.md) in `web/` has the keyboard, the text screen, the debugger and the disk drives
 - **Built-in hardware debugger**: Ctrl+B freezes the CPU to inspect registers, single-step and dump memory
@@ -74,6 +74,10 @@ The TF card commands the web page uses (`b u y`) are described in [`web/README.m
 ### The TF card
 
 An ordinary FAT32 card, readable on any PC. Images go in the root directory; `A2CONFIG.TXT` there names each drive's file by its 8.3 name (`S6D1=LODERU~1.DSK`), and the web page writes it for you. The FPGA has no file system of its own: at power-on it finds the config and the four files by name, checks each is in one piece on the card and of the right size, and streams the floppies in. Hard-disk volumes stay on the card: each block is read when ProDOS asks for it, and the last one read or written is remembered. A file that is missing, fragmented or the wrong kind leaves its drive empty, and the page says why. Slot 6 takes 143,360-byte `.dsk`/`.do`/`.po` images; slot 7 takes `.hdv`/`.po` volumes up to 32 MB (a `.dsk` is in DOS sector order, so it cannot be a ProDOS block device).
+
+### Disk II floppy and hard-disk timing
+
+Disk II floppy emulation accurately models the controller's 74LS123 motor-off one-shot timer (~1.0 s spin-down delay) and flux transition dynamics on data reads. This allows Apple DOS 3.3 and RWTS to detect a spinning drive and stream sectors at full native speed (cold boot to DOS prompt in ~1.2 s, full DOS 3.3 System Master boot with `HELLO`/`INTBASIC` in ~14.5 s) without incurring repeated 1-second motor spin-up delays between sectors.
 
 Estimated hard-disk timing per 512-byte block (from the design, not yet measured on hardware):
 

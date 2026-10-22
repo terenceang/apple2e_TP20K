@@ -132,8 +132,8 @@ module tb_p6boot;
         dut.u_cpu.AXYS[3] = 8'hFF;
         #200 @(posedge clk) reset = 1'b0;
         // the drive holds an image, as an upload would leave it
-        dut.g_sector.u_disk2_store.present[0]    = 1'b1;
-        dut.g_sector.u_disk2_store.writable_q[0] = 1'b1;
+        dut.u_disk2_store.present[0]    = 1'b1;
+        dut.u_disk2_store.writable_q[0] = 1'b1;
     end
 
     // Boot sector: track 0, sector 0, is the first 256 bytes of the physical image.

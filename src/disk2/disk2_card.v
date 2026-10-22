@@ -146,6 +146,8 @@ module disk2_card (
     // Drive state: which drive, is the motor on, where is the head
     // ------------------------------------------------------------------
     reg        motor_q = 1'b0;
+    reg [19:0] motor_timer = 20'd0;    // ~1-second motor spin-down timer (74LS123 one-shot)
+    wire       motor_running = motor_q || (motor_timer != 20'd0);
     reg        drive_q = 1'b0;      // 0 = drive 1
     reg [7:0]  head_q  = 8'd0;     // the track under the head, 0..34
     reg        wr_mode_q = 1'b0;   // Q7: the read/write mode select
@@ -185,18 +187,25 @@ module disk2_card (
 
     always @(posedge clk or posedge reset) begin
         if (reset) begin
-            motor_q   <= 1'b0;
-            drive_q   <= 1'b0;
-            head_q    <= 8'd0;
-            ph_mask   <= 4'd0;
-            ph_cur    <= 2'd0;
-            half_q    <= 7'd0;
-        end else if (bus_cycle) begin
-            if (motor_off)     motor_q <= 1'b0;
-            else if (motor_on) motor_q <= 1'b1;
-            if (drive1)        drive_q <= 1'b0;
-            else if (drive2)   drive_q <= 1'b1;
-            if (phase_hit) begin
+            motor_q     <= 1'b0;
+            motor_timer <= 20'd0;
+            drive_q     <= 1'b0;
+            head_q      <= 8'd0;
+            ph_mask     <= 4'd0;
+            ph_cur      <= 2'd0;
+            half_q      <= 7'd0;
+        end else begin
+            if (bus_cycle) begin
+                if (motor_off) begin
+                    motor_q     <= 1'b0;
+                    motor_timer <= 20'd1000000;   // 1.0 second motor spin-down
+                end else if (motor_on) begin
+                    motor_q     <= 1'b1;
+                    motor_timer <= 20'd0;
+                end
+                if (drive1)        drive_q <= 1'b0;
+                else if (drive2)   drive_q <= 1'b1;
+                if (phase_hit) begin
                 ph_mask <= mask_nx;
                 if (io_a[0] && pull_up && !pull_dn) begin
                     ph_cur <= ph_cur + 2'd1;
@@ -211,6 +220,10 @@ module disk2_card (
                         head_q <= {1'b0, half_q - 7'd1} >> 1;
                     end
                 end
+            end
+            end
+            if (motor_timer != 20'd0 && ce_1m) begin
+                motor_timer <= motor_timer - 1'b1;
             end
         end
     end
@@ -466,7 +479,7 @@ module disk2_card (
             if (q6l_sel && cpu_we) wr_latch <= cpu_di;  // preload a write byte
 
             // The stream advances on the shift tick while the motor is on...
-            if (motor_q && ce_1m) begin
+            if (!wr_mode_q && motor_running && ce_1m) begin
                 if (shift_cnt >= SHIFT_CLKS - 1) begin
                     shift_cnt <= 6'd0;
                     rdy_q     <= 1'b1;          // a new byte is under the head
@@ -509,7 +522,9 @@ module disk2_card (
     // In write mode a read gives the same.
     wire wr_protected = !store_drv_writable[drive_q];
     wire sense_wp     = wr_mode_q || q6_q;
-    wire [7:0] rd_byte = byte_ok ? synth_byte : {1'b0, synth_byte[6:0]};
+    wire [7:0] rd_byte = byte_ok ? synth_byte :
+                         (motor_running ? {1'b0, synth_byte[6:1], shift_cnt[1]} :
+                                          {1'b0, synth_byte[6:0]});
     wire [7:0] data_rd = sense_wp ? (wr_protected ? 8'h80 : 8'h00) : rd_byte;
 
     // What the card drives onto $C0E0-$C0EF: the data register at Q6L and Q6,
