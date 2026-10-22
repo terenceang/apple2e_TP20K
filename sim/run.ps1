@@ -95,13 +95,14 @@ if (-not (Test-Path -LiteralPath (Join-Path $root 'roms\disk2_p6.hex'))) {
 }
 
 # What apple2_core instantiates, hand-made: the core, the CPU, the slot bus, the
-# memory, the slot-6 card, the slot-4 Mockingboard card and the slot-7 hard disk.  tb_cpu_trace and
+# memory, the slot-6 card, the slot-4 Mockingboard card, the slot-2 SoftCard and the slot-7 hard disk.  tb_cpu_trace and
 # tb_auxsw both elaborate apple2_core, so both need the cards with it; tb_disk2
 # drives the card on its own and does not want the core.
 $disk2 = @('src/disk2/disk2_card.v', 'src/disk2/disk2_store.v')
 $mockingboard = @('src/mockingboard/mockingboard_card.v', 'src/mockingboard/via6522.v', 'src/mockingboard/ay8910.v')
+$softcard = @('src/softcard.v', 'src/z80/tv80_core.v', 'src/z80/tv80_alu.v', 'src/z80/tv80_mcode.v', 'src/z80/tv80_reg.v')
 $core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v',
-           'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v', 'src/thunderclock.v') + $disk2 + $mockingboard
+           'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v', 'src/thunderclock.v') + $disk2 + $mockingboard + $softcard
 Run-Tb 'tb_thunderclock' @('src/thunderclock.v')
 # slot 7's firmware: the included .vh must match src/prodos_hd_rom.s, and the
 # firmware is run against a model of its registers (py65; the system Python,
@@ -132,6 +133,7 @@ Run-Tb 'tb_p6boot'       $core -Gen '2012' -Defines $disk2Defines
 
 Run-Tb 'tb_aux_ram'     @('sim/models/ddr3_model.v', 'src/aux_ram.v') -Gen '2012'
 Run-Tb 'tb_auxstress'   (@('sim/models/ddr3_model.v', 'src/aux_ram.v', 'src/video_generator.v') + $core) -Gen '2012' -Defines $disk2Defines
+Run-Tb 'tb_softcard'    (@('sim/models/ddr3_model.v', 'src/aux_ram.v', 'src/video_generator.v') + $core) -Gen '2012' -Defines $disk2Defines
 
 # The DDR3 IP is encrypted; sim/models/ddr3_model.v stands in for it.
 $allSources = & (Join-Path $root 'scripts\sources.ps1') -Except 'src/ddr3_memory_interface/ddr3_memory_interface.v'

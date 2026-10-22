@@ -1,6 +1,7 @@
 // Apple //e Core Logic for Tang Primer 20K
 // Integrates the 65C02, main RAM, the system and character ROMs, the softswitches
-// and the slot cards (Mockingboard 4, Disk II 6, ProDOS hard disk 7)
+// and the slot cards (Z-80 SoftCard 2, Mockingboard 4, clock 5, Disk II 6,
+// ProDOS hard disk 7)
 
 module apple2_core (
     input  wire        clk,           // 27.0 MHz
@@ -126,11 +127,18 @@ module apple2_core (
     output wire [7:0]  debug_cpu_ir
 );
 
-    // CPU Signals
-    wire [15:0] cpu_addr;
-    wire [7:0]  cpu_dout;
+    // CPU Signals.  cpu_addr/cpu_dout/cpu_we are the bus, driven by the 65C02
+    // or, while the SoftCard has it (z80_on), by the Z80 (src/softcard.v).
+    wire [15:0] c02_addr;
+    wire [7:0]  c02_dout;
+    wire        c02_we;
+    wire        z80_on, z_cen, z_go, z_we;
+    wire [15:0] z_addr;
+    wire [7:0]  z_dout;
+    wire [15:0] cpu_addr = z80_on ? z_addr : c02_addr;
+    wire [7:0]  cpu_dout = z80_on ? z_dout : c02_dout;
+    wire        cpu_we   = z80_on ? z_we   : c02_we;
     reg  [7:0]  cpu_din;
-    wire        cpu_we;
     wire        cpu_sync;
 
     // Video-CPU memory conflict prevention:
@@ -192,10 +200,14 @@ module apple2_core (
 
     // A CPU cycle that really happens: while the debugger holds RDY low the
     // enable keeps ticking, and side effects must not replay on each tick.
-    wire cpu_go = cpu_ce && cpu_rdy;
+    // cpu_go is a bus step by either CPU: the 65C02's (c02_go) or a Z80
+    // memory cycle (z_go).  Every Z80 T-state (z_cen) counts as a step for
+    // aux_fresh, since its address and write flag change on any of them.
+    wire c02_go = cpu_ce && cpu_rdy && !z80_on;
+    wire cpu_go = c02_go || z_go;
     always @(posedge clk) begin
         aux_stall_q <= aux_stall;
-        cpu_go_q    <= cpu_go;
+        cpu_go_q    <= c02_go || z_cen;
         cpu_go_q2   <= cpu_go_q;
         vram_req_d2 <= vram_req_d;
         rdy_q       <= cpu_rdy;
@@ -227,22 +239,22 @@ module apple2_core (
     assign io_read  = cpu_go && !cpu_we && addr_is_c0;
     assign io_write = cpu_go &&  cpu_we && addr_is_c0;
 
-    assign debug_cpu_addr = cpu_addr;
-    assign debug_cpu_dout = cpu_dout;
-    assign debug_cpu_we   = cpu_we;
+    assign debug_cpu_addr = c02_addr;
+    assign debug_cpu_dout = c02_dout;
+    assign debug_cpu_we   = c02_we;
     assign debug_cpu_sync = cpu_sync;
 
     // 65C02 CPU Core
     cpu_65c02 u_cpu (
         .clk(clk),
         .reset(reset),
-        .AB(cpu_addr),
+        .AB(c02_addr),
         .DI(cpu_din),
-        .DO(cpu_dout),
-        .WE(cpu_we),
+        .DO(c02_dout),
+        .WE(c02_we),
         .IRQ((~slot_irq_n) | (~mock_irq_n)),   // Active-high IRQ into 65C02 (core active-high, bus active-low)
         .NMI(~slot_nmi_n),
-        .RDY(cpu_go),
+        .RDY(c02_go),
         .SYNC(cpu_sync),
         .debug_a(debug_cpu_a),
         .debug_x(debug_cpu_x),
@@ -609,6 +621,27 @@ module apple2_core (
     end
 
     assign dbg_mem_din = (!cpu_rdy) ? cpu_din_comb : cpu_din;
+
+    // ------------------------------------------------------------------
+    // Microsoft Z-80 SoftCard, slot 2: a second bus master, no ROM
+    // ------------------------------------------------------------------
+    softcard u_softcard (
+        .clk(clk),
+        .reset(reset),
+        .cpu_rdy(cpu_rdy),
+        .video_busy(video_busy),
+        .intcxrom(intcxrom),
+        .bus_go(cpu_go),
+        .bus_we(cpu_we),
+        .bus_addr(cpu_addr),
+        .bus_din(cpu_din_comb),
+        .z80_on(z80_on),
+        .z_cen(z_cen),
+        .z_go(z_go),
+        .z_addr(z_addr),
+        .z_we(z_we),
+        .z_dout(z_dout)
+    );
 
     // ------------------------------------------------------------------
     // Disk ][ controller card, slot 6

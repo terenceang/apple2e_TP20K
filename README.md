@@ -12,6 +12,7 @@ This project's code was written with AI assistance.
 - **Audio** from the $C030 speaker and a **Mockingboard C** in slot 4, over HDMI (48 kHz L-PCM) and through the Dock's PT8211 DAC and amplifier to the 3.5 mm jack
 - **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes, also answering as a SmartPort), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files. Floppy emulation includes 74LS123 motor spin-down timing and flux dynamics for fast, accurate DOS 3.3 and ProDOS loading
 - **Clock** in slot 5 that ProDOS uses as a Thunderclock, so files get dated; the web page sets the time when it connects (there is no battery, so it is lost at power-off)
+- **Z-80 SoftCard** in slot 2 (Microsoft's, at its 2.045 MHz), for Apple CP/M; the Z80 takes the bus over from the 6502 as on the real card
 - **Keyboard, gamepad and debugger over USB serial** at 1 Mbps; the [browser front end](web/README.md) in `web/` has the keyboard, the text screen, the debugger and the disk drives
 - **Built-in hardware debugger**: Ctrl+B freezes the CPU to inspect registers, single-step and dump memory
 
@@ -137,6 +138,7 @@ src/disk2/              Disk II card and image store, slot 6
 src/prodos_hd.v         ProDOS block device and SmartPort, slot 7
 src/prodos_hd_rom.s     its firmware, 6502 source (scripts/hdrom.py assembles it)
 src/thunderclock.v      clock card ProDOS takes for a Thunderclock, slot 5
+src/softcard.v         Microsoft Z-80 SoftCard, slot 2 (Z80 core in src/z80/)
 src/sd_vol.v            the TF card: finds the drives' files on FAT32, loads them, writes them back
 src/input_controller.v  UART RX, keyboard, gamepad, $C0xx input registers
 src/serial_debugger.v   UART TX, console mirror, hardware debugger
@@ -157,6 +159,7 @@ This project uses work by others, with thanks:
 |------|-------|----|-------|
 | 6502 CPU core | `src/cpu/` | Arlet Ottens ([verilog-6502](https://github.com/Arlet/verilog-6502)) | keep the copyright notice (in the file headers) |
 | 65C02 extensions to it | `src/cpu/` | David Banks and Ed Spittles ([hoglet67/verilog-6502](https://github.com/hoglet67/verilog-6502)) | as above |
+| Z80 CPU core (TV80) | `src/z80/` | Guy Hutchison ([hutch31/tv80](https://github.com/hutch31/tv80)), after Daniel Wallner's T80 | MIT, [`LICENSE`](src/z80/LICENSE) there |
 | DDR3 Memory Interface IP (encrypted netlist) | `src/ddr3_memory_interface/` | Gowin Semiconductor, via Sipeed's [TangPrimer-20K-example](https://github.com/sipeed/TangPrimer-20K-example) (© 2022 LAKKA) | BSD-3-Clause, [`LICENSE`](src/ddr3_memory_interface/LICENSE) there |
 | HDMI transmitter | `src/hdmi/` | the author's own TN20K-HDMI project, snapshot at `388b39e` | MIT |
 | React | bundled in the web page | Meta Platforms, Inc. | MIT; the published page carries `LICENSES.md` |

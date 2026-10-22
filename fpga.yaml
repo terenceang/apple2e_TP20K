@@ -6,6 +6,11 @@ top: top
 sources:
   - src/cpu/ALU.v
   - src/cpu/cpu_65c02.v
+  - src/z80/tv80_alu.v
+  - src/z80/tv80_mcode.v
+  - src/z80/tv80_reg.v
+  - src/z80/tv80_core.v
+  - src/softcard.v
   - src/clk_gen.v
   - src/apple2_mem.v
   - src/ddr3_memory_interface/ddr3_memory_interface.v   # Gowin DDR3 IP, see its README
