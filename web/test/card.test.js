@@ -17,7 +17,7 @@ const fast = { pollMs: 1 }
 
 test('parseCardStatus reads S:ssss', () => {
   // S6D1 and S7D1 present, S6D2 and S7D2 failed, FAT32
-  assert.deepEqual(parseCardStatus('I1:00000000 I2:00000000 H:00 S:02A5'), {
+  assert.deepEqual(parseCardStatus('H:00 S:02A5'), {
     present: [true, false, true, false], fail: [false, true, false, true],
     fsOk: true, busy: false, loading: false, error: null,
   })
@@ -26,7 +26,7 @@ test('parseCardStatus reads S:ssss', () => {
     present: [false, false, false, false], fail: [false, false, false, false],
     fsOk: false, busy: true, loading: true, error: 6,
   })
-  assert.equal(parseCardStatus('I1:00000000 I2:00000000 H:00'), null)
+  assert.equal(parseCardStatus('H:00'), null)
 })
 
 test('readSectors and writeSectors frame b and u, zero runs included', async () => {

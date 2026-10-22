@@ -143,12 +143,8 @@ export default function App() {
           <div className="col-left">
             {showDisks && (
               <DiskPane
-                drives={apple.drives}
                 progress={apple.diskProgress}
                 error={apple.diskError}
-                onUpload={apple.uploadDiskFile}
-                onDownload={apple.downloadDiskFile}
-                onEject={apple.ejectDisk}
                 card={apple.card}
                 cardBusy={apple.cardBusy}
                 onCardRefresh={apple.refreshCard}

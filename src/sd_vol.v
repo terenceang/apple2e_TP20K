@@ -91,7 +91,6 @@ module sd_vol #(
     input  wire        fl_wr,          // a data field is being written...
     input  wire        fl_wr_drv,      // ...on this drive and track
     input  wire [5:0]  fl_wr_trk,
-    input  wire [1:0]  fl_detach,      // the debugger put its own image in a drive
     input  wire        bg_hold,        // no background write-back now
 
     output reg  [3:0]  present,        // a drive holds its file (slot 6 1-2, slot 7 1-2)
@@ -212,9 +211,6 @@ module sd_vol #(
     reg [7:0]  spc = 1, nfats = 2, ptype = 0;
     reg [2:0]  spc_log = 0;
     reg        vchk = 1'b0;             // "FAT32" at 0x52 of the sector
-    function [31:0] clus_lba(input [31:0] c);
-        clus_lba = data_lba + ((c - 32'd2) << spc_log);
-    endfunction
 
     // the lookup
     reg [3:0]  lk = L_MBR;
@@ -231,7 +227,8 @@ module sd_vol #(
     reg [31:0] fsize [0:4];
     reg [4:0]  mt = 5'd0;               // the entry being read still matches
     reg [31:0] ec = 0, es = 0;          // the entry's cluster and size so far
-    reg [31:0] c0 = 0, clast = 0, ent = 0;
+    reg [27:0] c0 = 0, clast = 0;      // a file's first and last cluster
+    reg [31:0] ent = 0;
     reg        walk_ok = 1'b0;
     reg [31:0] fstart [0:3];
     reg [16:0] fnsec [0:3];
@@ -281,6 +278,11 @@ module sd_vol #(
     assign busy    = st != IDLE || lk != L_IDLE || jdone || wb_req || rb_req || x_req || r_req ||
                      fw_active || rl_req != 4'd0;
 
+    // A cluster's first sector.  One shifter and adder for the three places
+    // that need it, which are never in the same lookup step: the directory
+    // (L_DIR), the config file (L_DIRDONE) and a drive's file (L_WALK's end).
+    wire [27:0] cl_in  = lk == L_WALK ? c0 : lk == L_DIRDONE ? fclus[4][27:0] : dclus[27:0];
+    wire [31:0] cl_lba = data_lba + ({4'd0, cl_in - 28'd2} << spc_log);
     wire        hd_in  = present[{1'b1, hd_d}] && {1'b0, hd_b} < fnsec[{1'b1, hd_d}];
     assign hd_size0 = fnsec[2][16] ? 16'hFFFF : fnsec[2][15:0];
     assign hd_size1 = fnsec[3][16] ? 16'hFFFF : fnsec[3][15:0];
@@ -362,11 +364,6 @@ module sd_vol #(
                 if (fl_wr_drv) dirty1[fl_wr_trk] <= 1'b1; else dirty0[fl_wr_trk] <= 1'b1;
             end
         end else if (!quiet_up) quiet <= quiet + 1'b1;
-        for (i = 0; i < 2; i = i + 1)
-            if (fl_detach[i]) begin
-                present[i] <= 1'b0; fail[i] <= 1'b0;
-                if (i == 1) dirty1 <= 0; else dirty0 <= 0;
-            end
 
         if (reset) begin
             st <= PWR; pcnt <= 0; fast <= 1'b0; sx <= 1'b0; got <= 1'b0; tries <= 0;
@@ -467,8 +464,8 @@ module sd_vol #(
                           T_FAT1: if (bcnt[8:2] == dclus[6:0]) nxt <= {rxv, nxt[31:8]};
                           T_FATW: begin
                               ent <= {rxv, ent[31:8]};
-                              if (bcnt[1:0] == 2'd3 && cur_cl >= c0[27:0] && cur_cl <= clast[27:0]) begin
-                                  if (cur_cl == clast[27:0]) begin
+                              if (bcnt[1:0] == 2'd3 && cur_cl >= c0 && cur_cl <= clast) begin
+                                  if (cur_cl == clast) begin
                                       if (v_ent[27:0] < 28'hFFFFFF8) walk_ok <= 1'b0;
                                   end else if (v_ent[27:0] != cur_cl + 1'b1) walk_ok <= 1'b0;
                               end
@@ -616,7 +613,7 @@ module sd_vol #(
                                 L_WALK:
                                     if (!walk_ok) begin fail[k] <= 1'b1; lk <= L_NEXT; end
                                     else begin
-                                        fstart[k] <= clus_lba(c0);
+                                        fstart[k] <= cl_lba;
                                         fnsec[k]  <= fsize[k][25:9];
                                         if (!k[1]) fdos[k[0]] <= nm[k][23:0] != "PO ";
                                         lk <= L_DDR;
@@ -632,14 +629,14 @@ module sd_vol #(
                     if (!lk_wait) case (lk)
                         L_MBR: begin lk_wait <= 1'b1; vchk <= 1'b0; rd(32'd0, 16'd0, T_MBR, J_LK); end
                         L_VBR: begin lk_wait <= 1'b1; vchk <= 1'b0; rd(part, 16'd0, T_VBR, J_LK); end
-                        L_DIR: begin lk_wait <= 1'b1; rd(clus_lba(dclus), {8'd0, spc} - 16'd1, T_DIR, J_LK); end
+                        L_DIR: begin lk_wait <= 1'b1; rd(cl_lba, {8'd0, spc} - 16'd1, T_DIR, J_LK); end
                         L_DIRF: begin lk_wait <= 1'b1; rd(fat_lba + {11'd0, dclus[27:7]}, 16'd0, T_FAT1, J_LK); end
                         L_DIRDONE:
                             if (!pass && found[4]) begin
                                 lk <= L_CFG; lk_wait <= 1'b1;
                                 ps <= P_K0; has <= 4'd0;
                                 for (i = 0; i < 4; i = i + 1) nm[i] <= SPACES;
-                                rd(clus_lba(fclus[4]), 16'd0, T_CFG, J_LK);
+                                rd(cl_lba, 16'd0, T_CFG, J_LK);
                             end else begin
                                 if (!pass) has <= 4'd0;   // no config: every drive empty
                                 k <= 2'd0; lk <= L_DRV;
@@ -656,10 +653,11 @@ module sd_vol #(
                                                !(nm[k][23:0] == "HDV" || nm[k][23:0] == "PO ")))) begin
                                 fail[k] <= 1'b1; lk <= L_NEXT;
                             end else begin
-                                c0 <= fclus[k];
+                                c0 <= fclus[k][27:0];
                                 // the last cluster: first + ceil(size / cluster) - 1
-                                clast <= fclus[k] - 32'd1 +
-                                         ((fsize[k] + (32'd512 << spc_log) - 32'd1) >> (5'd9 + spc_log));
+                                // (26 bits: anything over 32 MB was refused above)
+                                clast <= fclus[k][27:0] - 28'd1 +
+                                         {2'd0, (fsize[k][25:0] + (26'd512 << spc_log) - 26'd1) >> (5'd9 + spc_log)};
                                 lk <= L_WALK;
                             end
                         L_WALK: begin

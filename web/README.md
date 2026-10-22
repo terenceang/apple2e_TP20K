@@ -154,7 +154,9 @@ dump address to `$0000 $0100 $0400 $0800 $FA60 $FFF0` before `m`. The
 firmware's own `?` only lists six of them; `x`, `g` and `w` work and are not in
 its help text.
 
-**The TF card** holds every drive's image as an ordinary file on FAT32 (a PC
+**The TF card is required**: every drive's disk is a file on it, and there is
+no other way in (an image from this computer is copied onto the card, then
+loaded). It holds every drive's image as an ordinary file on FAT32 (a PC
 formats it and can copy images on and off; cards over 32 GB must be
 reformatted FAT32, and a card in the old raw-slot layout must be reformatted).
 `A2CONFIG.TXT` in the root says what each drive loads, one line per drive by
@@ -226,8 +228,7 @@ src/
     layouts.js      the 63 keys as x/y/w/h + legends; the only place the
                     physical arrangement lives
   protocol.js       byte encoding and the firmware's literal strings
-  disk.js           Disk II image validation, interleaving (.dsk/.do <-> .po) & UART protocol,
-                    the TF card's sector commands (b/u/y/i)
+  disk.js           disk sizes and the TF card commands (b, u, y, i)
   fat32.js          the TF card's FAT32, in the page: list, create (contiguous), delete
   config.js         A2CONFIG.TXT, what each drive loads
   card.js           the card as the Disks pane uses it: upload, download, mount

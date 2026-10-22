@@ -88,7 +88,7 @@ export function createCardBoard(img) {
       up = { lba: parseInt(m[1], 16), rx: [] }
       queueMicrotask(() => link.feed('\r\nUPLOAD HD\r\n'))
     } else if (t === 'i') {
-      queueMicrotask(() => link.feed(`\r\nI1:00000000 I2:00000000 H:00 S:${status().toString(16).toUpperCase().padStart(4, '0')}\r\n> `))
+      queueMicrotask(() => link.feed(`\r\nH:00 S:${status().toString(16).toUpperCase().padStart(4, '0')}\r\n> `))
     } else if ((m = /^y([1-4])$/.exec(t))) {
       busy = true
       void reload(Number(m[1]) - 1)

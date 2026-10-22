@@ -45,9 +45,9 @@ powershell -File sim\run.ps1 -Target tb_sdvol
 
 ## Using it
 
-1. Copy disk images onto a FAT32 TF card on a PC (`.dsk`/`.do`/`.po` floppies, `.hdv`/`.po` hard-disk volumes) and put it in the SOM's slot.
+1. **A FAT32 TF card is required**: every drive loads from an image file on it, and there is no other way in. Copy disk images onto it on a PC (`.dsk`/`.do`/`.po` floppies, `.hdv`/`.po` hard-disk volumes) and put it in the SOM's slot; images can also be copied onto it later from the web page.
 2. Connect HDMI and the Dock's USB-C, and flash the bitstream.
-3. Open the [web front end](web/README.md) in Chrome or Edge and press Connect. The Disks pane lists the card's images; click one and pick a drive. The board remembers the choice in `A2CONFIG.TXT` on the card and loads it at every power-on.
+3. Open the [web front end](web/README.md) in Chrome or Edge and press Connect. The Disks pane lists the card's images; click one and pick a drive, or use LOAD → *From this computer…* to copy an image onto the card and load it in one go. The board remembers the choice in `A2CONFIG.TXT` on the card and loads it at every power-on.
 
 A plain serial terminal at **1000000 8N1** works too: what you type goes to the Apple, and what it prints through COUT comes back.
 
@@ -69,7 +69,7 @@ Press **Ctrl+B** to pause the CPU and enter the debugger; press it again (or `c`
 | `x` | Reset the CPU |
 | `h` | Help (also `?`) |
 
-The disk commands the web page uses (`d e n` for floppy images over the link, `b u y` for the TF card) are described in [`web/README.md`](web/README.md). Commands are only read when the debugger is idle, so anything sent while it is still printing is dropped; the web page waits for 200 ms of silence.
+The TF card commands the web page uses (`b u y`) are described in [`web/README.md`](web/README.md). Commands are only read when the debugger is idle, so anything sent while it is still printing is dropped; the web page waits for 200 ms of silence.
 
 ### The TF card
 

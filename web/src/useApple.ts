@@ -3,18 +3,8 @@ import { AppleStream } from './stream.js'
 import { encodeClock, encodeGamepad, encodeKey, encodeKeysUp, encodeReset, CTRL_B, CMD } from './protocol.js'
 import { SerialLink, serialSupported, BAUD } from './serial-link.js'
 import { isLetter, resolve } from './keymap.js'
-import { PREF_AUTOCONNECT, getSavedBool, setSavedBool, loadDisk, saveDisk } from './prefs.js'
-import {
-  validateDiskImage,
-  prepareUploadImage,
-  prepareDownloadImage,
-  uploadDisk,
-  downloadDisk,
-  diskChecksum,
-  queryDiskSums,
-  queryCardStatus,
-  type CardStatus,
-} from './disk.js'
+import { PREF_AUTOCONNECT, getSavedBool, setSavedBool } from './prefs.js'
+import { queryCardStatus, type CardStatus } from './disk.js'
 import { Card } from './card.js'
 import type { DirEntry } from './fat32.js'
 
@@ -120,13 +110,8 @@ export interface Screen {
   at: number
 }
 
-export interface DriveState {
-  filename: string | null
-  busy: boolean
-}
-
 export interface DiskProgress {
-  drive: 1 | 2 | 7 // 7: the TF card
+  drive: 7 // the TF card: every drive's disk is a file on it
   phase: 'uploading' | 'downloading'
   percent: number
   detail: string
@@ -425,113 +410,9 @@ export function useApple() {
     void connectSerial()
   }, [connectSerial])
 
-  const [drives, setDrives] = useState<Record<1 | 2, DriveState>>({
-    1: { filename: null, busy: false },
-    2: { filename: null, busy: false },
-  })
   const [diskProgress, setDiskProgress] = useState<DiskProgress | null>(null)
   const [diskError, setDiskError] = useState<string | null>(null)
 
-  const uploadDiskFile = useCallback(
-    async (drive: 1 | 2, file: File) => {
-      if (!link.current || conn.state !== 'open') {
-        throw new Error('Connect USB serial before uploading a disk image.')
-      }
-      setDiskError(null)
-      setDrives((d) => ({ ...d, [drive]: { ...d[drive], busy: true } }))
-      const wasConsole = stream.current.mode === 'console'
-
-      try {
-        const buffer = await file.arrayBuffer()
-        const { data, order } = validateDiskImage(buffer, file.name)
-        const physical = prepareUploadImage(data, order)
-
-        if (wasConsole) {
-          send([CTRL_B])
-          await new Promise((r) => setTimeout(r, QUIET_MS))
-        }
-
-        // Ask the board first: the image survives in its SDRAM, so an identical
-        // one needs no 12 s transfer.
-        const sum = diskChecksum(physical)
-        const onBoard = (await queryDiskSums(link.current).catch(() => [-1, -1]))[drive - 1] // old firmware: no `i`, just upload
-
-        if (onBoard !== sum) {
-          setDiskProgress({
-            drive,
-              phase: 'uploading',
-            percent: 0,
-            detail: `Starting upload of ${file.name}...`,
-          })
-        }
-
-        if (onBoard !== sum) await uploadDisk(link.current, drive, physical, {
-          onProgress: (p) => {
-            const percent = Math.round((p.track / p.totalTracks) * 100)
-            setDiskProgress({
-              drive,
-                  phase: 'uploading',
-              percent,
-              detail: `Track ${p.track}/${p.totalTracks} (${percent}%)`,
-            })
-          },
-        })
-
-        saveDisk(store, drive, { filename: file.name, sum })
-        setDrives((d) => ({ ...d, [drive]: { filename: file.name, busy: false } }))
-        setDiskProgress(null)
-
-        if (wasConsole) {
-          release(CMD.cont.charCodeAt(0))
-        }
-      } catch (err: any) {
-        setDrives((d) => ({ ...d, [drive]: { ...d[drive], busy: false } }))
-        setDiskProgress(null)
-        const msg = err?.message ?? String(err)
-        setDiskError(msg)
-        if (wasConsole) {
-          release(CMD.cont.charCodeAt(0))
-        }
-        throw err
-      }
-    },
-    [conn.state, mode, send, release, store],
-  )
-
-  /**
-   * Ask the board what its drives hold and show that, not what this page last
-   * did: a power cycle empties them, and another browser may have loaded them.
-   * A drive whose checksum matches what we saved gets its filename back.
-   */
-  const syncDrives = useCallback(async () => {
-    if (!link.current || conn.state !== 'open') return
-    const wasConsole = stream.current.mode === 'console'
-    try {
-      if (wasConsole) {
-        send([CTRL_B])
-        await new Promise((r) => setTimeout(r, QUIET_MS))
-      }
-      const sums = await queryDiskSums(link.current)
-      setDrives((d) => {
-        const next = { ...d }
-        for (const n of [1, 2] as const) {
-          const saved = loadDisk(store, n)
-          next[n] = {
-            ...d[n],
-            filename: sums[n - 1] === 0 ? null : saved && saved.sum === sums[n - 1] ? saved.filename : 'Unknown image',
-          }
-        }
-        return next
-      })
-    } catch {
-      // Firmware without the `i` command: leave the display as it is.
-    } finally {
-      if (wasConsole) release(CMD.cont.charCodeAt(0))
-    }
-  }, [conn.state, mode, send, release, store])
-
-  const syncRef = useRef(syncDrives)
-  syncRef.current = syncDrives
   const cardRef = useRef<() => Promise<void>>(async () => {})
   useEffect(() => {
     if (conn.state !== 'open') return
@@ -541,83 +422,10 @@ export function useApple() {
     stream.current.mode = 'console'
     setMode('console')
     // The slot 5 clock has no battery: give it the time while the parser takes
-    // packets (it drops them in the debugger, which the sync below enters).
+    // packets (it drops them in the debugger, which reading the card enters).
     link.current?.write(encodeClock(new Date()))
-    void syncRef.current().then(() => cardRef.current().catch(() => {}))
+    void cardRef.current().catch(() => {})
   }, [conn.state])
-
-  const downloadDiskFile = useCallback(
-    async (drive: 1 | 2, format: 'dsk' | 'po' = 'dsk') => {
-      if (!link.current || conn.state !== 'open') {
-        throw new Error('Connect USB serial before downloading a disk image.')
-      }
-      setDiskError(null)
-      setDrives((d) => ({ ...d, [drive]: { ...d[drive], busy: true } }))
-      const wasConsole = stream.current.mode === 'console'
-
-      try {
-        if (wasConsole) {
-          send([CTRL_B])
-          await new Promise((r) => setTimeout(r, QUIET_MS))
-        }
-
-        setDiskProgress({
-          drive,
-          phase: 'downloading',
-          percent: 0,
-          detail: `Starting download from Drive ${drive}...`,
-        })
-
-        const physical = await downloadDisk(link.current, drive, {
-          onProgress: (p) => {
-            const percent = Math.round((p.bytesReceived / p.totalBytes) * 100)
-            setDiskProgress({
-              drive,
-                  phase: 'downloading',
-              percent,
-              detail: `${Math.round(p.bytesReceived / 1024)} KB / ${Math.round(p.totalBytes / 1024)} KB (${percent}%)`,
-            })
-          },
-        })
-
-        const fileData = prepareDownloadImage(physical, format)
-        setDrives((d) => ({ ...d, [drive]: { ...d[drive], busy: false } }))
-        setDiskProgress(null)
-
-        const ext = format === 'po' ? '.po' : '.dsk'
-        const baseName = drives[drive].filename
-          ? drives[drive].filename!.replace(/\.[^.]+$/, '')
-          : `disk${drive}`
-        const filename = `${baseName}${ext}`
-
-        if (typeof document !== 'undefined') {
-          const blob = new Blob([fileData as unknown as BlobPart], { type: 'application/octet-stream' })
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = filename
-          document.body.appendChild(a)
-          a.click()
-          document.body.removeChild(a)
-          URL.revokeObjectURL(url)
-        }
-
-        if (wasConsole) {
-          release(CMD.cont.charCodeAt(0))
-        }
-      } catch (err: any) {
-        setDrives((d) => ({ ...d, [drive]: { ...d[drive], busy: false } }))
-        setDiskProgress(null)
-        const msg = err?.message ?? String(err)
-        setDiskError(msg)
-        if (wasConsole) {
-          release(CMD.cont.charCodeAt(0))
-        }
-        throw err
-      }
-    },
-    [conn.state, mode, send, release, drives],
-  )
 
   const [card, setCard] = useState<CardState | null>(null)
   const [cardBusy, setCardBusy] = useState(false)
@@ -717,28 +525,8 @@ export function useApple() {
     (d: number, f: CardFile | null) =>
       cardSession(async (c) => {
         await c.mount(d, f, { onPoll: (status: CardStatus) => setCard((cs) => (cs ? { ...cs, status } : cs)) })
-        // the floppy now comes from the card, not from this page's upload
-        if (d < 2) setDrives((ds) => ({ ...ds, [d + 1]: { filename: null, busy: false } }))
       }),
     [cardSession],
-  )
-
-  /** Take the disk out on the board too (the debugger's n1/n2), not just here. */
-  const ejectDisk = useCallback(
-    async (drive: 1 | 2) => {
-      setDrives((d) => ({ ...d, [drive]: { filename: null, busy: false } }))
-      if (!link.current || conn.state !== 'open') return
-      const wasConsole = stream.current.mode === 'console'
-      if (wasConsole) {
-        send([CTRL_B])
-        await new Promise((r) => setTimeout(r, QUIET_MS))
-      }
-      release(0x6e, drive === 2 ? 0x32 : 0x31) // 'n', drive digit
-      // separately: a 'c' that lands while the eject's prompt prints is dropped
-      await new Promise((r) => setTimeout(r, 3 * QUIET_MS))
-      if (wasConsole) release(CMD.cont.charCodeAt(0))
-    },
-    [conn.state, send, release],
   )
 
   const clearDiskError = useCallback(() => setDiskError(null), [])
@@ -761,11 +549,8 @@ export function useApple() {
       status,
       screen,
       busy,
-      drives,
       diskProgress,
       diskError,
-      uploadDiskFile,
-      downloadDiskFile,
       card,
       cardBusy,
       refreshCard,
@@ -773,7 +558,6 @@ export function useApple() {
       downloadFromCard,
       deleteFromCard,
       mountCard,
-      ejectDisk,
       clearDiskError,
       pressKey,
       resetKey,
@@ -800,11 +584,8 @@ export function useApple() {
       status,
       screen,
       busy,
-      drives,
       diskProgress,
       diskError,
-      uploadDiskFile,
-      downloadDiskFile,
       card,
       cardBusy,
       refreshCard,
@@ -812,7 +593,6 @@ export function useApple() {
       downloadFromCard,
       deleteFromCard,
       mountCard,
-      ejectDisk,
       clearDiskError,
       pressKey,
       resetKey,

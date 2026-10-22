@@ -14,13 +14,7 @@
 //   h/?  help, x  CPU reset, CR  repeat the prompt
 //   a  toggle aux RAM view: m and w then read the aux 64 KB (the dump prints
 //      ';' after the address, and w sets bit 7 of its flags byte)
-//   d1 d2  upload a Disk ][ image: the next 143,360 bytes are written to drive
-//      1 or 2, one byte at a time, with no framing and no way to interrupt
-//   e1 e2  download a Disk ][ image: 143,360 bytes of drive 1 or 2 come back,
-//      then a prompt
-//   n1 n2  eject Disk ][ drive 1 or 2 (its checksum goes to 0)
-//   i  print the Disk ][ image checksums: "I1:xxxxxxxx I2:xxxxxxxx", 0 = empty,
-//      then the head, then the TF card: "S:ssss", src/sd_vol.v's state
+//   i  print the Disk ][ head ("H:hh") and the TF card: "S:ssss", src/sd_vol.v's state
 //      ({loading, busy, err, estage[2:0], fs_ok, 0, fail[3:0], present[3:0]};
 //      drives 0-1 are slot 6, 2-3 slot 7)
 //   uhhhhhhhh  write TF card sectors from LBA hhhhhhhh: "UPLOAD HD", then
@@ -29,6 +23,7 @@
 //      then "done" or "lost"
 //   bhhhhhhhhcccc  read cccc TF card sectors from LBA hhhhhhhh: "SECTORS",
 //      the raw bytes, then "done" (or "lost": past the card's end)
+//   Every drive's disk is a file on the TF card; there is no other way in.
 //   y1-y4  reload a drive (S6D1 S6D2 S7D1 S7D2) from A2CONFIG.TXT on the
 //      card, after its written floppy tracks are back on it; the load runs on
 //      after the prompt, so poll i until S says not busy
@@ -85,27 +80,6 @@ module serial_debugger (
     input  wire [7:0]  cpu_dout,
     input  wire        cpu_we,
     input  wire        cpu_sync,
-
-    // Hardware Status Inputs
-    // Disk ][ image transfer, one byte at a time because that is all the UART
-    // carries (src/disk2/disk2_store.v).  An address is a byte offset within the
-    // drive's image and the drive select is held for a whole transfer, which is
-    // what lets the store work out where a byte goes instead of counting.
-    output reg         img_up_go,     // take img_up_data at img_up_addr
-    output wire        img_up_drive,
-    output wire [17:0] img_up_addr,
-    output reg  [7:0]  img_up_data,
-    output wire        img_up_last,   // ...and it is the drive's last byte
-    output reg         img_up_bad,    // ...or it was a bad image, so empty it
-    input  wire        img_up_busy,   // a word write is in flight
-    input  wire        img_up_done,   // the store has the byte
-    output reg         img_dn_go,     // serve the byte at img_dn_addr
-    output wire        img_dn_drive,
-    output wire [17:0] img_dn_addr,
-    output wire        img_dn_last,   // ...and it is the drive's last byte
-    input  wire [7:0]  img_dn_data,
-    input  wire        img_dn_valid,  // img_dn_data is good
-    input  wire        img_dn_done,   // img_dn_last and it has been served
 
     // The TF card (src/sd_vol.v)
     output reg         sd_mnt_go,
@@ -268,19 +242,15 @@ module serial_debugger (
     localparam STR_GFX_LEN      = 8'd5;
     localparam STR_END_START    = 8'd171;
     localparam STR_END_LEN      = 8'd7;
-    localparam STR_UP_START     = 9'd178;
-    localparam STR_UP_LEN       = 8'd33;
-    localparam STR_DN_START     = 9'd211;
-    localparam STR_DN_LEN       = 8'd25;
-    localparam STR_DONE_START   = 9'd236;
+    localparam STR_DONE_START   = 9'd178;
     localparam STR_DONE_LEN     = 8'd8;
-    localparam STR_LOST_START   = 9'd244;
+    localparam STR_LOST_START   = 9'd186;
     localparam STR_LOST_LEN     = 8'd8;
-    localparam STR_HDUP_START   = 9'd252;
+    localparam STR_HDUP_START   = 9'd194;
     localparam STR_HDUP_LEN     = 8'd13;
-    localparam STR_SECS_START   = 9'd265;
+    localparam STR_SECS_START   = 9'd207;
     localparam STR_SECS_LEN     = 8'd11;
-    reg [7:0] str_rom [0:275];
+    reg [7:0] str_rom [0:217];
     initial begin
         str_rom[0] = 8'h0D; str_rom[1] = 8'h0A; str_rom[2] = 8'h5B; str_rom[3] = 8'h20;
         str_rom[4] = 8'h41; str_rom[5] = 8'h70; str_rom[6] = 8'h70; str_rom[7] = 8'h6C;
@@ -297,26 +267,22 @@ module serial_debugger (
         str_rom[48] = 8'h52; str_rom[49] = 8'h65; str_rom[50] = 8'h73; str_rom[51] = 8'h75;
         str_rom[52] = 8'h6D; str_rom[53] = 8'h69; str_rom[54] = 8'h6E; str_rom[55] = 8'h67;
         str_rom[56] = 8'h2E; str_rom[57] = 8'h2E; str_rom[58] = 8'h2E; str_rom[59] = 8'h5D;
-        str_rom[60] = 8'h0D; str_rom[61] = 8'h0A;
-        // Help: "\r\nCmds: r=Regs s=Step c=Cont m=Mem t=Stat w=Scr h=Help\r\n> "
-        str_rom[62] = 8'h0D; str_rom[63] = 8'h0A; str_rom[64] = 8'h43; str_rom[65] = 8'h6D;
-        str_rom[66] = 8'h64; str_rom[67] = 8'h73; str_rom[68] = 8'h3A; str_rom[69] = 8'h20;
-        str_rom[70] = 8'h72; str_rom[71] = 8'h3D; str_rom[72] = 8'h52; str_rom[73] = 8'h65;
-        str_rom[74] = 8'h67; str_rom[75] = 8'h73; str_rom[76] = 8'h20; str_rom[77] = 8'h73;
-        str_rom[78] = 8'h3D; str_rom[79] = 8'h53; str_rom[80] = 8'h74; str_rom[81] = 8'h65;
-        str_rom[82] = 8'h70; str_rom[83] = 8'h20; str_rom[84] = 8'h63; str_rom[85] = 8'h3D;
-        str_rom[86] = 8'h43; str_rom[87] = 8'h6F; str_rom[88] = 8'h6E; str_rom[89] = 8'h74;
-        str_rom[90] = 8'h20; str_rom[91] = 8'h6D; str_rom[92] = 8'h3D; str_rom[93] = 8'h4D;
-        str_rom[94] = 8'h65; str_rom[95] = 8'h6D; str_rom[96] = 8'h20; str_rom[97] = 8'h74;
-        str_rom[98] = 8'h3D; str_rom[99] = 8'h53; str_rom[100] = 8'h74; str_rom[101] = 8'h61;
-        str_rom[102] = 8'h74; str_rom[103] = 8'h20; str_rom[104] = 8'h77; str_rom[105] = 8'h3D;
-        str_rom[106] = 8'h53; str_rom[107] = 8'h63; str_rom[108] = 8'h72; str_rom[109] = 8'h20;
-        str_rom[110] = 8'h68; str_rom[111] = 8'h3D; str_rom[112] = 8'h48; str_rom[113] = 8'h65;
-        str_rom[114] = 8'h6C; str_rom[115] = 8'h70; str_rom[116] = 8'h0D; str_rom[117] = 8'h0A;
-        str_rom[118] = 8'h3E; str_rom[119] = 8'h20;
-        // Prompt "\r\n> "
+        str_rom[60] = 8'h0D; str_rom[61] = 8'h0A; str_rom[62] = 8'h0D; str_rom[63] = 8'h0A;
+        str_rom[64] = 8'h43; str_rom[65] = 8'h6D; str_rom[66] = 8'h64; str_rom[67] = 8'h73;
+        str_rom[68] = 8'h3A; str_rom[69] = 8'h20; str_rom[70] = 8'h72; str_rom[71] = 8'h3D;
+        str_rom[72] = 8'h52; str_rom[73] = 8'h65; str_rom[74] = 8'h67; str_rom[75] = 8'h73;
+        str_rom[76] = 8'h20; str_rom[77] = 8'h73; str_rom[78] = 8'h3D; str_rom[79] = 8'h53;
+        str_rom[80] = 8'h74; str_rom[81] = 8'h65; str_rom[82] = 8'h70; str_rom[83] = 8'h20;
+        str_rom[84] = 8'h63; str_rom[85] = 8'h3D; str_rom[86] = 8'h43; str_rom[87] = 8'h6F;
+        str_rom[88] = 8'h6E; str_rom[89] = 8'h74; str_rom[90] = 8'h20; str_rom[91] = 8'h6D;
+        str_rom[92] = 8'h3D; str_rom[93] = 8'h4D; str_rom[94] = 8'h65; str_rom[95] = 8'h6D;
+        str_rom[96] = 8'h20; str_rom[97] = 8'h74; str_rom[98] = 8'h3D; str_rom[99] = 8'h53;
+        str_rom[100] = 8'h74; str_rom[101] = 8'h61; str_rom[102] = 8'h74; str_rom[103] = 8'h20;
+        str_rom[104] = 8'h77; str_rom[105] = 8'h3D; str_rom[106] = 8'h53; str_rom[107] = 8'h63;
+        str_rom[108] = 8'h72; str_rom[109] = 8'h20; str_rom[110] = 8'h68; str_rom[111] = 8'h3D;
+        str_rom[112] = 8'h48; str_rom[113] = 8'h65; str_rom[114] = 8'h6C; str_rom[115] = 8'h70;
+        str_rom[116] = 8'h0D; str_rom[117] = 8'h0A; str_rom[118] = 8'h3E; str_rom[119] = 8'h20;
         str_rom[120] = 8'h0D; str_rom[121] = 8'h0A; str_rom[122] = 8'h3E; str_rom[123] = 8'h20;
-        // Register line labels
         str_rom[124] = 8'h0D; str_rom[125] = 8'h0A; str_rom[126] = 8'h50; str_rom[127] = 8'h43;
         str_rom[128] = 8'h3A; str_rom[129] = 8'h24; str_rom[130] = 8'h20; str_rom[131] = 8'h41;
         str_rom[132] = 8'h3A; str_rom[133] = 8'h24; str_rom[134] = 8'h20; str_rom[135] = 8'h58;
@@ -326,47 +292,21 @@ module serial_debugger (
         str_rom[148] = 8'h50; str_rom[149] = 8'h3A; str_rom[150] = 8'h5B; str_rom[151] = 8'h5D;
         str_rom[152] = 8'h20; str_rom[153] = 8'h4F; str_rom[154] = 8'h50; str_rom[155] = 8'h3A;
         str_rom[156] = 8'h24; str_rom[157] = 8'h20; str_rom[158] = 8'h7C; str_rom[159] = 8'h0D;
-        str_rom[160] = 8'h0A;
-        // Screen dump framing: "\r\n$SS", "\r\n$GF", "\r\n$SEND"
-        str_rom[161] = 8'h0D; str_rom[162] = 8'h0A; str_rom[163] = 8'h24; str_rom[164] = 8'h53;
-        str_rom[165] = 8'h53; str_rom[166] = 8'h0D; str_rom[167] = 8'h0A; str_rom[168] = 8'h24;
-        str_rom[169] = 8'h47; str_rom[170] = 8'h46; str_rom[171] = 8'h0D; str_rom[172] = 8'h0A;
-        str_rom[173] = 8'h24; str_rom[174] = 8'h53; str_rom[175] = 8'h45; str_rom[176] = 8'h4E;
-        str_rom[177] = 8'h44;
-        // Disk image transfer.
-        // 178: "\r\nUPLOAD 143360 bytes, send now\r\n"
-        str_rom[178] = 8'h0D; str_rom[179] = 8'h0A; str_rom[180] = 8'h55; str_rom[181] = 8'h50;
-        str_rom[182] = 8'h4C; str_rom[183] = 8'h4F; str_rom[184] = 8'h41; str_rom[185] = 8'h44;
-        str_rom[186] = 8'h20; str_rom[187] = 8'h31; str_rom[188] = 8'h34; str_rom[189] = 8'h33;
-        str_rom[190] = 8'h33; str_rom[191] = 8'h36; str_rom[192] = 8'h30; str_rom[193] = 8'h20;
-        str_rom[194] = 8'h62; str_rom[195] = 8'h79; str_rom[196] = 8'h74; str_rom[197] = 8'h65;
-        str_rom[198] = 8'h73; str_rom[199] = 8'h2C; str_rom[200] = 8'h20; str_rom[201] = 8'h73;
-        str_rom[202] = 8'h65; str_rom[203] = 8'h6E; str_rom[204] = 8'h64; str_rom[205] = 8'h20;
-        str_rom[206] = 8'h6E; str_rom[207] = 8'h6F; str_rom[208] = 8'h77; str_rom[209] = 8'h0D;
-        str_rom[210] = 8'h0A;
-        // 211: "\r\nDOWNLOAD 143360 bytes\r\n"
-        str_rom[211] = 8'h0D; str_rom[212] = 8'h0A; str_rom[213] = 8'h44; str_rom[214] = 8'h4F;
-        str_rom[215] = 8'h57; str_rom[216] = 8'h4E; str_rom[217] = 8'h4C; str_rom[218] = 8'h4F;
-        str_rom[219] = 8'h41; str_rom[220] = 8'h44; str_rom[221] = 8'h20; str_rom[222] = 8'h31;
-        str_rom[223] = 8'h34; str_rom[224] = 8'h33; str_rom[225] = 8'h33; str_rom[226] = 8'h36;
-        str_rom[227] = 8'h30; str_rom[228] = 8'h20; str_rom[229] = 8'h62; str_rom[230] = 8'h79;
-        str_rom[231] = 8'h74; str_rom[232] = 8'h65; str_rom[233] = 8'h73; str_rom[234] = 8'h0D;
-        str_rom[235] = 8'h0A;
-        // 236: "\r\ndone\r\n"
-        str_rom[236] = 8'h0D; str_rom[237] = 8'h0A; str_rom[238] = 8'h64; str_rom[239] = 8'h6F;
-        str_rom[240] = 8'h6E; str_rom[241] = 8'h65; str_rom[242] = 8'h0D; str_rom[243] = 8'h0A;
-        // 244: "\r\nlost\r\n"
-        str_rom[244] = 8'h0D; str_rom[245] = 8'h0A; str_rom[246] = 8'h6C; str_rom[247] = 8'h6F;
-        str_rom[248] = 8'h73; str_rom[249] = 8'h74; str_rom[250] = 8'h0D; str_rom[251] = 8'h0A;
-        // 252: "\r\nUPLOAD HD\r\n"
-        str_rom[252] = 8'h0D; str_rom[253] = 8'h0A; str_rom[254] = 8'h55; str_rom[255] = 8'h50;
-        str_rom[256] = 8'h4C; str_rom[257] = 8'h4F; str_rom[258] = 8'h41; str_rom[259] = 8'h44;
-        str_rom[260] = 8'h20; str_rom[261] = 8'h48; str_rom[262] = 8'h44; str_rom[263] = 8'h0D;
-        str_rom[264] = 8'h0A;
-        // CR LF "SECTORS" CR LF
-        str_rom[265] = 8'h0D; str_rom[266] = 8'h0A; str_rom[267] = 8'h53; str_rom[268] = 8'h45;
-        str_rom[269] = 8'h43; str_rom[270] = 8'h54; str_rom[271] = 8'h4F; str_rom[272] = 8'h52;
-        str_rom[273] = 8'h53; str_rom[274] = 8'h0D; str_rom[275] = 8'h0A;
+        str_rom[160] = 8'h0A; str_rom[161] = 8'h0D; str_rom[162] = 8'h0A; str_rom[163] = 8'h24;
+        str_rom[164] = 8'h53; str_rom[165] = 8'h53; str_rom[166] = 8'h0D; str_rom[167] = 8'h0A;
+        str_rom[168] = 8'h24; str_rom[169] = 8'h47; str_rom[170] = 8'h46; str_rom[171] = 8'h0D;
+        str_rom[172] = 8'h0A; str_rom[173] = 8'h24; str_rom[174] = 8'h53; str_rom[175] = 8'h45;
+        str_rom[176] = 8'h4E; str_rom[177] = 8'h44; str_rom[178] = 8'h0D; str_rom[179] = 8'h0A;
+        str_rom[180] = 8'h64; str_rom[181] = 8'h6F; str_rom[182] = 8'h6E; str_rom[183] = 8'h65;
+        str_rom[184] = 8'h0D; str_rom[185] = 8'h0A; str_rom[186] = 8'h0D; str_rom[187] = 8'h0A;
+        str_rom[188] = 8'h6C; str_rom[189] = 8'h6F; str_rom[190] = 8'h73; str_rom[191] = 8'h74;
+        str_rom[192] = 8'h0D; str_rom[193] = 8'h0A; str_rom[194] = 8'h0D; str_rom[195] = 8'h0A;
+        str_rom[196] = 8'h55; str_rom[197] = 8'h50; str_rom[198] = 8'h4C; str_rom[199] = 8'h4F;
+        str_rom[200] = 8'h41; str_rom[201] = 8'h44; str_rom[202] = 8'h20; str_rom[203] = 8'h48;
+        str_rom[204] = 8'h44; str_rom[205] = 8'h0D; str_rom[206] = 8'h0A; str_rom[207] = 8'h0D;
+        str_rom[208] = 8'h0A; str_rom[209] = 8'h53; str_rom[210] = 8'h45; str_rom[211] = 8'h43;
+        str_rom[212] = 8'h54; str_rom[213] = 8'h4F; str_rom[214] = 8'h52; str_rom[215] = 8'h53;
+        str_rom[216] = 8'h0D; str_rom[217] = 8'h0A;
     end
 
     // String printer sub-engine
@@ -402,57 +342,10 @@ module serial_debugger (
     localparam M_MEM     = 4'd4;
     localparam M_STATUS  = 4'd5;
     localparam M_SCREEN  = 4'd6;
-    localparam M_IMG     = 4'd7;   // a Disk ][ image, in or out
-    localparam M_INFO    = 4'd8;   // the Disk ][ checksums (the i command)
+    localparam M_INFO    = 4'd8;   // the Disk ][ head and the TF card (the i command)
     localparam M_HIST    = 4'd9;   // the last 32 instruction addresses before a BRK (p)
     localparam M_SDW     = 4'd10;  // u: records onto TF card sectors
     localparam M_SDR     = 4'd11;  // b: TF card sectors back
-
-    // Disk ][ image: 143,360 bytes (35 tracks x 16 sectors x 256 bytes)
-    localparam [17:0] IMG_BYTES = 18'd143360;
-    localparam [17:0] IMG_LAST  = IMG_BYTES - 18'd1;
-
-    // Which way the bytes are going, and the position in the image.  img_dir is
-    // 0 for the host writing the drive and 1 for the host reading it.
-    reg        img_dir   = 1'b0;
-    reg        img_drv   = 1'b0;
-    reg [20:0] img_addr  = 21'd0;
-
-    assign img_up_drive = img_drv;
-    assign img_up_addr  = img_addr[17:0];
-    assign img_up_last  = (img_addr == {3'd0, IMG_LAST});
-    assign img_dn_drive = img_drv;
-    assign img_dn_addr  = img_addr[17:0];
-    assign img_dn_last  = (img_addr == {3'd0, IMG_LAST});
-
-    wire        active_up_busy  = img_up_busy;
-    wire        active_up_done  = img_up_done;
-    wire        active_up_last  = img_up_last;
-    wire        active_dn_valid = img_dn_valid;
-    wire        active_dn_last  = img_dn_last;
-    wire [7:0]  active_dn_data  = img_dn_data;
-    wire [21:0] img_target_bytes = {4'd0, IMG_BYTES};
-
-    // The byte that has arrived from the host and the flag that says so, and the
-    // flag that says it has been handed to the store.
-    reg [7:0]  img_byte = 8'h00;
-    reg        img_have = 1'b0;      // a byte has arrived and is waiting
-    reg        img_sent = 1'b0;      // ...and it has been handed over
-    reg        img_ask  = 1'b0;      // a download request is out
-    reg        img_ackq = 1'b0;      // an acknowledgement is waiting for room
-    reg [21:0] img_rx   = 22'd0;     // bytes that arrived during the upload
-
-    // What each Disk ][ holds, as a fingerprint the host can compare with the
-    // file it would upload: 0 when empty (cleared at reset, at the start of an
-    // upload and when one is lost), otherwise the rotate-and-add of every byte
-    // handed to the store.  web/src/disk.js diskChecksum() is the same sum.
-    reg [31:0] dsk_sum0 = 32'd0;
-    reg [31:0] dsk_sum1 = 32'd0;
-    wire [31:0] dsk_cur = img_drv ? dsk_sum1 : dsk_sum0;
-    wire [31:0] dsk_nxt = {dsk_cur[30:0], dsk_cur[31]} + {24'd0, img_byte};
-    reg        img_cmd  = 1'b0;      // command seen; the next digit picks the drive
-    reg        ej_cmd   = 1'b0;      // n seen; the next digit is the drive to eject
-    reg        ej_pend  = 1'b0;      // img_drv is set; pulse img_up_bad next clock
 
     // Screen dump state. The W command streams the 1 KB text page the video
     // generator is showing, in memory order ($0400/$0800 upward, interleaving
@@ -602,38 +495,12 @@ module serial_debugger (
             scr_col        <= 6'd0;
             scr_wait       <= 3'd0;
             scr_flags      <= 8'h00;
-            img_dir        <= 1'b0;
-            img_drv        <= 1'b0;
-            img_addr       <= 21'd0;
-            img_byte       <= 8'h00;
-            img_have       <= 1'b0;
-            img_sent       <= 1'b0;
-            img_ask        <= 1'b0;
-            img_ackq       <= 1'b0;
-            img_cmd        <= 1'b0;
-            img_up_data    <= 8'h00;
-            img_up_go      <= 1'b0;
-            img_up_bad     <= 1'b0;
-            img_dn_go      <= 1'b0;
-            img_rx         <= 22'd0;
-            // dsk_sum0/1 survive a reset, as the drives' disks do (disk2_store)
-            ej_cmd         <= 1'b0;
-            ej_pend        <= 1'b0;
         end else begin
             fifo_push_en <= 1'b0;
             sd_mnt_go    <= 1'b0;
             sd_x_go      <= 1'b0;
             sd_r_go      <= 1'b0;
             sd_r_take    <= 1'b0;
-            // Clear single-cycle strobe flags:
-            img_up_bad <= 1'b0;
-            // An eject is an upload gone bad: disk2_store empties the drive.
-            // One clock after img_drv, which up_drive follows, has settled.
-            if (ej_pend) begin
-                ej_pend    <= 1'b0;
-                img_up_bad <= 1'b1;
-            end
-
             if (ce_1m && cpu_sync && !ph_frz) begin
                 ph[ph_i] <= cpu_pc;
                 ph_i     <= ph_i + 1'b1;
@@ -709,7 +576,7 @@ module serial_debugger (
                 return_job <= M_REGS;
                 seq_step   <= 5'd0;
                 main_state <= M_STR;
-            end else if (rx_valid && (rx_byte == 8'h02) && (main_state != M_IMG) && (main_state != M_SDW)) begin
+            end else if (rx_valid && (rx_byte == 8'h02) && (main_state != M_SDW)) begin
                 if (!dbg_mode) begin
                     dbg_mode   <= 1'b1;
                     cpu_rdy    <= 1'b0;
@@ -826,48 +693,7 @@ module serial_debugger (
                         main_state <= M_STR;
                     end
 
-                    // d1/d2 upload Disk ][, e1/e2 download Disk ][.
-                    "n": ej_cmd <= 1'b1;
-
-                    "d", "D", "e", "E": begin
-                        img_cmd   <= 1'b1;
-                        img_dir   <= (rx_byte == "e") || (rx_byte == "E");
-                    end
-
-                    "1", "2": begin
-                        if (ej_cmd) begin
-                            ej_cmd  <= 1'b0;
-                            img_drv <= (rx_byte == "2");
-                            ej_pend <= 1'b1;
-                            if (rx_byte == "2") dsk_sum1 <= 32'd0;
-                            else                dsk_sum0 <= 32'd0;
-                            str_pos    <= STR_PROMPT_START;
-                            str_cnt    <= STR_PROMPT_LEN;
-                            return_job <= M_IDLE;
-                            main_state <= M_STR;
-                        end else if (img_cmd) begin
-                            img_cmd    <= 1'b0;
-                            img_drv    <= (rx_byte == "2");
-                            img_addr   <= 21'd0;
-                            img_rx     <= 22'd0;
-                            if (!img_dir) begin
-                                if (rx_byte == "2") dsk_sum1 <= 32'd0;
-                                else                dsk_sum0 <= 32'd0;
-                            end
-                            img_have   <= 1'b0;
-                            img_sent   <= 1'b0;
-                            img_ask    <= 1'b0;
-                            img_ackq   <= 1'b0;
-                            img_up_go  <= 1'b0;
-                            img_dn_go  <= 1'b0;
-                            str_pos <= img_dir ? STR_DN_START : STR_UP_START;
-                            str_cnt <= img_dir ? STR_DN_LEN   : STR_UP_LEN;
-                            return_job <= M_IMG;
-                            main_state <= M_STR;
-                        end else if (rx_byte == "1") begin
-                            dump_addr <= 16'h0100;
-                        end
-                    end
+                    "1": dump_addr <= 16'h0100;
 
                     "m", "M": begin
                         main_state <= M_MEM;
@@ -883,8 +709,6 @@ module serial_debugger (
                     end
 
                     "0":     dump_addr <= 16'h0000;
-                    // "1" is handled above, where it is a drive number when it
-                    // follows d or e and the text-page preset when it does not.
                     "4":     dump_addr <= 16'h0400;
                     "8":     dump_addr <= 16'h0800;
                     "f", "F": dump_addr <= 16'hFA60;
@@ -926,8 +750,8 @@ module serial_debugger (
 
                 // Any of the six preset addresses above starts a dump; "m"
                 // reuses the last address. Only the address differs.
-                // (not a digit that belongs to d/e, @, n, y, u or b)
-                if (mem_preset && !img_cmd && !ej_cmd && adr_n == 3'd0 &&
+                // (not a digit that belongs to @, y, u or b)
+                if (mem_preset && adr_n == 3'd0 &&
                     !mnt_n && q_n == 4'd0 && rd_n == 4'd0) begin
                     main_state <= M_MEM;
                     seq_step   <= 5'd0;
@@ -1260,7 +1084,7 @@ module serial_debugger (
                 end
 
                 // -------------------------------------------------------------
-                // Disk ][ checksums: CRLF, I1:xxxxxxxx I2:xxxxxxxx, a prompt
+                // i: CRLF, H:hh (the Disk ][ head), S:ssss (the TF card), a prompt
                 // -------------------------------------------------------------
                 M_INFO: begin
                     case (seq_step)
@@ -1268,33 +1092,9 @@ module serial_debugger (
                             str_pos    <= STR_CRLF_START;
                             str_cnt    <= STR_CRLF_LEN;
                             return_job <= M_INFO;
-                            seq_step   <= 5'd1;
+                            seq_step   <= 5'd13;
                             main_state <= M_STR;
                         end
-                        5'd1:  if (!tx_fifo_full) begin fifo_push("I"); seq_step <= 5'd2; end
-                        5'd2:  if (!tx_fifo_full) begin fifo_push("1"); seq_step <= 5'd3; end
-                        5'd3:  if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd4; end
-                        5'd4: begin
-                            hex_val <= dsk_sum0[31:16]; hex_digits <= 3'd4;
-                            return_job <= M_INFO; seq_step <= 5'd5; main_state <= M_HEX;
-                        end
-                        5'd5: begin
-                            hex_val <= dsk_sum0[15:0];  hex_digits <= 3'd4;
-                            return_job <= M_INFO; seq_step <= 5'd6; main_state <= M_HEX;
-                        end
-                        5'd6:  if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd7; end
-                        5'd7:  if (!tx_fifo_full) begin fifo_push("I"); seq_step <= 5'd8; end
-                        5'd8:  if (!tx_fifo_full) begin fifo_push("2"); seq_step <= 5'd9; end
-                        5'd9:  if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd10; end
-                        5'd10: begin
-                            hex_val <= dsk_sum1[31:16]; hex_digits <= 3'd4;
-                            return_job <= M_INFO; seq_step <= 5'd11; main_state <= M_HEX;
-                        end
-                        5'd11: begin
-                            hex_val <= dsk_sum1[15:0];  hex_digits <= 3'd4;
-                            return_job <= M_INFO; seq_step <= 5'd12; main_state <= M_HEX;
-                        end
-                        5'd12: if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd13; end
                         5'd13: if (!tx_fifo_full) begin fifo_push("H"); seq_step <= 5'd14; end
                         5'd14: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd15; end
                         5'd15: begin
@@ -1435,106 +1235,6 @@ module serial_debugger (
                 end
 
                 // -------------------------------------------------------------
-                // Disk ][ image, in or out
-                // -------------------------------------------------------------
-                // Two directions, one engine, because both are "a byte, then the
-                // next one" and the only thing that differs is whose turn it is.
-                //
-                // Nothing here waits on the UART.  An upload is paced by the host,
-                // which is 86 us a byte against a 16-clock word write, and a
-                // download is paced by the TX FIFO, which a request is only made
-                // into when there is room in: a download of 143,360 bytes is 12.4
-                // seconds of sending and the store is never the slow part.
-                M_IMG: begin
-                    if (img_dir == 1'b0) begin
-                        // Host to drive.
-                        if (img_sent) begin
-                            if (active_up_done) begin
-                                img_sent  <= 1'b0;
-                                img_up_go <= 1'b0;
-                                if (img_addr[11:0] == 12'hFFF) begin
-                                    if (!tx_fifo_full)
-                                        fifo_push(8'h06);
-                                    else
-                                        img_ackq <= 1'b1;
-                                end
-                                img_addr <= img_addr + 21'd1;
-                                if (active_up_last) begin
-                                    // Arrived and taken are counted separately:
-                                    // a byte that arrives while the one in hand is
-                                    // still in hand is dropped, and an image with
-                                    // bytes missing in the middle is wrong.
-                                    if (img_rx == {1'b0, img_addr} + 22'd1) begin
-                                        str_pos <= STR_DONE_START;
-                                    end else begin
-                                        img_up_bad <= 1'b1;
-                                        if (img_drv) dsk_sum1 <= 32'd0; else dsk_sum0 <= 32'd0;
-                                        str_pos <= STR_LOST_START;
-                                    end
-                                    str_cnt    <= (img_rx == {1'b0, img_addr} + 22'd1)
-                                                  ? STR_DONE_LEN : STR_LOST_LEN;
-                                    return_job <= M_IDLE;
-                                    main_state <= M_STR;
-                                end
-                            end
-                        end else if (img_have) begin
-                            if (!active_up_busy) begin
-                                img_up_data <= img_byte;
-                                img_up_go   <= 1'b1;
-                                if (img_drv) dsk_sum1 <= dsk_nxt;
-                                else         dsk_sum0 <= dsk_nxt;
-                                img_have    <= 1'b0;
-                                img_sent    <= 1'b1;
-                            end
-                        end
-                        if (rx_valid) begin
-                            img_rx <= img_rx + 22'd1;
-                            if (!img_have && (!img_sent || active_up_done)) begin
-                                img_byte <= rx_byte;
-                                img_have <= 1'b1;
-                            end
-                        end
-                        if ((img_rx >= img_target_bytes) && !img_have && !img_sent && (img_addr != img_target_bytes[20:0])) begin
-                            img_up_bad <= 1'b1;
-                            img_up_go  <= 1'b0;
-                            if (img_drv) dsk_sum1 <= 32'd0; else dsk_sum0 <= 32'd0;
-                            str_pos    <= STR_LOST_START;
-                            str_cnt    <= STR_LOST_LEN;
-                            return_job <= M_IDLE;
-                            main_state <= M_STR;
-                        end
-                        // The acknowledgement, whenever there is room for it.
-                        if (img_ackq && !tx_fifo_full) begin
-                            img_ackq <= 1'b0;
-                            fifo_push(8'h06);
-                        end
-                    end else begin
-                        // Drive to host.  The request is made only with room in
-                        // the FIFO, and nothing else pushes to the FIFO while
-                        // this runs -- the console is silent while the machine is
-                        // paused and the string engine has already finished -- so
-                        // the byte that comes back always has somewhere to go.
-                        if (img_ask) begin
-                            if (active_dn_valid) begin
-                                img_ask   <= 1'b0;
-                                img_dn_go <= 1'b0;
-                                img_addr  <= img_addr + 21'd1;
-                                fifo_push(active_dn_data);
-                                if (active_dn_last) begin
-                                    str_pos    <= STR_DONE_START;
-                                    str_cnt    <= STR_DONE_LEN;
-                                    return_job <= M_IDLE;
-                                    main_state <= M_STR;
-                                end
-                            end
-                        end else if (!tx_fifo_full) begin
-                            img_dn_go <= 1'b1;
-                            img_ask   <= 1'b1;
-                        end
-                    end
-                end
-
-                // -------------------------------------------------------------
                 // u: records onto TF card sectors (record format at u above)
                 // -------------------------------------------------------------
                 M_SDW: begin
@@ -1639,20 +1339,5 @@ module serial_debugger (
             end
         end
     end
-
-`ifdef DBG_IMG
-    // One line per transition into or out of the image state, and one per
-    // command byte: enough to see who left M_IMG and why.
-    reg [3:0] img_prev_state = M_IDLE;
-    always @(posedge clk) begin
-        img_prev_state <= main_state;
-        if ((main_state == M_IMG) != (img_prev_state == M_IMG))
-            $display("[img] %0s M_IMG t=%0t addr=%0d st %0d->%0d rx=%02x",
-                     (main_state == M_IMG) ? "enter" : "leave", $time, img_addr,
-                     img_prev_state, main_state, rx_byte);
-        if (dbg_mode && (main_state == M_IDLE) && rx_valid)
-            $display("[cmd] t=%0t byte %02x img_cmd=%b", $time, rx_byte, img_cmd);
-    end
-`endif
 
 endmodule

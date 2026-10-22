@@ -117,7 +117,6 @@ if (-not $Target -or $Target -in @('tb_prodos_hd', 'hdrom')) {
     }
 }
 Run-Tb 'tb_disk2'        $disk2 -Gen '2012' -Defines $disk2Defines
-Run-Tb 'tb_diskimg'      @('src/serial_debugger.v', 'src/disk2/disk2_store.v') -Gen '2012'
 # tb_sdvol and tb_sdcopy boot from a FAT32 card built by the page's own FAT code
 if (-not $Target -or $Target -in @('tb_sdvol', 'tb_sdcopy')) {
     & node (Join-Path $root 'web\scripts\simcard.mjs')

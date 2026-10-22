@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DriveState, DiskProgress, CardState, CardFile } from '../useApple'
+import type { DiskProgress, CardState, CardFile } from '../useApple'
 import { fitsDrive } from '../card.js'
 
+// Every drive's disk is a file on the TF card: LOAD picks one (or copies one
+// from this computer onto the card first), EJECT empties the drive.  There is
+// no other way in, so without a FAT32 card the drives are empty.
 interface Props {
-  drives: Record<1 | 2, DriveState>
   card: CardState | null
   cardBusy: boolean
   progress: DiskProgress | null
   error: string | null
-  onUpload: (drive: 1 | 2, file: File) => Promise<void>
-  onDownload: (drive: 1 | 2, format: 'dsk' | 'po') => Promise<void>
-  onEject: (drive: 1 | 2) => void
   onCardRefresh: () => Promise<void>
   onCardUpload: (file: File) => Promise<CardFile | null>
   onCardDownload: (f: CardFile) => Promise<void>
@@ -48,29 +47,18 @@ export function DiskPane(p: Props) {
     if (!ask && el.open) el.close()
   }, [ask])
 
-  /** What a drive holds: its card file, a file the config names but cannot use, or this page's upload. */
+  /** What a drive holds: its card file, or a file the config names but cannot use. */
   const inDrive = (d: number) => {
     const f = card?.drives[d] ?? null
-    if (card?.status.present[d] && f) return { name: f.name, card: true, failed: false }
-    if (card?.status.fail[d]) return { name: f ? `${f.name}: cannot load` : 'file not on the card', card: true, failed: true }
-    if (d < 2 && p.drives[(d + 1) as 1 | 2].filename) return { name: p.drives[(d + 1) as 1 | 2].filename!, card: false, failed: false }
+    if (card?.status.present[d] && f) return { name: f.name, file: f, failed: false }
+    if (card?.status.fail[d]) return { name: f ? `${f.name}: cannot load` : 'file not on the card', file: null, failed: true }
     return null
   }
   const mountedOn = (f: CardFile) =>
     [0, 1, 2, 3].filter((d) => card?.status.present[d] && card?.drives[d]?.short === f.short)
 
-  const load = (d: number) => {
-    if (onCard) setAsk({ kind: 'drive', d })
-    else if (d < 2) {
-      pickFor.current = d
-      pickFile.current?.click()
-    }
-  }
-  const eject = (d: number) => {
-    const h = inDrive(d)
-    if (h?.card) quiet(p.onCardMount(d, null))
-    else if (d < 2) p.onEject((d + 1) as 1 | 2)
-  }
+  const load = (d: number) => setAsk({ kind: 'drive', d })
+  const eject = (d: number) => quiet(p.onCardMount(d, null))
   const fromComputer = (d: number | null) => {
     setAsk(null)
     pickFor.current = d
@@ -78,17 +66,13 @@ export function DiskPane(p: Props) {
   }
   const picked = async (file: File) => {
     const d = pickFor.current
-    if (!onCard) {
-      if (d !== null && d < 2) await p.onUpload((d + 1) as 1 | 2, file)
-      return
-    }
     const f = await p.onCardUpload(file)
     if (f && d !== null) await p.onCardMount(d, f)
   }
 
   const led = (d: number) => {
     const h = inDrive(d)
-    const working = cardBusy || (d < 2 && p.drives[(d + 1) as 1 | 2].busy) || card?.status.loading
+    const working = cardBusy || card?.status.loading
     return 'dd-led' + (working && (h || cardBusy) ? ' on' : h && !h.failed ? ' idle' : '')
   }
 
@@ -105,14 +89,14 @@ export function DiskPane(p: Props) {
           {h && <span className={'dd-label' + (h.failed ? ' failed' : '')} title={h.name}>{h.name}</span>}
         </div>
         <div className="dd-buttons">
-          <button type="button" className="dd-select" onClick={() => load(d)} disabled={busy}>LOAD</button>
+          <button type="button" className="dd-select" onClick={() => load(d)} disabled={busy || !onCard}>LOAD</button>
           <button type="button" className="dd-select" onClick={() => eject(d)} disabled={busy || !h}>EJECT</button>
-          {h && !h.failed && (
+          {h?.file && (
             <details className="dd-more">
               <summary title="More">⋯</summary>
               <div className="dd-menu">
-                <button type="button" onClick={() => quiet(p.onDownload((d + 1) as 1 | 2, 'dsk'))} disabled={busy}>Save as .dsk</button>
-                <button type="button" onClick={() => quiet(p.onDownload((d + 1) as 1 | 2, 'po'))} disabled={busy}>Save as .po</button>
+                <button type="button" onClick={() => quiet(p.onCardDownload(h.file!))} disabled={busy}
+                  title="The card's copy: the board writes a track back about a second after the drive goes quiet">Download</button>
               </div>
             </details>
           )}
@@ -228,6 +212,12 @@ export function DiskPane(p: Props) {
         </div>
       )}
 
+      {status && !status.fsOk && (
+        <div className="disk-error-banner" role="status">
+          <span>Every drive loads from a FAT32 TF card, and there is none in the board. Insert one (formatted FAT32
+            on a PC, 32 GB or smaller) and press ↻.</span>
+        </div>
+      )}
       <div className="card-row">
         <div className="io-card">
           <div className="io-card-title">SLOT 6 · DISK II</div>
