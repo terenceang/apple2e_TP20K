@@ -113,7 +113,7 @@ module top (
     // on its go pulse, takes whichever pulsed.
     wire [3:0]  sd_present, sd_fail;
     wire [1:0]  hd_present = sd_present[3:2];
-    wire        hd_ack, hd_sd_busy, hd_loading, sd_err, sd_fs_ok;
+    wire        hd_sd_busy, hd_loading, sd_err, sd_fs_ok;
     wire [15:0] hd_rdata;
     wire        core_hd_go, core_hd_we, sd_m_go, sd_m_we;
     wire [1:0]  core_hd_be;
@@ -277,6 +277,44 @@ module top (
     wire [21:0] dsk_store_addr;
     wire [15:0] dsk_store_wdata, dsk_store_rdata;
 
+    // aux_ram's hd port holds one request.  The slot 7 card and sd_vol each
+    // keep at most one out and wait for its ack, but both can be out at once
+    // (a floppy flush or a mount while the CPU streams a block), and then a
+    // second go overwrote the first and both took the one ack.  Each client's
+    // request waits here; one goes at a time and the ack goes to its owner.
+    reg         hq_c = 1'b0, hq_s = 1'b0;     // a request waiting, per client
+    reg  [24:0] hq_c_addr;  reg hq_c_we;  reg [1:0] hq_c_be;  reg [15:0] hq_c_wdata;
+    reg  [24:0] hq_s_addr;  reg hq_s_we;  reg [15:0] hq_s_wdata;
+    reg         hd_out = 1'b0, hd_own_s = 1'b0;   // one in aux_ram, and whose
+    reg         hd_m_go = 1'b0, hd_m_we = 1'b0;
+    reg  [24:0] hd_m_addr = 25'd0;
+    reg  [1:0]  hd_m_be = 2'b11;
+    reg  [15:0] hd_m_wdata = 16'd0;
+    wire        hd_m_ack;
+    always @(posedge clk_pixel) begin
+        hd_m_go <= 1'b0;
+        if (core_hd_go) begin
+            hq_c <= 1'b1; hq_c_addr <= core_hd_addr; hq_c_we <= core_hd_we;
+            hq_c_be <= core_hd_be; hq_c_wdata <= core_hd_wdata;
+        end
+        if (sd_m_go) begin
+            hq_s <= 1'b1; hq_s_addr <= sd_m_addr; hq_s_we <= sd_m_we; hq_s_wdata <= sd_m_wdata;
+        end
+        // aux_ram drops a waiting request on reset and never acks it
+        if (hd_m_ack || sys_reset) hd_out <= 1'b0;
+        if (sys_reset) begin
+            hq_c <= 1'b0; hq_s <= 1'b0;
+        end else if (!hd_out && !hd_m_go && !hd_m_ack) begin
+            if (hq_s) begin
+                hq_s <= 1'b0; hd_out <= 1'b1; hd_own_s <= 1'b1; hd_m_go <= 1'b1;
+                hd_m_addr <= hq_s_addr; hd_m_we <= hq_s_we; hd_m_be <= 2'b11; hd_m_wdata <= hq_s_wdata;
+            end else if (hq_c) begin
+                hq_c <= 1'b0; hd_out <= 1'b1; hd_own_s <= 1'b0; hd_m_go <= 1'b1;
+                hd_m_addr <= hq_c_addr; hd_m_we <= hq_c_we; hd_m_be <= hq_c_be; hd_m_wdata <= hq_c_wdata;
+            end
+        end
+    end
+
     aux_ram u_aux (
         .clk(clk_pixel), .reset(sys_reset),
         .ddr_clk(clk),
@@ -287,12 +325,9 @@ module top (
         .dsk_go(dsk_store_go), .dsk_addr(dsk_store_addr), .dsk_we(dsk_store_we),
         .dsk_wdata(dsk_store_wdata), .dsk_rdata(dsk_store_rdata),
         .dsk_ack(dsk_store_ack), .dsk_idle(dsk_store_idle),
-        .hd_go(core_hd_go | sd_m_go),
-        .hd_addr(sd_m_go ? sd_m_addr : core_hd_addr),
-        .hd_we(sd_m_go ? sd_m_we : core_hd_we),
-        .hd_be(sd_m_go ? 2'b11 : core_hd_be),
-        .hd_wdata(sd_m_go ? sd_m_wdata : core_hd_wdata),
-        .hd_rdata(hd_rdata), .hd_ack(hd_ack),
+        .hd_go(hd_m_go), .hd_addr(hd_m_addr), .hd_we(hd_m_we),
+        .hd_be(hd_m_be), .hd_wdata(hd_m_wdata),
+        .hd_rdata(hd_rdata), .hd_ack(hd_m_ack),
         .ready(aux_ready), .diag(ddr_diag),
         .ddr_memory_clk(ddr_memory_clk), .ddr_lock(ddr_lock),
         .DDR3_DQ(DDR3_DQ), .DDR3_DQS(DDR3_DQS), .DDR3_DQS_n(DDR3_DQS_n),
@@ -308,7 +343,7 @@ module top (
         .sd_clk(sd_clk), .sd_mosi(sd_mosi), .sd_miso(sd_miso), .sd_cs_n(sd_cs_n),
         .ddr_ready(aux_ready),
         .m_go(sd_m_go), .m_addr(sd_m_addr), .m_we(sd_m_we), .m_wdata(sd_m_wdata),
-        .m_rdata(hd_rdata), .m_ack(hd_ack),
+        .m_rdata(hd_rdata), .m_ack(hd_m_ack && hd_own_s),
         .f_up_go(img_up_go), .f_up_drive(img_up_drive), .f_up_addr(img_up_addr), .f_up_data(img_up_data),
         .f_up_last(img_up_last), .f_up_bad(img_up_bad), .f_up_busy(img_up_busy), .f_up_done(img_up_done),
         .f_dn_go(img_dn_go), .f_dn_drive(img_dn_drive), .f_dn_addr(img_dn_addr),
@@ -364,7 +399,7 @@ module top (
         .dsk_store_idle(dsk_store_idle),
         .hd_present(hd_present),
         .hd_go(core_hd_go), .hd_addr(core_hd_addr), .hd_we(core_hd_we), .hd_be(core_hd_be),
-        .hd_wdata(core_hd_wdata), .hd_rdata(hd_rdata), .hd_ack(hd_ack),
+        .hd_wdata(core_hd_wdata), .hd_rdata(hd_rdata), .hd_ack(hd_m_ack && !hd_own_s),
         .hd_wb_go(hd_wb_go), .hd_wb_drv(hd_wb_drv), .hd_wb_blk(hd_wb_blk),
         .hd_rb_go(hd_rb_go), .hd_rb_ok(hd_rb_ok), .hd_size0(hd_size0), .hd_size1(hd_size1),
         .hd_sd_busy(hd_sd_busy),

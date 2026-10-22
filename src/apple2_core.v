@@ -166,10 +166,21 @@ module apple2_core (
     // it never actually waits.)  What turns a stall off -- a fill landing,
     // the write buffer draining -- just costs a clock.  DDR3 coming ready
     // is not covered: until then a read returns $FF anyway.
-    reg  aux_stall_q = 1'b0, cpu_go_q = 1'b0, rdy_q = 1'b0, reset_q = 1'b1;
-    wire aux_fresh = cpu_go_q || reset_q || (cpu_rdy != rdy_q);
+    //
+    // Main RAM needs two clocks, not one: the address goes into the BSRAM
+    // one clock after the step and its byte reaches cpu_ram_dout the clock
+    // after that, so a step two clocks after the last one would latch the
+    // previous address's byte (cpu_go_q2).  The same goes for the video
+    // having had the BSRAM two clocks back (vram_req_d2): cpu_ram_dout was
+    // not reloaded then.  A step that close only happens when the last one
+    // waited (ce_1m_pending) behind a long aux stall and the next ce_1m
+    // follows at once -- code running from aux or language-card RAM, e.g.
+    // Prince of Persia, read stale main-RAM bytes and crashed.
+    reg  aux_stall_q = 1'b0, cpu_go_q = 1'b0, cpu_go_q2 = 1'b0, rdy_q = 1'b0, reset_q = 1'b1;
+    reg  vram_req_d2 = 1'b0;
+    wire aux_fresh = cpu_go_q || cpu_go_q2 || reset_q || (cpu_rdy != rdy_q);
     // The same hold applies while an aux RAM access is not ready (aux_stall).
-    wire video_busy = vram_req || vram_req_d || aux_stall_q || aux_fresh;
+    wire video_busy = vram_req || vram_req_d || vram_req_d2 || aux_stall_q || aux_fresh;
     wire cpu_ce = (ce_1m || ce_1m_pending) && !video_busy;
 
     always @(posedge clk or posedge reset) begin
@@ -187,6 +198,8 @@ module apple2_core (
     always @(posedge clk) begin
         aux_stall_q <= aux_stall;
         cpu_go_q    <= cpu_go;
+        cpu_go_q2   <= cpu_go_q;
+        vram_req_d2 <= vram_req_d;
         rdy_q       <= cpu_rdy;
         reset_q     <= reset;
     end

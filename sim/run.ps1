@@ -131,6 +131,7 @@ Run-Tb 'tb_prodos_hd'    $core -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_p6boot'       $core -Gen '2012' -Defines $disk2Defines
 
 Run-Tb 'tb_aux_ram'     @('sim/models/ddr3_model.v', 'src/aux_ram.v') -Gen '2012'
+Run-Tb 'tb_auxstress'   (@('sim/models/ddr3_model.v', 'src/aux_ram.v', 'src/video_generator.v') + $core) -Gen '2012' -Defines $disk2Defines
 
 # The DDR3 IP is encrypted; sim/models/ddr3_model.v stands in for it.
 $allSources = & (Join-Path $root 'scripts\sources.ps1') -Except 'src/ddr3_memory_interface/ddr3_memory_interface.v'
