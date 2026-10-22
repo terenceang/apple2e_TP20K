@@ -11,6 +11,7 @@ This project's code was written with AI assistance.
 - **HDMI video** at 720×480p60 (CEA-861 VIC 2), with the 560×384 Apple display centered: text (40 and 80 column, MouseText), lo-res, hi-res and double hi-res, mixed mode and page 2; colour is an NTSC-style decode of the dot stream, so fills, fringes and the palette bit look as they do on a TV
 - **Audio** from the $C030 speaker and a **Mockingboard C** in slot 4, over HDMI (48 kHz L-PCM) and through the Dock's PT8211 DAC and amplifier to the 3.5 mm jack
 - **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files
+- **Clock** in slot 5 that ProDOS uses as a Thunderclock, so files get dated; the web page sets the time when it connects (there is no battery, so it is lost at power-off)
 - **Keyboard, gamepad and debugger over USB serial** at 1 Mbps; the [browser front end](web/README.md) in `web/` has the keyboard, the text screen, the debugger and the disk drives
 - **Built-in hardware debugger**: Ctrl+B freezes the CPU to inspect registers, single-step and dump memory
 
@@ -129,6 +130,7 @@ src/sound_generator.v   speaker and Mockingboard to the PT8211 DAC
 src/mockingboard/       Mockingboard C (two 6522 VIAs, two AY-3-8910s), slot 4
 src/disk2/              Disk II card and image store, slot 6
 src/prodos_hd.v         ProDOS block device, slot 7
+src/thunderclock.v      clock card ProDOS takes for a Thunderclock, slot 5
 src/sd_vol.v            the TF card: finds the drives' files on FAT32, loads them, writes them back
 src/input_controller.v  UART RX, keyboard, gamepad, $C0xx input registers
 src/serial_debugger.v   UART TX, console mirror, hardware debugger

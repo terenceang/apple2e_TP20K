@@ -13,6 +13,10 @@
 //   0xFF 0x03 <b>            RESET key: b bit3 = RESET held, bits 0-2 = PB0-2
 //                            (sent only with CONTROL down: the //e's RESET line
 //                            is CONTROL-gated, and the host owns modifiers)
+//   0xFF 0x05 <13 digits>    set the slot 5 clock: ASCII "YYMMDDWHHMMSS"
+//                            (W = day of week, 0 = Sunday).  Digits, not BCD
+//                            bytes, so the payload can never hold 0x02 (the
+//                            debugger toggle) or another packet leader
 //   0x1B '[' A|B|C|D         cursor keys, mapped to 0x0B/0x0A/0x15/0x08
 //   anything else            a single ASCII keystroke
 //
@@ -46,7 +50,11 @@ module input_controller (
 
     // Diagnostic indicator
     output wire        key_strobe,
-    output wire        kbd_reset      // RESET key held
+    output wire        kbd_reset,     // RESET key held
+
+    // Slot 5 clock (src/thunderclock.v)
+    output reg         clk_set = 1'b0,
+    output reg  [51:0] clk_time = 52'd0  // BCD {YY, MO, DD, W, HH, MI, SS}
 );
 
     // 1 Mbps baud receiver at 27 MHz; the divisor is src/uart_defs.vh
@@ -174,6 +182,8 @@ module input_controller (
     localparam PKT_KEY_CODE= 4'd8;
     localparam PKT_KEY_BTN= 4'd9;
     localparam PKT_RST_BTN= 4'd10;
+    localparam PKT_CLK    = 4'd11;
+    reg [3:0] clk_n = 4'd0;            // clock digits still to come
 
     reg [3:0] pkt_state = PKT_NORMAL;
 
@@ -232,6 +242,7 @@ module input_controller (
             joy_pdl0  <= 8'd128;
             joy_pdl1  <= 8'd128;
         end else begin
+            clk_set <= 1'b0;
             // Clear keyboard strobe on $C010 access
             if ((io_read || io_write) && (io_addr == 8'h10)) begin
                 kbd_data[7] <= 1'b0;
@@ -308,7 +319,10 @@ module input_controller (
                             pkt_state <= PKT_GP_BTN;
                         else if (urx_byte == 8'h03)
                             pkt_state <= PKT_RST_BTN;
-                        else begin
+                        else if (urx_byte == 8'h05) begin
+                            clk_n     <= 4'd12;
+                            pkt_state <= PKT_CLK;
+                        end else begin
                             if (urx_byte == 8'h04) akd <= 1'b0; // all keys up
                             pkt_state <= PKT_NORMAL;
                         end
@@ -352,6 +366,16 @@ module input_controller (
                         latch_buttons(urx_byte);
                         key_reset <= urx_byte[3];
                         pkt_state <= PKT_NORMAL;
+                    end
+
+                    // FF 05: thirteen ASCII digits, each one's low nibble
+                    PKT_CLK: begin
+                        clk_time <= {clk_time[47:0], urx_byte[3:0]};
+                        clk_n    <= clk_n - 4'd1;
+                        if (clk_n == 4'd0) begin
+                            clk_set   <= 1'b1;
+                            pkt_state <= PKT_NORMAL;
+                        end
                     end
 
                     default: pkt_state <= PKT_NORMAL;

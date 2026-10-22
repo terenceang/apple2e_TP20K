@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 
 import {
   encodeKey,
+  encodeClock,
   encodeGamepad,
   encodeKeysUp,
   clampPaddle,
@@ -23,6 +24,16 @@ import {
   SCR_FLAG,
   textPageIndex,
 } from '../src/protocol.js'
+
+test('a clock packet is FF 05 and YYMMDDWHHMMSS as ASCII digits, never 0x02', () => {
+  // 2026-10-22 is a Thursday (4); local time, as ProDOS has no time zone
+  const p = encodeClock(new Date(2026, 9, 22, 13, 45, 7))
+  assert.deepEqual([...p.slice(0, 2)], [0xff, 0x05])
+  assert.equal(String.fromCharCode(...p.slice(2)), '2610224134507')
+  // a Sunday is 0, and early in the month every field is zero-padded
+  assert.equal(String.fromCharCode(...encodeClock(new Date(2027, 0, 3, 2, 2, 2)).slice(2)), '2701030020202')
+  assert.ok(!p.slice(2).includes(0x02))
+})
 
 test('a key packet is FE <code> <buttons>', () => {
   assert.deepEqual([...encodeKey(0x61, 0b001)], [0xfe, 0x61, 0b001])

@@ -45,6 +45,10 @@ module tb_input;
     wire       io_hit;
     wire       key_strobe;
     wire       kbd_reset;
+    wire        clk_set;
+    wire [51:0] clk_time;
+    integer     clk_sets = 0;
+    always @(posedge clk) if (clk_set) clk_sets = clk_sets + 1;
 
     wire [7:0] rx_byte;
     wire       rx_valid;
@@ -63,7 +67,9 @@ module tb_input;
         .io_dout   (io_dout),
         .io_hit    (io_hit),
         .key_strobe(key_strobe),
-        .kbd_reset (kbd_reset)
+        .kbd_reset (kbd_reset),
+        .clk_set   (clk_set),
+        .clk_time  (clk_time)
     );
 
     integer failures = 0;
@@ -265,6 +271,20 @@ module tb_input;
         ok(kbd_reset === 1'b0, "FF 03 01 releases RESET");
         send_byte(8'hFF); send_byte(8'h03); send_byte(8'h00);
         repeat (SETTLE) @(posedge clk);
+
+        // Clock: FF 05 and 13 ASCII digits "YYMMDDWHHMMSS", one set, no keystroke
+        send_byte(8'hFF); send_byte(8'h05);
+        begin : clock_digits
+            reg [8*13-1:0] t;
+            integer k;
+            t = "2610224134507";                 // 2026-10-22, Thursday, 13:45:07
+            for (k = 12; k >= 0; k = k - 1) send_byte(t[8*k +: 8]);
+        end
+        repeat (SETTLE) @(posedge clk);
+        ok(clk_sets == 1, "FF 05 sets the clock once");
+        ok(clk_time === {8'h26, 8'h10, 8'h22, 4'h4, 8'h13, 8'h45, 8'h07}, "FF 05 time is BCD YYMMDDWHHMMSS");
+        reg_read(8'h00);
+        ok(io_dout[7] === 1'b0, "the clock packet types nothing");
 
         // ------------------------------------------------------------------
         // 3. Cursor keys

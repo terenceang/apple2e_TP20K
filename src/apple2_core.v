@@ -31,6 +31,8 @@ module apple2_core (
     output reg         dhires,        // AN3 cleared ($C05E): double hi-res
     output reg         store80,
     input  wire        vbl,
+    input  wire        clk_set,       // set the slot 5 clock (input_controller FF 05)
+    input  wire [51:0] clk_time,
 
     // Video Generator RAM and Char ROM access
     input  wire        vram_req,
@@ -53,7 +55,7 @@ module apple2_core (
     output wire [7:0]  aux_wr_data,
     input  wire        aux_wr_busy,
 
-    // Disk ][ controller in slot 6, and its image store in SDRAM
+    // Disk ][ controller in slot 6, and its image store in DDR3
     // (src/disk2/disk2_card.v, src/disk2/disk2_store.v).  The store's SDRAM
     // port is wired to aux_ram's arbiter at the top level; the card sits on the
     // slot bus below.
@@ -151,8 +153,21 @@ module apple2_core (
     // aux_stall is the hold while an aux RAM access is not ready; assigned
     // where its inputs are decoded, further down.
     wire aux_stall;
+    // It is used a clock late: it comes from aux_ram's 17-bit cache tag
+    // compare on the CPU's own address, and feeding that into cpu_go in the
+    // same clock was clk_pixel's critical path.  A clock of lag is safe as
+    // long as nothing that can turn a stall *on* changed in that clock, and
+    // those all happen at one of: the CPU stepping (its address, cpu_we, the
+    // softswitches, and a write, which empties the cache and fills the write
+    // buffer), the debugger releasing RDY, and reset.  aux_fresh holds the
+    // CPU for the clock after each.  (The next ce_1m is ~26 clocks off, so
+    // it never actually waits.)  What turns a stall off -- a fill landing,
+    // the write buffer draining -- just costs a clock.  DDR3 coming ready
+    // is not covered: until then a read returns $FF anyway.
+    reg  aux_stall_q = 1'b0, cpu_go_q = 1'b0, rdy_q = 1'b0, reset_q = 1'b1;
+    wire aux_fresh = cpu_go_q || reset_q || (cpu_rdy != rdy_q);
     // The same hold applies while an aux RAM access is not ready (aux_stall).
-    wire video_busy = vram_req || vram_req_d || aux_stall;
+    wire video_busy = vram_req || vram_req_d || aux_stall_q || aux_fresh;
     wire cpu_ce = (ce_1m || ce_1m_pending) && !video_busy;
 
     always @(posedge clk or posedge reset) begin
@@ -167,17 +182,22 @@ module apple2_core (
     // A CPU cycle that really happens: while the debugger holds RDY low the
     // enable keeps ticking, and side effects must not replay on each tick.
     wire cpu_go = cpu_ce && cpu_rdy;
+    always @(posedge clk) begin
+        aux_stall_q <= aux_stall;
+        cpu_go_q    <= cpu_go;
+        rdy_q       <= cpu_rdy;
+        reset_q     <= reset;
+    end
     // A real access to the bus, by the CPU or by the debugger while it holds
     // it.  The slot bus decodes on this rather than on cpu_go, so its strobes
     // follow the same address the cpu_din mux uses (effective_cpu_addr).
     wire bus_cycle = cpu_go || !cpu_rdy;
 
     // Slot bus (src/slot_bus.v): the //e's peripheral bus decode, the $C800
-    // expansion-space arbitration and the interrupt daisy chain.  A Disk ][
-    // controller in slot 6 is the one card in it; every other slot is empty,
-    // so those card-side inputs are tied inactive at the instantiation and
-    // $C100-$CFFF behaves as it did before this was split out for a card that
-    // is not there: the internal ROM when a softswitch selects it, $00 for an
+    // expansion-space arbitration and the interrupt daisy chain.  The cards
+    // are listed at card_present; an empty slot's card-side inputs are tied
+    // inactive at the instantiation, so its $Cn00 space behaves as on a //e
+    // with nothing there: the internal ROM when a softswitch selects it, $00 for an
     // empty slot.  The wires are declared here rather than next to the
     // instantiation because the CPU below takes the interrupt lines from them.
     wire        slot_irq_n;
@@ -322,10 +342,8 @@ module apple2_core (
     // Effective address: CPU address during normal operation, dbg_mem_addr when paused
     wire [15:0] effective_cpu_addr = (!cpu_rdy) ? dbg_mem_addr : cpu_addr;
 
-    // The slot bus.  There is one card in it: a Disk ][ controller in slot 6,
-    // which is the only card the //e's own ROM boot code knows how to drive
-    // ($C600 in the internal ROM is the Disk ][ boot).  Every other slot stays
-    // empty, so its card-side inputs are tied to their inactive levels.
+    // The slot bus.  card_present (below) lists the cards; the empty slots'
+    // card-side inputs are tied to their inactive levels.
     //
     // The active-low ties are 7'h7F and not 7'd7: that is decimal seven,
     // 7'b0000111, which would leave slot 4 asserting a line it has no card to
@@ -336,17 +354,22 @@ module apple2_core (
     wire [7:0]  mock_rom_data;
     wire [7:0]  hd_rom_data;
     wire [7:0]  hd_io_data;
+    wire [7:0]  tc_rom_data;
+    wire [7:0]  tc_io_data;
     wire        d2_any_disk;    // a Disk ][ drive holds an image (gates the $C600 ROM)
     wire [6:0]  card_present;
     // A byte per card, so 56 bits wide, not 7:
     // Slot 4 (index 3) is Mockingboard C.
+    // Slot 5 (index 4) is the clock.
     // Slot 6 (index 5) is the Disk ][.
     // Slot 7 (index 6) is the ProDOS hard disk.
     wire [55:0] card_data;
     assign card_data = ({48'd0, hd_rom_data} << (6 * 8)) |
-                       // no disk in either drive: slot 6 reads as empty, so the
-                       // Autostart scan passes it by and falls into BASIC
-                       ({48'd0, d2_any_disk ? d2_rom_data : 8'h00} << (5 * 8)) |
+                       // no disk in either drive: slot 6 reads as empty (the
+                       // floating bus), so the Autostart scan passes it by and
+                       // falls into BASIC
+                       ({48'd0, d2_any_disk ? d2_rom_data : vram_data} << (5 * 8)) |
+                       ({48'd0, tc_rom_data} << (4 * 8)) |
                        ({48'd0, mock_rom_data} << (3 * 8));
 
     // The card's registers are on the $C0Ex bus, which the read mux claims
@@ -386,6 +409,7 @@ module apple2_core (
         .iosel_n(iosel_n),       // ...and /IOSEL, to answer $C600-$C6FF
         .irq_out_n(),
         .iostrobe_n(),           // $CFFF releases the expansion space
+        .float_data(vram_data),          // the floating bus: the video's last byte
         .int_rom_sel(slot_int_rom),
         .slot_dout(slot_dout),
         .irq_n(slot_irq_n),
@@ -540,11 +564,13 @@ module apple2_core (
                 cpu_din_comb = d2_io_data;
             end else if (effective_cpu_addr[7:4] == 4'hF) begin
                 cpu_din_comb = hd_io_data;      // slot 7, $C0F0-$C0FF
+            end else if (effective_cpu_addr[7:4] == 4'hD) begin
+                cpu_din_comb = tc_io_data;      // slot 5, $C0D0-$C0DF
             end else if (mock_devsel_hit) begin
                 // Mockingboard alternate I/O registers at $C0C0-$C0CF
                 cpu_din_comb = mock_rom_data;
             end else begin
-                cpu_din_comb = 8'h00;
+                cpu_din_comb = vram_data;       // nothing answers: the floating bus
             end
         end else if (is_slot_rom) begin
             // Slot 4 Mockingboard registers override internal ROM when accessed
@@ -600,7 +626,7 @@ module apple2_core (
     assign fl_wr_drv = d2_pos_drive;
     assign fl_wr_trk = d2_pos_track[5:0];
 
-    assign card_present = 7'b1101000;   // slot 7 (bit 6): ProDOS hard disk, slot 6 (bit 5): the Disk ][, slot 4 (bit 3): Mockingboard
+    assign card_present = 7'b1111000;   // slot 7 (bit 6): ProDOS hard disk, slot 6 (bit 5): the Disk ][, slot 5 (bit 4): clock, slot 4 (bit 3): Mockingboard
     wire [6:0]  d2_dbg_track;
     wire [7:0]  d2_dbg_head;
     assign debug_dsk_head = d2_dbg_head;
@@ -622,6 +648,20 @@ module apple2_core (
         .irq_n(mock_irq_n),
         .audio_left(mock_audio_left),
         .audio_right(mock_audio_right)
+    );
+
+    // ------------------------------------------------------------------
+    // Clock (ProDOS sees a Thunderclock), slot 5
+    // ------------------------------------------------------------------
+    thunderclock u_clock (
+        .clk(clk),
+        .bus_cycle(cpu_go),
+        .cpu_we(cpu_we),
+        .addr(effective_cpu_addr),
+        .set(clk_set),
+        .set_time(clk_time),
+        .rom_data(tc_rom_data),
+        .io_data(tc_io_data)
     );
 
     // ------------------------------------------------------------------

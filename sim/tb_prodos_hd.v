@@ -36,11 +36,17 @@ module tb_prodos_hd;
     reg         hd_ack = 1'b0;
     reg         sd_busy = 1'b0;
     wire [15:0] pc;
+    // input_controller's addresses, idle: no key, no button, paddles at 0
+    // ($C000, $C010, $C060-$C06F, $C070).  Left unclaimed they read the
+    // floating bus, a constant $A0 here (no video), and bit 7 of $C062 set
+    // at reset sends the enhanced ROM into its self-test (Solid-Apple held).
+    wire [7:0]  io_a;
+    wire        kbd_hit = io_a == 8'h00 || io_a == 8'h10 || io_a[7:4] == 4'h6 || io_a == 8'h70;
 
     apple2_core dut (
         .clk(clk), .reset(reset), .ce_1m(ce_1m),
-        .input_dout(8'h00), .input_hit(1'b0),
-        .io_addr(), .io_read(), .io_write(), .spkr_pulse(),
+        .input_dout(8'h00), .input_hit(kbd_hit),
+        .io_addr(io_a), .io_read(), .io_write(), .spkr_pulse(),
         .text_mode(), .mixed_mode(), .page2(), .hires_mode(), .vbl(1'b0),
         .vram_req(1'b0), .vram_addr(16'd0), .vram_data(),
         .char_rom_addr(12'd0), .char_rom_data(),

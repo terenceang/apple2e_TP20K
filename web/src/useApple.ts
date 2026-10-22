@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppleStream } from './stream.js'
-import { encodeGamepad, encodeKey, encodeKeysUp, encodeReset, CTRL_B, CMD } from './protocol.js'
+import { encodeClock, encodeGamepad, encodeKey, encodeKeysUp, encodeReset, CTRL_B, CMD } from './protocol.js'
 import { SerialLink, serialSupported, BAUD } from './serial-link.js'
 import { isLetter, resolve } from './keymap.js'
 import { PREF_AUTOCONNECT, getSavedBool, setSavedBool, loadDisk, saveDisk } from './prefs.js'
@@ -540,6 +540,9 @@ export function useApple() {
     // trusts that never pauses the machine and talks to the keyboard instead.
     stream.current.mode = 'console'
     setMode('console')
+    // The slot 5 clock has no battery: give it the time while the parser takes
+    // packets (it drops them in the debugger, which the sync below enters).
+    link.current?.write(encodeClock(new Date()))
     void syncRef.current().then(() => cardRef.current().catch(() => {}))
   }, [conn.state])
 

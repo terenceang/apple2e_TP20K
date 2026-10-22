@@ -101,7 +101,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $root 'roms\disk2_p6.hex'))) {
 $disk2 = @('src/disk2/disk2_card.v', 'src/disk2/disk2_store.v')
 $mockingboard = @('src/mockingboard/mockingboard_card.v', 'src/mockingboard/via6522.v', 'src/mockingboard/ay8910.v')
 $core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v',
-           'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v') + $disk2 + $mockingboard
+           'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v', 'src/thunderclock.v') + $disk2 + $mockingboard
+Run-Tb 'tb_thunderclock' @('src/thunderclock.v')
 Run-Tb 'tb_disk2'        $disk2 -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_diskimg'      @('src/serial_debugger.v', 'src/disk2/disk2_store.v') -Gen '2012'
 # tb_sdvol and tb_sdcopy boot from a FAT32 card built by the page's own FAT code

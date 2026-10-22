@@ -12,7 +12,7 @@
 //  and the shared /NMI and /DMA lines.
 //
 //  The no-card behaviour through apple2_core (the internal ROM when INTCXROM is
-//  on, $00 in an empty slot, the C3xx/INTC8ROM/$CFFF rules) is tb_auxsw's job,
+//  on, the floating bus in an empty slot, the C3xx/INTC8ROM/$CFFF rules) is tb_auxsw's job,
 //  and it now checks that through slot_bus.
 
 module tb_slots;
@@ -37,6 +37,7 @@ module tb_slots;
     // Flat here because a packed localparam is SystemVerilog, and this bench
     // builds as -g2005: 7 cards x 8 bits.
     localparam [55:0] NO_DATA = 56'd0;
+    localparam [7:0]  FLOAT   = 8'hC5;  // the floating bus, so a stray $00 cannot pass
 
     // Fake cards.  Index 0 is slot 1, so the vectors are indexed from the slot
     // number minus one.  Every populated slot drives a distinct byte, so a
@@ -69,7 +70,7 @@ module tb_slots;
         .card_nmi_n(card_nmi_n), .card_dma_n(card_dma_n),
         .devsel_n(devsel_n), .iosel_n(iosel_n), .irq_out_n(irq_out_n),
         .iostrobe_n(iostrobe_n),
-        .int_rom_sel(int_rom_sel), .slot_dout(slot_dout),
+        .float_data(FLOAT), .int_rom_sel(int_rom_sel), .slot_dout(slot_dout),
         .irq_n(irq_n), .nmi_n(nmi_n), .dma_n(dma_n)
     );
 
@@ -154,11 +155,11 @@ module tb_slots;
         check("no cards: slot 5's byte comes back, 8 bits of it",
               slot_dout === 8'h5A);
         // A byte sitting on the data vector of a slot with no card in it must
-        // not reach the bus: that is what makes the $00 float correct.
+        // not reach the bus: the floating bus does.
         card_present = 7'd0;
         intcxrom     = 1'b0;
         look(16'hC500);
-        check("an absent slot's byte does not reach the bus", slot_dout === 8'h00);
+        check("an absent slot's byte does not reach the bus", slot_dout === FLOAT);
         card_data = NO_DATA;
         intcxrom  = 1'b1;
 
@@ -226,10 +227,10 @@ module tb_slots;
         card_data[5] = card_byte(6);
         card_present = 7'b0110100;
 
-        // An empty slot's bus floats, and reads as $00.
-        look(16'hC200); check("empty slot 2 floats", int_rom_sel === 1'b0 && slot_dout === 8'h00);
-        look(16'hC400); check("empty slot 4 floats", int_rom_sel === 1'b0 && slot_dout === 8'h00);
-        look(16'hC700); check("empty slot 7 floats", int_rom_sel === 1'b0 && slot_dout === 8'h00);
+        // An empty slot's bus floats: float_data.
+        look(16'hC200); check("empty slot 2 floats", int_rom_sel === 1'b0 && slot_dout === FLOAT);
+        look(16'hC400); check("empty slot 4 floats", int_rom_sel === 1'b0 && slot_dout === FLOAT);
+        look(16'hC700); check("empty slot 7 floats", int_rom_sel === 1'b0 && slot_dout === FLOAT);
 
         // Each card answers its own $Cnxx window, not its neighbour's.
         look(16'hC500); check("slot 5 ROM", slot_dout === card_byte(5));
@@ -248,7 +249,7 @@ module tb_slots;
 
         // $C800 is unclaimed: the floating bus, and no internal ROM either.
         look(16'hC800); check("C800 unclaimed floats",
-                              int_rom_sel === 1'b0 && slot_dout === 8'h00);
+                              int_rom_sel === 1'b0 && slot_dout === FLOAT);
         settle;
 
         // ---- The $C800 claim: a card with expansion ROM claims it on /IOSEL
@@ -261,12 +262,12 @@ module tb_slots;
         card_data[4] = 8'hEE;
         look(16'hC800); check("C800 read is live", slot_dout === 8'hEE);
         bus(16'hCFFF);
-        look(16'hC800); check("C800 released by $CFFF", slot_dout === 8'h00);
+        look(16'hC800); check("C800 released by $CFFF", slot_dout === FLOAT);
 
         // A later claim replaces the earlier one, and it is that card's.
         bus(16'hC600);                // slot 6 has no expansion ROM yet
         look(16'hC800); check("C800 stays unclaimed without an expansion ROM",
-                              slot_dout === 8'h00);
+                              slot_dout === FLOAT);
         card_exprom[5] = 1'b1;        // now give slot 6 one
         bus(16'hC600);
         look(16'hC800); check("C800 served by slot 6", slot_dout === card_byte(6));

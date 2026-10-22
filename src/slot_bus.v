@@ -77,8 +77,12 @@ module slot_bus (
     output wire        iostrobe_n,    // /IOSTROBE: a $CFFF cycle releases $C800
 
     // Arbitration of the $C100-$CFFF read bus, consumed by apple2_core's
-    // cpu_din mux: the internal ROM when int_rom_sel, else slot_dout ($00 when
-    // no card answers, which is what an empty slot's floating bus reads as).
+    // cpu_din mux: the internal ROM when int_rom_sel, else slot_dout, which is
+    // float_data when no card answers: an empty slot's bus floats, and on a //e
+    // it reads as the byte the video last fetched.  Software tells an empty
+    // slot from a card by that byte changing (MECC's Computer Inspector reads
+    // each $Cn page twice), so a constant here reads as a card it cannot name.
+    input  wire [7:0]  float_data,
     output wire        int_rom_sel,   // the internal ROM answers this access
     output wire [7:0]  slot_dout,
 
@@ -176,7 +180,7 @@ module slot_bus (
     // first, so nothing is ever read from a card that is not there.
     wire [2:0] rom_idx    = rom_owner - 3'd1;
     wire       have_card  = (rom_owner != 3'd0) ? card_present[rom_idx] : 1'b0;
-    assign slot_dout = have_card ? card_data[rom_idx] : 8'h00;
+    assign slot_dout = have_card ? card_data[rom_idx] : float_data;
 
     // ------------------------------------------------------------------
     // Interrupts

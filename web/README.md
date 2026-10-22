@@ -109,7 +109,7 @@ local build has the real glyphs; a published one does not.
 
 ## The wire protocol
 
-Host to //e, at 1000000 (1 Mbps) 8N1. Everything except the two packets is a plain ASCII
+Host to //e, at 1000000 (1 Mbps) 8N1. Everything except the packets below is a plain ASCII
 keystroke, so a Bluetooth-to-UART module or `picocom` still works.
 
 | Bytes | Meaning |
@@ -117,7 +117,9 @@ keystroke, so a Bluetooth-to-UART module or `picocom` still works.
 | `02` | toggle the hardware debugger. The firmware throws this away before the keyboard sees it, so Ctrl+B can never type a character |
 | `FE <code> <btns>` | one keypress: the final 7-bit key code, and the paddle button bits (bit 0 Open-Apple, bit 1 Solid-Apple) down with it |
 | `FF 01 <btns> <x> <y>` | gamepad: buttons, paddle 0, paddle 1 |
+| `FF 03 <b>` | the RESET key: bit 3 = held, bits 0-2 = the paddle buttons (sent only with CONTROL down) |
 | `FF 04` | all keys up: drops any-key-down (`$C010` bit 7) |
+| `FF 05 <13 digits>` | set the slot 5 clock: ASCII `YYMMDDWHHMMSS`, local time, W = day of week (0 = Sunday). The page sends it on every connect (`encodeClock`). Digits, not BCD bytes, so the payload can never contain `02` |
 | `1B 5B 41/42/43/44` | ANSI cursor keys, mapped to `$0B/$0A/$15/$08` |
 | anything else | a single ASCII keystroke, with CR/LF and DEL normalised |
 

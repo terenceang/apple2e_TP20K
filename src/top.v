@@ -253,6 +253,8 @@ module top (
     wire       input_hit;
     wire       key_strobe;
     wire       kbd_reset;
+    wire        clk_set;           // slot 5 clock, set by the host (FF 05)
+    wire [51:0] clk_time;
 
     input_controller u_input (
         .clk(clk_pixel),
@@ -268,7 +270,9 @@ module top (
         .io_dout(input_dout),
         .io_hit(input_hit),
         .key_strobe(key_strobe),
-        .kbd_reset(kbd_reset)
+        .kbd_reset(kbd_reset),
+        .clk_set(clk_set),
+        .clk_time(clk_time)
     );
 
     // Apple //e Core (CPU, Memory, Softswitches)
@@ -382,6 +386,7 @@ module top (
         .dhires(dhires),
         .store80(store80),
         .vbl(vbl),
+        .clk_set(clk_set), .clk_time(clk_time),
         .vram_req(vram_req),
         .vram_addr(vram_addr),
         .vram_data(vram_data),

@@ -201,7 +201,10 @@ module prodos_hd (
             8'hA0: b = 8'hC6; 8'hA1: b = 8'h45; 8'hA2: b = 8'hAD; 8'hA3: b = 8'hF4; 8'hA4: b = 8'hC0; 8'hA5: b = 8'h30; 8'hA6: b = 8'hFB; 8'hA7: b = 8'h4C;
             8'hA8: b = 8'h61; 8'hA9: b = 8'hC7; 8'hAA: b = 8'hA9; 8'hAB: b = 8'h27; 8'hAC: b = 8'h38; 8'hAD: b = 8'h60;
             8'hFC: b = 8'hFF; 8'hFD: b = 8'hFF;   // 65,535 blocks
-            8'hFE: b = 8'h17;                   // fixed, two volumes, status/read/write
+            // removable (the page can swap the volume), two volumes,
+            // status/read/write.  Not $17: MECC's Computer Inspector names
+            // exactly $Cn07=$3C + $CnFE=$17 a Corvus Transporter.
+            8'hFE: b = 8'h97;
             8'hFF: b = 8'h29;                   // driver entry, $C729
             default: b = 8'h00;
             endcase

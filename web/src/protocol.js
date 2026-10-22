@@ -47,6 +47,27 @@ export function encodeReset(down, buttons = 0) {
   return Uint8Array.from([GAMEPAD_HDR, 0x03, (down ? 0x08 : 0) | (buttons & 0x07)])
 }
 
+/**
+ * Set the slot 5 clock (src/thunderclock.v): FF 05 and thirteen ASCII digits,
+ * "YYMMDDWHHMMSS" in local time, W the day of week with 0 = Sunday (what
+ * ProDOS's Thunderclock driver infers the year from). Digits rather than BCD
+ * bytes, so the payload can never hold 0x02, which toggles the debugger.
+ *
+ * @param {Date} d
+ */
+export function encodeClock(d) {
+  const two = (n) => String(n).padStart(2, '0')
+  const s =
+    two(d.getFullYear() % 100) +
+    two(d.getMonth() + 1) +
+    two(d.getDate()) +
+    String(d.getDay()) +
+    two(d.getHours()) +
+    two(d.getMinutes()) +
+    two(d.getSeconds())
+  return Uint8Array.from([GAMEPAD_HDR, 0x05, ...Array.from(s, (c) => c.charCodeAt(0))])
+}
+
 /** A gamepad packet: PB0/PB1/PB2 in the low three bits, then two paddles. */
 export function encodeGamepad(buttons, x, y) {
   return Uint8Array.from([
