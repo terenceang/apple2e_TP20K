@@ -9,7 +9,9 @@
 // $C7FF entry) the way ProDOS does: WRITE block 5 from $0800, READ it back to
 // $1000 and compare, STATUS (65,535 blocks), and STATUS on drive 2 (no
 // volume there, so no device).  $0300 = $AA when all of it passed, and the
-// written block must also have been handed to the TF card (wb_go).
+// written block must also have been handed to the TF card (wb_go).  Each
+// READ first asks the TF card for its block (rb_go, the image here is
+// already "on the card"), and the driver must wait while the card is busy.
 //
 // The DDR3 is a behavioural port with a deliberately slow answer (LAT clocks,
 // a few times what aux_ram takes) and it fails the bench if a request arrives
@@ -26,7 +28,7 @@ module tb_prodos_hd;
 
     localparam integer LAT = 60;     // ~2.2 us per request
 
-    wire        hd_go, hd_we, wb_go, wb_drv;
+    wire        hd_go, hd_we, wb_go, wb_drv, rb_go;
     wire [1:0]  hd_be;
     wire [24:0] hd_addr;
     wire [15:0] hd_wdata, wb_blk;
@@ -47,6 +49,7 @@ module tb_prodos_hd;
         .hd_present(2'b01), .hd_go(hd_go), .hd_addr(hd_addr), .hd_we(hd_we), .hd_be(hd_be),
         .hd_wdata(hd_wdata), .hd_rdata(hd_rdata), .hd_ack(hd_ack),
         .hd_wb_go(wb_go), .hd_wb_drv(wb_drv), .hd_wb_blk(wb_blk), .hd_sd_busy(sd_busy),
+        .hd_rb_go(rb_go), .hd_rb_ok(1'b1),
         .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_aux(1'b0), .dbg_mem_ready(),
         .debug_cpu_pc(pc), .debug_cpu_addr(), .debug_cpu_dout(), .debug_cpu_we(),
         .debug_cpu_sync(), .debug_cpu_a(), .debug_cpu_x(), .debug_cpu_y(),
@@ -135,8 +138,17 @@ module tb_prodos_hd;
     end
 
     // The TF card: a write-back keeps it busy for a while, as a real one does
-    integer wbs = 0, wb_bad = 0, bt = 0;
+    integer wbs = 0, wb_bad = 0, bt = 0, rbs = 0, rb_bad = 0;
     always @(posedge clk) begin
+        if (rb_go) begin
+            // the boot reads block 0, the test program block 5
+            rbs = rbs + 1;
+            if (wb_drv !== 1'b0 || (wb_blk !== 16'd0 && wb_blk !== 16'd5)) rb_bad = rb_bad + 1;
+            if (sd_busy || hd_go) rb_bad = rb_bad + 1;
+            sd_busy <= 1'b1; bt = 2000;
+        end else if (hd_go && sd_busy) begin
+            $display("FAIL: DDR3 request at %0t while the TF card is busy", $time); fails = fails + 1;
+        end
         if (wb_go) begin
             wbs = wbs + 1;
             if (wb_drv !== 1'b0 || wb_blk !== 16'd5) wb_bad = wb_bad + 1;
@@ -169,6 +181,14 @@ module tb_prodos_hd;
                 if (fails < 10) $display("FAIL: block 5 byte %0d = %02x, block 0 has %02x", i, img[5 * 512 + i], img[i]);
                 fails = fails + 1;
             end
+        // the profile: the bench's card takes ~1000 clocks a read, ~3000 a write
+        if (dut.u_prodos_hd.rd_max !== 16'd3 || dut.u_prodos_hd.wr_max < 16'd11 || dut.u_prodos_hd.wr_max > 16'd12) begin
+            $display("FAIL: profile read max %0d (want 3), write max %0d (want 11-12)",
+                     dut.u_prodos_hd.rd_max, dut.u_prodos_hd.wr_max); fails = fails + 1;
+        end
+        if (rbs != 2 || rb_bad != 0) begin
+            $display("FAIL: %0d block reads (%0d wrong), want blocks 0 and 5", rbs, rb_bad); fails = fails + 1;
+        end
         if (wbs != 1 || wb_bad != 0) begin
             $display("FAIL: %0d write-backs (%0d wrong), want one of drive 1 block 5", wbs, wb_bad); fails = fails + 1;
         end

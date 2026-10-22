@@ -173,8 +173,9 @@ FAT32 (`src/fat32.js`, `src/card.js`) over three debugger commands:
   then `done` (`writeSectors`). The serial link sets the pace: ~45 s per MB of
   non-zero sectors, so a big volume is quicker through a card reader.
 - `y` and a drive digit 1-4 reloads that drive from `A2CONFIG.TXT` and prints
-  a prompt at once; the load runs on, so poll `i` until busy clears (~30 s for
-  a whole volume) (`reloadDrive`).
+  a prompt at once; the load runs on, so poll `i` until busy clears (about a
+  second for a floppy; a volume is only looked up, its blocks are read from
+  the card as ProDOS asks) (`reloadDrive`).
 
 A floppy the Apple writes goes back into its `.dsk` file by itself, about a
 second after the drive goes quiet (never during a debugger session).

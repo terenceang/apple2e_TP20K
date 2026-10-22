@@ -13,7 +13,6 @@ This project's code was written with AI assistance.
 - **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files
 - **Keyboard, gamepad and debugger over USB serial** at 1 Mbps; the [browser front end](web/README.md) in `web/` has the keyboard, the text screen, the debugger and the disk drives
 - **Built-in hardware debugger**: Ctrl+B freezes the CPU to inspect registers, single-step and dump memory
-- **Loading screen** while the TF card's images load at power-on, so a 32 MB volume (~30 s) does not look like a hang
 
 ## Requirements
 
@@ -72,7 +71,22 @@ The disk commands the web page uses (`d e n` for floppy images over the link, `b
 
 ### The TF card
 
-An ordinary FAT32 card, readable on any PC. Images go in the root directory; `A2CONFIG.TXT` there names each drive's file by its 8.3 name (`S6D1=LODERU~1.DSK`), and the web page writes it for you. The FPGA has no file system of its own: at power-on it finds the config and the four files by name, checks each is in one piece on the card and of the right size, and streams it in. A file that is missing, fragmented or the wrong kind leaves its drive empty, and the page says why. Slot 6 takes 143,360-byte `.dsk`/`.do`/`.po` images; slot 7 takes `.hdv`/`.po` volumes up to 32 MB (a `.dsk` is in DOS sector order, so it cannot be a ProDOS block device).
+An ordinary FAT32 card, readable on any PC. Images go in the root directory; `A2CONFIG.TXT` there names each drive's file by its 8.3 name (`S6D1=LODERU~1.DSK`), and the web page writes it for you. The FPGA has no file system of its own: at power-on it finds the config and the four files by name, checks each is in one piece on the card and of the right size, and streams the floppies in. Hard-disk volumes stay on the card: each block is read when ProDOS asks for it, and the last one read or written is remembered. A file that is missing, fragmented or the wrong kind leaves its drive empty, and the page says why. Slot 6 takes 143,360-byte `.dsk`/`.do`/`.po` images; slot 7 takes `.hdv`/`.po` volumes up to 32 MB (a `.dsk` is in DOS sector order, so it cannot be a ProDOS block device).
+
+Estimated hard-disk timing per 512-byte block (from the design, not yet measured on hardware):
+
+| Case | Time | Why |
+|------|------|-----|
+| Best: the block just read or written | ~7.6 ms | the 6502's copy loop alone (512 × 15 cycles at 1.02 MHz) |
+| Typical: any other block | ~8–9 ms | + one card read, ~0.4 ms of transfer plus 0.1–1 ms of card access |
+| Slow card | ~110 ms | the SD card's 100 ms read limit |
+| Worst: behind a floppy write-back | ~360 ms | waits for the one sector already being written (250 ms write limit) |
+| Card removed | ~0.75 s, then I/O error | the board gives up and ProDOS gets error $27 |
+| Write | ~7 ms + 1–3 ms (worst 250 ms) | the copy loop, then the card writing the block |
+
+That is roughly 60 KB/s, set by the 1 MHz CPU rather than the card: about 5–10× a Disk II and about the same as the fastest real //e hard-disk cards.
+
+To measure your own card: use the hard disk for a while, press Ctrl+B, then `@c0f0` and `m`. The last eight bytes of that line are four 16-bit little-endian times in units of 9.48 µs: the last read, the worst read, the last write and the worst write (the card's part only; a remembered block reads as 0). `POKE 49399,0` (`$C0F7`) clears them.
 
 Copying through the board runs at the serial link's speed, about 13 s for a floppy and up to ~48 minutes for a full 32 MB volume, so big volumes are best copied with a card reader.
 
@@ -105,8 +119,8 @@ The 560×384 Apple raster (40 columns × 14 pixel clocks, 192 lines doubled) is 
 ## Project layout
 
 ```
-src/top.v               top level: clocks, HDMI serializers, DDR3, TF card, LEDs, reset, loading screen colours
-src/apple2_core.v       CPU, address decode, softswitches, language card, slots, loading screen text
+src/top.v               top level: clocks, HDMI serializers, DDR3, TF card, LEDs, reset
+src/apple2_core.v       CPU, address decode, softswitches, language card, slots
 src/apple2_mem.v        block-RAM RAM and ROMs
 src/aux_ram.v           aux RAM, language card, Disk II and hard-disk storage in DDR3
 src/video_generator.v   Apple raster into the 720x480 frame

@@ -9,9 +9,12 @@
 // that runs past one cluster, and the four names it gives are looked up:
 // GAME.DSK (S6D1) loads into the store in physical sector order, FRAG.PO
 // (S6D2) is fragmented and MISSING.HDV (S7D2) is not on the card, so both
-// fail, and PRODOS~1.HDV (S7D1, 16 blocks) streams into the DDR3.  Then:
-// a block written back lands in the file's sector, one past the file's end
-// is dropped, a floppy track the Apple wrote goes back to the file in DOS
+// fail, and PRODOS~1.HDV (S7D1, 16 blocks) is found but not loaded.  Then:
+// a block asked for (rb_go) is read into the DDR3, asking again does not
+// touch the card, one past the file's end or on an empty drive fails
+// (rb_ok = 0), a block written back lands in the file's sector, one past
+// the file's end is dropped, reading the block just written does not touch
+// the card, a floppy track the Apple wrote goes back to the file in DOS
 // order once the drive is quiet, the raw read hands over a file's sectors,
 // a read past the card's end only answers r_ok = 0, and a reload of S6D1
 // ejects it from the store and loads it again.  A second instance with no
@@ -33,10 +36,9 @@ module tb_sdvol;
     reg         m_ack = 1'b0;
     wire [3:0]  present, fail;
     wire        fs_ok, loading, busy, err;
-    wire [1:0]  ld_drv;
-    wire [4:0]  ld_prog;
     wire [2:0]  estage;
-    reg         wb_go = 1'b0, wb_drv = 1'b0, mnt_go = 1'b0;
+    reg         wb_go = 1'b0, wb_drv = 1'b0, mnt_go = 1'b0, rb_go = 1'b0;
+    wire        rb_ok;
     reg  [1:0]  mnt_drv = 2'd0;
     reg  [15:0] wb_blk = 16'd0;
     reg         fl_wr = 1'b0;
@@ -64,8 +66,9 @@ module tb_sdvol;
         .f_dn_data(f_dn_data), .f_dn_valid(f_dn_valid),
         .fl_wr(fl_wr), .fl_wr_drv(1'b0), .fl_wr_trk(fl_wr_trk), .fl_detach(2'b00), .bg_hold(1'b0),
         .present(present), .fail(fail), .fs_ok(fs_ok),
-        .loading(loading), .ld_drv(ld_drv), .ld_prog(ld_prog), .busy(busy), .err(err), .estage(estage),
+        .loading(loading), .busy(busy), .err(err), .estage(estage),
         .wb_go(wb_go), .wb_drv(wb_drv), .wb_blk(wb_blk),
+        .rb_go(rb_go), .rb_ok(rb_ok),
         .mnt_go(mnt_go), .mnt_drv(mnt_drv),
         .x_go(1'b0), .x_lba(32'd0), .x_zero(1'b0), .x_byte(8'd0), .x_valid(1'b0), .x_take(),
         .r_go(r_go), .r_lba(r_lba), .r_cnt(r_cnt), .r_byte(r_byte), .r_valid(r_valid),
@@ -83,9 +86,10 @@ module tb_sdvol;
         .f_up_busy(1'b0), .f_up_done(1'b0), .f_dn_go(), .f_dn_drive(), .f_dn_addr(),
         .f_dn_data(8'd0), .f_dn_valid(1'b0),
         .fl_wr(1'b0), .fl_wr_drv(1'b0), .fl_wr_trk(6'd0), .fl_detach(2'b00), .bg_hold(1'b0),
-        .present(), .fail(), .fs_ok(), .loading(n_loading), .ld_drv(), .ld_prog(), .busy(),
+        .present(), .fail(), .fs_ok(), .loading(n_loading), .busy(),
         .err(n_err), .estage(),
-        .wb_go(1'b0), .wb_drv(1'b0), .wb_blk(16'd0), .mnt_go(1'b0), .mnt_drv(2'd0),
+        .wb_go(1'b0), .wb_drv(1'b0), .wb_blk(16'd0), .rb_go(1'b0), .rb_ok(),
+        .mnt_go(1'b0), .mnt_drv(2'd0),
         .x_go(1'b0), .x_lba(32'd0), .x_zero(1'b0), .x_byte(8'd0), .x_valid(1'b0), .x_take(),
         .r_go(1'b0), .r_lba(32'd0), .r_cnt(16'd0), .r_byte(), .r_valid(), .r_take(1'b0),
         .r_done(), .r_ok()
@@ -150,6 +154,24 @@ module tb_sdvol;
         if (!cond) begin $display("FAIL: %0s", what); fails = fails + 1; end
     endtask
     task wait_idle; begin @(posedge clk); while (busy) @(posedge clk); end endtask
+    // ask for slot 7 block bk of drive dv; `want` is whether the card is read
+    task rb(input dv, input [15:0] bk, input want_ok, input want_read, input [8*48-1:0] what);
+        begin
+            i = card.r17s;
+            @(posedge clk); rb_go <= 1'b1; wb_drv <= dv; wb_blk <= bk;
+            @(posedge clk); rb_go <= 1'b0;
+            wait_idle;
+            check(rb_ok === want_ok, what);
+            check(card.r17s == i + want_read, what);
+        end
+    endtask
+    task check_hd_block(input integer bk);
+        for (o = 0; o < 512; o = o + 1)
+            if ((o[0] ? ddr[{1'b0, bk[3:0], o[8:1]}][15:8] : ddr[{1'b0, bk[3:0], o[8:1]}][7:0]) !== pat(2, bk * 512 + o)) begin
+                if (fails < 10) $display("FAIL: HD block %0d byte %0d", bk, o);
+                fails = fails + 1;
+            end
+    endtask
     task check_floppy;
         begin
             for (o = 0; o < 143360; o = o + 1)
@@ -175,13 +197,22 @@ module tb_sdvol;
         check(fl_present === 2'b01, "store present");
         check(dut.fstart[1] == 0, "a fragmented file got a start");
         check_floppy;
-        for (b = 0; b < 16; b = b + 1)
-            for (o = 0; o < 512; o = o + 1)
-                if ((o[0] ? ddr[{1'b0, b[3:0], o[8:1]}][15:8] : ddr[{1'b0, b[3:0], o[8:1]}][7:0]) !== pat(2, b * 512 + o)) begin
-                    if (fails < 10) $display("FAIL: HD block %0d byte %0d", b, o);
-                    fails = fails + 1;
-                end
+        for (i = 0; i < 8192; i = i + 1)
+            if (ddr[i] !== 16'hDEAD) begin
+                if (fails < 10) $display("FAIL: DDR3 word %0d written by the boot (slot 7 is read on demand)", i);
+                fails = fails + 1;
+            end
         $display("load: %0t ns, floppy at LBA %0d, HD at LBA %0d", $time, dut.fstart[0], dut.fstart[2]);
+
+        // ---- slot 7 blocks on demand ----
+        rb(1'b0, 16'd3,  1'b1, 1'b1, "block 3 not read from the card");
+        check_hd_block(3);
+        rb(1'b0, 16'd3,  1'b1, 1'b0, "block 3 asked again went to the card");
+        rb(1'b0, 16'd16, 1'b0, 1'b0, "a block past the file's end");
+        rb(1'b1, 16'd0,  1'b0, 1'b0, "a block of the empty drive");
+        rb(1'b0, 16'd15, 1'b1, 1'b1, "block 15 not read from the card");
+        check_hd_block(15);
+        rb(1'b0, 16'd3,  1'b1, 1'b1, "block 3 after 15 not read again");
 
         // ---- slot 7 write-back: block 2, then one past the end ----
         for (i = 0; i < 256; i = i + 1) ddr[{1'b0, 4'd2, i[7:0]}] = {i[7:0] ^ 8'h5A, i[7:0]};
@@ -201,6 +232,12 @@ module tb_sdvol;
         @(posedge clk); wb_go <= 1'b0;
         wait_idle;
         check(card.wblks == i, "a block past the file's end was written");
+        rb(1'b0, 16'd16, 1'b0, 1'b0, "a block past the end after its write-back");
+        // the last write was block 16 (dropped); write block 2 again, then read it
+        @(posedge clk); wb_go <= 1'b1; wb_blk <= 16'd2;
+        @(posedge clk); wb_go <= 1'b0;
+        wait_idle;
+        rb(1'b0, 16'd2, 1'b1, 1'b0, "the block just written was read from the card");
 
         // ---- floppy write-back: the Apple rewrote track 3 ----
         for (o = 3 * 4096; o < 4 * 4096; o = o + 1) fl[o] = o ^ 8'hC3;   // physical order

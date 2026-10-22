@@ -709,7 +709,7 @@ export function useApple() {
 
   const deleteFromCard = useCallback((f: CardFile) => cardSession((c) => c.remove(f)), [cardSession])
 
-  /** Put a card file in drive d (0-3: S6D1 S6D2 S7D1 S7D2), or empty it; a volume takes up to ~30 s. */
+  /** Put a card file in drive d (0-3: S6D1 S6D2 S7D1 S7D2), or empty it; about a second (volumes are read on demand). */
   const mountCard = useCallback(
     (d: number, f: CardFile | null) =>
       cardSession(async (c) => {

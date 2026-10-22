@@ -445,7 +445,8 @@ export async function queryCardStatus(link, opts = {}) {
 
 /**
  * Reload drive `drive` (1-4: S6D1 S6D2 S7D1 S7D2) from A2CONFIG.TXT with the
- * debugger's `y`, then wait for the load: a whole 32 MB volume takes ~30 s.
+ * debugger's `y`, then wait for the load: about a second for a floppy; a
+ * volume is only looked up (its blocks are read from the card on demand).
  *
  * @param {{ write: (b: Uint8Array | number[]) => void, onBytes: (b: Uint8Array) => void }} link
  * @param {1 | 2 | 3 | 4} drive

@@ -133,20 +133,18 @@ module top (
 
     // The slot 7 hard disk's DDR3 port (aux_ram hd_*), shared by the card in
     // the core and the TF card loader (src/sd_vol.v).  They never ask at once:
-    // the loader moves bytes only while the CPU is held (loading) or sits in
-    // the driver's wait for a write-back, and aux_ram, which latches a request
+    // sd_vol moves bytes only while the driver sits in its wait for a block
+    // to come from or go back to the card, and aux_ram, which latches a request
     // on its go pulse, takes whichever pulsed.
     wire [3:0]  sd_present, sd_fail;
     wire [1:0]  hd_present = sd_present[3:2];
     wire        hd_ack, hd_sd_busy, hd_loading, sd_err, sd_fs_ok;
-    wire [1:0]  hd_ld_drv;
-    wire [4:0]  hd_ld_prog;
     wire [15:0] hd_rdata;
     wire        core_hd_go, core_hd_we, sd_m_go, sd_m_we;
     wire [1:0]  core_hd_be;
     wire [24:0] core_hd_addr, sd_m_addr;
     wire [15:0] core_hd_wdata, sd_m_wdata;
-    wire        hd_wb_go, hd_wb_drv, sd_mnt_go;
+    wire        hd_wb_go, hd_wb_drv, sd_mnt_go, hd_rb_go, hd_rb_ok;
     wire [1:0]  sd_mnt_drv;
     wire [15:0] hd_wb_blk;
     wire [2:0]  sd_estage;
@@ -353,8 +351,9 @@ module top (
         .fl_wr(fl_wr), .fl_wr_drv(fl_wr_drv), .fl_wr_trk(fl_wr_trk), .fl_detach(fl_detach),
         .bg_hold(dbg_mode),
         .present(sd_present), .fail(sd_fail), .fs_ok(sd_fs_ok),
-        .loading(hd_loading), .ld_drv(hd_ld_drv), .ld_prog(hd_ld_prog), .busy(hd_sd_busy), .err(sd_err), .estage(sd_estage),
+        .loading(hd_loading), .busy(hd_sd_busy), .err(sd_err), .estage(sd_estage),
         .wb_go(hd_wb_go), .wb_drv(hd_wb_drv), .wb_blk(hd_wb_blk),
+        .rb_go(hd_rb_go), .rb_ok(hd_rb_ok),
         .mnt_go(sd_mnt_go), .mnt_drv(sd_mnt_drv),
         .x_go(sd_x_go), .x_lba(sd_x_lba), .x_zero(sd_x_zero),
         .x_byte(sd_x_byte), .x_valid(sd_x_valid), .x_take(sd_x_take),
@@ -386,7 +385,6 @@ module top (
         .vram_req(vram_req),
         .vram_addr(vram_addr),
         .vram_data(vram_data),
-        .osd_on(hd_loading), .osd_drv(hd_ld_drv), .osd_prog(hd_ld_prog),
         .fl_wr(fl_wr), .fl_wr_drv(fl_wr_drv), .fl_wr_trk(fl_wr_trk),
         .char_rom_addr(char_rom_addr),
         .char_rom_data(char_rom_data),
@@ -402,6 +400,7 @@ module top (
         .hd_go(core_hd_go), .hd_addr(core_hd_addr), .hd_we(core_hd_we), .hd_be(core_hd_be),
         .hd_wdata(core_hd_wdata), .hd_rdata(hd_rdata), .hd_ack(hd_ack),
         .hd_wb_go(hd_wb_go), .hd_wb_drv(hd_wb_drv), .hd_wb_blk(hd_wb_blk),
+        .hd_rb_go(hd_rb_go), .hd_rb_ok(hd_rb_ok),
         .hd_sd_busy(hd_sd_busy),
         // held while the TF card's volumes load, so the boot finds them
         .cpu_rdy(cpu_rdy & !hd_loading),
@@ -506,23 +505,10 @@ module top (
         .rgb(bar_rgb)
     );
 
-    // The loading OSD (apple2_core, text page 1) is recoloured as a modal so it
-    // cannot be taken for the Apple: a box over text rows 7-14, cols 3-36
-    // (row r at y = 48 + 16r, col c at x = 80 + 14c), title bar over rows 7-8,
-    // drop shadow, dark backdrop.  vid_green[7] is a lit text dot.
-    wire osd_box   = pixel_x >= 10'd122 && pixel_x < 10'd598 && pixel_y >= 10'd160 && pixel_y < 10'd288;
-    wire osd_edge  = pixel_x <  10'd124 || pixel_x >= 10'd596 || pixel_y <  10'd162 || pixel_y >= 10'd286;
-    wire osd_title = pixel_y <  10'd200;
-    wire osd_bar   = pixel_y >= 10'd256 && pixel_y < 10'd272;   // row 13
-    wire osd_shade = pixel_x >= 10'd128 && pixel_x < 10'd604 && pixel_y >= 10'd166 && pixel_y < 10'd294;
-    wire [23:0] osd_rgb =
-        !osd_box     ? (osd_shade ? 24'h101418 : 24'h303848)
-      : osd_edge     ? 24'hF0F0F0
-      : osd_title    ? (vid_green[7] ? 24'hFFFFFF : 24'h1E50A0)
-      : vid_green[7] ? (osd_bar ? 24'h1E50A0 : 24'h101010)
-                     : 24'hD8D8D8;
+    // Black while the TF card loads: the CPU is held, so the ROM has not
+    // cleared the text page yet.
     wire [23:0] hdmi_rgb = test_pattern_enable ? bar_rgb
-                         : hd_loading          ? osd_rgb
+                         : hd_loading          ? 24'h000000
                                                : {vid_red, vid_green, vid_blue};
 
     // HDMI audio: true stereo audio (Left & Right) from sound_generator,

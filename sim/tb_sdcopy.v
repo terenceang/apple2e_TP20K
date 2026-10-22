@@ -8,8 +8,9 @@
 // u: the host writes the hard-disk file's first four sectors -- a data
 // sector, a run of two zero sectors, a data sector, then 02.  Each record
 // must be acked only once it is on the card, the sectors must hold exactly
-// that and the write must end in "done"; y3 then reloads S7D1, so the DDR3
-// copy is the new image.  b: two sectors come back raw after "SECTORS", then
+// that and the write must end in "done"; y3 then remounts S7D1, and block 3,
+// read once before the upload, must come back new (the upload drops
+// sd_vol's remembered block).  b: two sectors come back raw after "SECTORS", then
 // "done"; a read past the card's end says "lost".  i reports S:02A5 (FAT32,
 // S6D2 and S7D2 failed, S6D1 and S7D1 present).  A bad u tag says "lost".
 // The debugger's output is read off its TX FIFO's push port.
@@ -20,6 +21,7 @@ module tb_sdcopy;
 
     reg  [7:0] rx_byte  = 8'h00;
     reg        rx_valid = 1'b0;
+    reg        rb_go    = 1'b0;           // sd_vol: slot 7 block 3 into the DDR3
 
     wire sd_clk, sd_mosi, sd_miso, sd_cs_n;
     sdcard #(.SECTORS(8192), .INIT("build/sim_card.hex")) card (
@@ -55,8 +57,8 @@ module tb_sdcopy;
         .f_dn_data(8'd0), .f_dn_valid(1'b0),
         .fl_wr(1'b0), .fl_wr_drv(1'b0), .fl_wr_trk(6'd0), .fl_detach(2'b00), .bg_hold(1'b1),
         .present(present), .fail(fail), .fs_ok(fs_ok),
-        .loading(loading), .ld_drv(), .ld_prog(), .busy(busy), .err(err), .estage(estage),
-        .wb_go(1'b0), .wb_drv(1'b0), .wb_blk(16'd0),
+        .loading(loading), .busy(busy), .err(err), .estage(estage),
+        .wb_go(1'b0), .wb_drv(1'b0), .wb_blk(16'd3), .rb_go(rb_go), .rb_ok(),
         .mnt_go(mnt_go), .mnt_drv(mnt_drv),
         .x_go(x_go), .x_lba(x_lba), .x_zero(x_zero),
         .x_byte(x_byte), .x_valid(x_valid), .x_take(x_take),
@@ -166,12 +168,20 @@ module tb_sdcopy;
     endfunction
 
     integer acks, mark, lba, at;
+    task read_block3;
+        begin
+            @(posedge clk); rb_go <= 1'b1;
+            @(posedge clk); rb_go <= 1'b0;
+            @(posedge clk); while (busy) @(posedge clk);
+        end
+    endtask
     initial begin
         for (i = 0; i < 8192; i = i + 1) ddr[i] = 16'hDEAD;
         #200; @(posedge clk); reset = 1'b0;
         @(posedge clk); while (loading) @(posedge clk);
         if (present !== 4'b0101 || err) begin $display("FAIL: after the boot present=%b err=%b", present, err); fails = fails + 1; end
         lba = u_sd.fstart[2];
+        read_block3;                           // the old contents, remembered
 
         send(8'h02); wait_idle;                // into the debugger
 
@@ -199,9 +209,10 @@ module tb_sdcopy;
                     fails = fails + 1;
                 end
 
-        // ---- y3: S7D1 loads the new contents ----
+        // ---- y3: S7D1 remounted, block 3 reads the new contents ----
         send("y"); send("3"); wait_idle;
         @(posedge clk); while (busy) @(posedge clk);
+        read_block3;
         if (present !== 4'b0101) begin $display("FAIL: S7D1 not reloaded (present %b)", present); fails = fails + 1; end
         for (k = 0; k < 512; k = k + 1)
             if ((k[0] ? ddr[{1'b0, 4'd3, k[8:1]}][15:8] : ddr[{1'b0, 4'd3, k[8:1]}][7:0]) !== pat(3, k)) begin

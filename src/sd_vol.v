@@ -16,10 +16,10 @@
 //       (DOS order) or .PO for slot 6, a .HDV or .PO of whole 512-byte blocks
 //       up to 32 MB for slot 7.  A file that is missing, fragmented or the wrong size leaves
 //       its drive empty and sets its `fail` bit.
-//    5. Slot 7 files stream into the DDR3 (aux_ram hd_*, word address {drive,
-//       block, word}, low byte = even byte), slot 6 ones into disk2_store's
-//       up_* port in physical sector order (DOS_TO_PHYS for DOS order, the
-//       same table as web/src/disk.js).
+//    5. Slot 6 files stream into disk2_store's up_* port in physical sector
+//       order (DOS_TO_PHYS for DOS order, the same table as web/src/disk.js).
+//       Slot 7 files are not loaded: each block is read when prodos_hd asks
+//       (rb_go, below).
 //  Nothing is buffered (block RAM is 46/46): each sector is parsed as it goes
 //  past, and the SPI clock simply waits when the far side is not ready.
 //  `loading` is high for all of it, and top.v holds the CPU on it.
@@ -28,6 +28,11 @@
 //    wb_go    write a slot 7 block back (prodos_hd, after each WRITE), to the
 //             file's sector `start + blk`, dropped past the file's end so a
 //             write can never land in another file
+//    rb_go    read slot 7 block wb_blk into its DDR3 home (aux_ram hd_*, word
+//             address {drive, block, word}, low byte = even byte); rb_ok says
+//             it is there.  The block last read or written is remembered
+//             (`tag`) and not read again; writes go straight through, so the
+//             DDR3 copy is never newer than the file.
 //    x_go     write sector x_lba from bytes the debugger hands over
 //             (x_byte/x_valid, x_take when used) or, with x_zero, zeros
 //    r_go     read r_cnt sectors from r_lba, each byte to the debugger
@@ -37,7 +42,10 @@
 //             debugger is not in session (bg_hold)
 //    mnt_go   reload drive mnt_drv (0-1 slot 6, 2-3 slot 7) from the config,
 //             after its floppy tracks are on the card
-//  Each request is latched, so one that arrives while another runs waits.
+//  Each request is latched, so one that arrives while another runs waits;
+//  a floppy track flush is one job per sector, so rb_go waits for at most
+//  one sector behind it.  A card that stops answering gives up after 2^20
+//  polls (~0.75 s at 13.5 MHz).
 //
 //  `err` latches on a card failure, `estage` = the command (0 CMD0 1 CMD8
 //  2 CMD55 3 ACMD41 4 CMD17 5 CMD24 6 CMD18 7 CMD12/timeout).  A raw read
@@ -90,8 +98,6 @@ module sd_vol #(
     output reg  [3:0]  fail,           // ...or the config named one that cannot be used
     output reg         fs_ok,          // the card is FAT32
     output wire        loading,
-    output wire [1:0]  ld_drv,         // drive being looked up or loaded, for the OSD
-    output reg  [4:0]  ld_prog,        // ...and how far, 0-31
     output wire        busy,
     output reg         err,
     output reg  [2:0]  estage,
@@ -99,6 +105,8 @@ module sd_vol #(
     input  wire        wb_go,
     input  wire        wb_drv,
     input  wire [15:0] wb_blk,
+    input  wire        rb_go,          // block in wb_drv/wb_blk
+    output reg         rb_ok,
     input  wire        mnt_go,
     input  wire [1:0]  mnt_drv,
 
@@ -162,7 +170,7 @@ module sd_vol #(
     // where a write's bytes come from
     localparam [1:0] W_X = 0, W_Z = 1, W_HD = 2, W_FL = 3;
     // the job that is running, for what to do when it ends
-    localparam [2:0] J_LK = 0, J_RAW = 1, J_X = 2, J_WB = 3, J_FW = 4;
+    localparam [2:0] J_LK = 0, J_RAW = 1, J_X = 2, J_WB = 3, J_FW = 4, J_RB = 5;
     // the lookup (header steps 1-5)
     localparam [3:0] L_IDLE = 0, L_MBR = 1, L_VBR = 2, L_DIR = 3, L_DIRF = 4, L_DIRDONE = 5,
                      L_CFG = 6, L_DRV = 7, L_WALK = 8, L_DDR = 9, L_LOAD = 10, L_NEXT = 11;
@@ -226,7 +234,6 @@ module sd_vol #(
     reg [31:0] fstart [0:3];
     reg [16:0] fnsec [0:3];
     reg [1:0]  fdos = 2'b00;            // slot 6 drive holds a DOS-order file
-    reg [16:0] pacc = 0;                // progress: +32 per sector, a step per fnsec
     // the config parser
     reg [2:0]  ps = P_K0;
     reg [1:0]  pkey = 2'd0;
@@ -235,8 +242,14 @@ module sd_vol #(
     reg        pdot = 1'b0;
 
     // requests waiting
-    reg        wb_req = 1'b0, wb_d = 1'b0, x_req = 1'b0, r_req = 1'b0;
-    reg [15:0] wb_b = 16'd0;
+    reg        wb_req = 1'b0, rb_req = 1'b0, x_req = 1'b0, r_req = 1'b0;
+    // the slot 7 block of wb_go or rb_go: one latch, since prodos_hd never has
+    // both out (its driver waits for busy after each)
+    reg        hd_d = 1'b0;
+    reg [15:0] hd_b = 16'd0;
+    // ponytail: one block remembered; a 2nd tag if ProDOS ping-pongs blocks
+    reg        tag_v = 1'b0;
+    reg [16:0] tag = 17'd0;             // {drive, block} the DDR3 holds
     reg [3:0]  rl_req = 4'd0;           // drives to reload
     reg [1:0]  rl_d = 2'd0;             // ...the one being looked at
     reg        ej_pend = 1'b0;          // pulse f_up_bad next clock (f_up_drive is set)
@@ -263,9 +276,11 @@ module sd_vol #(
         else if (!ddr_ready && !gave_up) dwait <= dwait + 1'b1;
 
     assign loading = lk != L_IDLE;
-    assign ld_drv  = k;
-    assign busy    = st != IDLE || lk != L_IDLE || jdone || wb_req || x_req || r_req ||
+    assign busy    = st != IDLE || lk != L_IDLE || jdone || wb_req || rb_req || x_req || r_req ||
                      fw_active || rl_req != 4'd0;
+
+    wire        hd_in  = present[{1'b1, hd_d}] && {1'b0, hd_b} < fnsec[{1'b1, hd_d}];
+    wire [31:0] hd_lba = fstart[{1'b1, hd_d}] + {16'd0, hd_b};
 
     // the byte of an 8.3 name at position e (0-10), byte 0 first
     function [7:0] nbyte(input [87:0] s, input [3:0] e);
@@ -330,10 +345,12 @@ module sd_vol #(
         end
         if (r_take) r_valid <= 1'b0;
         if (f_up_done && fl_pend) begin fl_pend <= 1'b0; f_up_go <= 1'b0; end
-        if (wb_go) begin wb_req <= 1'b1; wb_d <= wb_drv; wb_b <= wb_blk; end
-        if (x_go)  x_req <= 1'b1;
+        if (wb_go || rb_go) begin hd_d <= wb_drv; hd_b <= wb_blk; end
+        if (wb_go) wb_req <= 1'b1;
+        if (rb_go) rb_req <= 1'b1;
+        if (x_go)  begin x_req <= 1'b1; tag_v <= 1'b0; end   // it may rewrite the file
         if (r_go)  r_req <= 1'b1;
-        if (mnt_go) rl_req[mnt_drv] <= 1'b1;
+        if (mnt_go) begin rl_req[mnt_drv] <= 1'b1; tag_v <= 1'b0; end
         // a written track of a drive that holds its file; quiet counts from the last
         if (fl_wr) begin
             quiet <= 0;
@@ -353,8 +370,9 @@ module sd_vol #(
             inited <= 1'b0; present <= 4'd0; fail <= 4'd0; fs_ok <= 1'b0; m_busy <= 1'b0;
             lk <= L_MBR; lk_wait <= 1'b0; ld_mask <= 4'b1111; k <= 2'd0; jdone <= 1'b0;
             wb_req <= 1'b0; x_req <= 1'b0; r_req <= 1'b0; rl_req <= 4'd0;
+            rb_req <= 1'b0; rb_ok <= 1'b1; tag_v <= 1'b0;
             dirty0 <= 0; dirty1 <= 0; fw_active <= 1'b0; r_valid <= 1'b0;
-            f_up_go <= 1'b0; f_dn_go <= 1'b0; fl_pend <= 1'b0; ld_prog <= 5'd0;
+            f_up_go <= 1'b0; f_dn_go <= 1'b0; fl_pend <= 1'b0;
         end else if (sx) begin
             if (spi_done) begin sx <= 1'b0; got <= 1'b1; rxv <= sh; end
         end else case (st)
@@ -482,7 +500,7 @@ module sd_vol #(
                           T_HD: if (!bcnt[0]) lo <= rxv;
                                 else begin
                                     m_go <= 1'b1; m_we <= 1'b1; m_busy <= 1'b1;
-                                    m_addr  <= {k[0], blk, bcnt[8:1]};
+                                    m_addr  <= {hd_d, hd_b, bcnt[8:1]};
                                     m_wdata <= {rxv, lo};
                                 end
                           T_FL: begin
@@ -500,12 +518,6 @@ module sd_vol #(
                      got <= 1'b0; n <= n + 1'b1;
                      if (n == 1) begin
                          n <= 0;
-                         if (tgt == T_HD || tgt == T_FL) begin
-                             if (pacc + 17'd32 >= fnsec[k]) begin
-                                 pacc <= pacc + 17'd32 - fnsec[k];
-                                 if (ld_prog != 5'd31) ld_prog <= ld_prog + 1'b1;
-                             end else pacc <= pacc + 17'd32;
-                         end
                          if (blk == jlast) begin
                              if (jlast == 16'd0) fin; else go_cmd(CMD12, 32'h0);
                          end else begin blk <= blk + 1'b1; st <= DTOK; end
@@ -532,7 +544,7 @@ module sd_vol #(
                                    if (n[0]) begin n <= 0; xfer(wword[7:0]); end
                                    else begin
                                        m_go <= 1'b1; m_we <= 1'b0; m_busy <= 1'b1; n <= 1;
-                                       m_addr <= {wb_d, wb_b, bcnt[8:1]};
+                                       m_addr <= {hd_d, hd_b, bcnt[8:1]};
                                    end
                                end
                            default:   // W_FL: a byte from the store
@@ -563,6 +575,7 @@ module sd_vol #(
                     jdone <= 1'b0;
                     case (jk)
                         J_RAW: begin r_done <= 1'b1; r_ok <= !jfail; end
+                        J_RB: begin rb_ok <= !jfail; tag_v <= !jfail; tag <= {hd_d, hd_b}; end
                         J_FW: if (jfail || fw_j == 3'd7) fw_active <= 1'b0; else fw_j <= fw_j + 1'b1;
                         J_LK: begin
                             lk_wait <= 1'b0;
@@ -650,18 +663,32 @@ module sd_vol #(
                             rd(fat_lba + {11'd0, c0[27:7]}, clast[22:7] - c0[22:7], T_FATW, J_LK);
                         end
                         L_DDR: if (gave_up) lk <= L_NEXT; else if (ddr_ready) lk <= L_LOAD;
-                        L_LOAD: begin
-                            lk_wait <= 1'b1; pacc <= 0; ld_prog <= 5'd0;
-                            rd(fstart[k], fnsec[k][15:0] - 16'd1, k[1] ? T_HD : T_FL, J_LK);
-                        end
+                        L_LOAD:
+                            // slot 7 is read a block at a time when prodos_hd asks
+                            if (k[1]) begin present[k] <= 1'b1; lk <= L_NEXT; end
+                            else begin
+                                lk_wait <= 1'b1;
+                                rd(fstart[k], fnsec[k][15:0] - 16'd1, T_FL, J_LK);
+                            end
                         L_NEXT: if (k == 2'd3) lk <= L_IDLE; else begin k <= k + 1'b1; lk <= L_DRV; end
                         default: lk <= L_IDLE;
                     endcase
                 end else if (wb_req) begin
                     // ---- a slot 7 block back to its file, never past its end ----
                     wb_req <= 1'b0;
-                    if (present[{1'b1, wb_d}] && {1'b0, wb_b} < fnsec[{1'b1, wb_d}])
-                        wr(fstart[{1'b1, wb_d}] + {16'd0, wb_b}, W_HD, J_WB);
+                    if (hd_in) begin
+                        tag <= {hd_d, hd_b}; tag_v <= 1'b1;   // the DDR3 holds what was written
+                        wr(hd_lba, W_HD, J_WB);
+                    end
+                end else if (rb_req) begin
+                    // ---- a slot 7 block from its file into the DDR3 ----
+                    rb_req <= 1'b0;
+                    if (tag_v && tag == {hd_d, hd_b}) rb_ok <= 1'b1;
+                    else if (!hd_in) rb_ok <= 1'b0;
+                    else begin
+                        tag_v <= 1'b0;
+                        rd(hd_lba, 16'd0, T_HD, J_RB);
+                    end
                 end else if (x_req) begin
                     x_req <= 1'b0;
                     wr(x_lba, x_zero ? W_Z : W_X, J_X);
