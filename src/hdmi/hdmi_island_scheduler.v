@@ -69,27 +69,17 @@ module hdmi_island_scheduler #(
     // encoder's two stages; hdmi_data_island is combinational.  They are
     // separate parameters so the geometry below stays correct if that changes.
     parameter integer VIDEO_LATENCY = 2,
-    parameter integer ISLAND_LATENCY = 2,
-    parameter integer COMMIT_LEAD    = 32 // video pixels spent committing
+    parameter integer ISLAND_LATENCY = 2
 ) (
     input  wire        clk_pixel,
     input  wire        rst_n,
 
     // -----------------------------------------------------------------------
-    // Packet sources (audio / ACR / InfoFrame) push complete packets here.
-    // src_ready backpressures a source that is trying to push into a full FIFO.
+    // hdmi_data_island holds at least one packet for this line's island.  The
+    // sources push straight into its slots, early in the line (local change,
+    // see "Packets" below).
     // -----------------------------------------------------------------------
-    input  wire        src_valid,
-    output wire        src_ready,
-    input  wire [23:0]  src_header,
-    input  wire [223:0] src_body,
-
-    // -----------------------------------------------------------------------
-    // Commit interface to hdmi_data_island
-    // -----------------------------------------------------------------------
-    output reg         pkt_valid,
-    output reg  [23:0]  pkt_header,
-    output reg  [223:0] pkt_body,
+    input  wire        pkt_pending,
     output wire        island_start,
 
     // -----------------------------------------------------------------------
@@ -144,17 +134,14 @@ module hdmi_island_scheduler #(
 
     localparam integer ISLAND_START_PX  = ACTIVE_END + TS_MIN +
                                           VIDEO_LATENCY - ISLAND_LATENCY;
-    localparam integer COMMIT_START     = ISLAND_START_PX - COMMIT_LEAD;
 
     // Longest island that still leaves TS_MIN of control before the next
-    // video data period.
+    // video data period.  The sources may push at most this many packets a
+    // line; hdmi_data_island holds MAX_PACKETS.
     localparam integer N_FIT_RAW = (H_TOTAL - ACTIVE_END - (2 * TS_MIN) - 4) / 32;
-    localparam integer N_FIT     = (N_FIT_RAW > MAX_PACKETS) ? MAX_PACKETS :
-                                   ((N_FIT_RAW < 1) ? 1 : N_FIT_RAW);
 
-    // The mode is usable at all only if a one-packet island fits and there is
-    // room left over to commit into.
-    wire geometry_ok = (N_FIT_RAW >= 1) && (COMMIT_START > 0);
+    // The mode is usable at all only if a full MAX_PACKETS island fits.
+    wire geometry_ok = (N_FIT_RAW >= MAX_PACKETS);
 
     // -----------------------------------------------------------------------
     // Pixel and line counters
@@ -204,108 +191,22 @@ module hdmi_island_scheduler #(
                        (vcnt < V_ACTIVE);
 
     // -----------------------------------------------------------------------
-    // Packet FIFO
+    // Packets (local change: upstream queues them here)
     //
-    // Sources push; the commit phase below pops.  One entry is a packet as
-    // hdmi_data_island latches it: 24-bit header plus 224-bit body (the ECC
-    // bytes are added on the way out, by hdmi_packet_ecc).
+    // Upstream keeps an 8-deep FIFO of whole packets (3 block RAMs) and
+    // commits up to N_FIT of them into hdmi_data_island 32 pixels before the
+    // island.  In this design the sources push at fixed pixels near the start
+    // of every line, never more than MAX_PACKETS of them, and the line's own
+    // island always sends them all, so nothing ever waits for a later line.
+    // The sources therefore push straight into hdmi_data_island's slots, and
+    // the previous line's island has finished (it ends near pixel 834) long
+    // before they do.
     //
-    // A synchronous FIFO is enough: the push and pop enables are mutually
-    // exclusive, since a commit only runs while the queue is non-empty and
-    // nothing is committed twice for the same slot.
+    // Island start: a one-cycle pulse at ISLAND_START_PX, suppressed when no
+    // packet was pushed: Sec 5.2.3.2 requires at least one packet, so an
+    // empty line must produce no island rather than a 4-pixel one.
     // -----------------------------------------------------------------------
-    localparam integer QDEPTH = 8;
-    localparam integer QAW    = 3;          // ceil(log2(8))
-
-    reg [23:0]  q_hdr  [0:QDEPTH-1];
-    reg [223:0] q_body [0:QDEPTH-1];
-
-    reg [3:0]      q_count;                // 0..QDEPTH
-    reg [QAW-1:0]  q_rd, q_wr;
-
-    assign src_ready        = (q_count < QDEPTH);
-
-    wire fifo_push = src_valid && src_ready;
-    wire fifo_pop;
-
-    always @(posedge clk_pixel) begin
-        if (!rst_n) begin
-            q_rd    <= {QAW{1'b0}};
-            q_wr    <= {QAW{1'b0}};
-            q_count <= 4'd0;
-        end else begin
-            if (fifo_push) q_wr <= q_wr + {{(QAW-1){1'b0}}, 1'b1};
-            if (fifo_pop)  q_rd <= q_rd + {{(QAW-1){1'b0}}, 1'b1};
-            case ({fifo_push, fifo_pop})
-                2'b10:   q_count <= q_count + 4'd1;
-                2'b01:   q_count <= q_count - 4'd1;
-                default: q_count <= q_count;
-            endcase
-        end
-    end
-
-    always @(posedge clk_pixel) begin
-        if (fifo_push) begin
-            q_hdr[q_wr] <= src_header;
-            q_body[q_wr] <= src_body;
-        end
-    end
-
-    // -----------------------------------------------------------------------
-    // Commit phase
-    //
-    // At COMMIT_START the queue depth is snapshotted and clamped to N_FIT, so
-    // the island length is fixed well before island_start and the sources
-    // cannot change it afterwards.  Because the snapshot never exceeds the
-    // depth at that instant and pushes only ever add entries, the commit can
-    // not underrun the queue.
-    //
-    // Committing starts on the following pixel and runs one packet per cycle,
-    // leaving ISLAND_START_PX - COMMIT_START - 1 cycles of slack.
-    // -----------------------------------------------------------------------
-    reg [3:0] commit_n;   // packets to commit for this island
-    reg [3:0] commit_i;   // packets committed so far
-
-    wire at_commit = (hcnt == COMMIT_START);
-    wire commit_go = (hcnt > COMMIT_START) && (hcnt < ISLAND_START_PX) &&
-                     (commit_i < commit_n);
-
-    assign fifo_pop = commit_go && (q_count != 4'd0);
-
-    always @(posedge clk_pixel) begin
-        if (!rst_n) begin
-            commit_n   <= 4'd0;
-            commit_i   <= 4'd0;
-            pkt_valid  <= 1'b0;
-            pkt_header <= 24'd0;
-            pkt_body   <= 224'd0;
-        end else begin
-            pkt_valid <= 1'b0;
-
-            if (at_commit) begin
-                commit_n <= (q_count > N_FIT) ? N_FIT : q_count;
-                commit_i <= 4'd0;
-            end else if (commit_go) begin
-                commit_i <= commit_i + 4'd1;
-            end
-
-            if (fifo_pop) begin
-                pkt_valid  <= 1'b1;
-                pkt_header <= q_hdr[q_rd];
-                pkt_body   <= q_body[q_rd];
-            end
-        end
-    end
-
-    // -----------------------------------------------------------------------
-    // Island start
-    //
-    // A one-cycle pulse aligned to ISLAND_START_PX, suppressed when the
-    // snapshot came up empty: Sec 5.2.3.2 requires at least one packet, so an
-    // empty commit must produce no island rather than a 4-pixel one.
-    // -----------------------------------------------------------------------
-    assign island_start = (hcnt == ISLAND_START_PX) && (commit_n != 4'd0) &&
-                          geometry_ok;
+    assign island_start = (hcnt == ISLAND_START_PX) && pkt_pending && geometry_ok;
 
     // -----------------------------------------------------------------------
     // Preambles (Sec 5.2.1.1, Table 5-2)
@@ -318,7 +219,7 @@ module hdmi_island_scheduler #(
     // The video preamble ends the line *before* an active line, so it runs on
     // the last line of the frame (next line is 0) and on every active line but
     // the last.  The island preamble is only sent when island_start will fire;
-    // commit_n is settled from COMMIT_START + 1, well before it opens.
+    // pkt_pending is settled from the last push, long before it opens.
     // -----------------------------------------------------------------------
     localparam integer PREAMBLE = 8;
 
@@ -327,7 +228,7 @@ module hdmi_island_scheduler #(
     wire video_pre  = (hcnt >= H_TOTAL - PREAMBLE) && next_line_active;
     wire island_pre = (hcnt >= ISLAND_START_PX - PREAMBLE) &&
                       (hcnt <  ISLAND_START_PX) &&
-                      (commit_n != 4'd0) && geometry_ok;
+                      pkt_pending && geometry_ok;
 
     assign ctl = video_pre  ? 4'b0001 :
                  island_pre ? 4'b0101 : 4'b0000;

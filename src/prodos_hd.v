@@ -8,7 +8,7 @@
 //  it (rb_go, ~1 ms, nothing if it is the block it read or wrote last) and
 //  gets each block written here back, so `present` is sd_vol's.  There is
 //  no block buffer, because
-//  there is no block RAM to spare (46/46): the data port streams straight to
+//  block RAM is too scarce for one (Documents/memory_architecture.md): the data port streams straight to
 //  and from the DDR3.  A read of $C0F0 hands over the byte fetched last and
 //  asks for the next; a write posts the byte.  The driver's copy loops take
 //  ~14 CPU cycles a byte against well under 1 us for a DDR3 request, so the

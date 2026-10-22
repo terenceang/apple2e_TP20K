@@ -7,14 +7,17 @@
 //
 //      video_rgb ------------------------------------------------.
 //      audio_valid/l/r -> sample buffer --.                      v
-//      ACR / AVI / Audio InfoFrame ------> hdmi_island_scheduler -> hdmi_data_island
-//                                             |  timing, preambles        |
-//                                             v                           v
+//      ACR / AVI / Audio InfoFrame -------+-------------------> hdmi_data_island
+//                                             hdmi_island_scheduler    |
+//                                             |  timing, preambles,    |
+//                                             |  island_start          |
+//                                             v                        v
 //                                       3 x hdmi_tmds_encoder <- period / TERC4 select
 //
-//  Packets per line, pushed at fixed pixels well ahead of the scheduler's
-//  commit point, at most three so one island (N_FIT = 3 at 720x480p) always
-//  drains them:
+//  Packets per line, pushed straight into hdmi_data_island's slots at fixed
+//  pixels near the start of the line, at most three so the line's own island
+//  (N_FIT = 3 at 720x480p) always sends them all (local change: upstream
+//  queues them in a FIFO in the scheduler first):
 //    * an Audio Sample Packet whenever samples are waiting (48 kHz over a
 //      31.47 kHz line rate is 1 or 2 frames per line; the buffer holds 4),
 //    * an Audio Clock Regeneration packet every ACR_LINES lines,
@@ -75,15 +78,15 @@ module hdmi_tx #(
     wire         video_led, video_act;
     wire [9:0]   hcount, vcount;
     wire [3:0]   ctl;
-    wire         src_ready, island_start;
+    wire         island_start;
+    wire [4:0]   pkt_count;
 
+    // Local change: the sources push straight into hdmi_data_island's slots
+    // (see hdmi_island_scheduler's "Packets"); upstream queues them in the
+    // scheduler first.
     reg          src_valid;
     reg  [23:0]  src_header;
     reg  [223:0] src_body;
-
-    wire         pkt_valid;
-    wire [23:0]  pkt_header;
-    wire [223:0] pkt_body;
 
     hdmi_island_scheduler #(
         .H_TOTAL(H_TOTAL), .H_ACTIVE(H_ACTIVE), .H_FRONT(H_FRONT),
@@ -91,9 +94,7 @@ module hdmi_tx #(
         .V_FRONT(V_FRONT), .V_SYNC_W(V_SYNC_W), .MAX_PACKETS(MAX_PACKETS)
     ) u_sched (
         .clk_pixel(clk_pixel), .rst_n(rst_n),
-        .src_valid(src_valid), .src_ready(src_ready),
-        .src_header(src_header), .src_body(src_body),
-        .pkt_valid(pkt_valid), .pkt_header(pkt_header), .pkt_body(pkt_body),
+        .pkt_pending(pkt_count != 5'd0),
         .island_start(island_start),
         .video_led(video_led), .video_act(video_act),
         .hsync(hsync_pulse), .vsync(vsync_pulse),
@@ -133,7 +134,7 @@ module hdmi_tx #(
         if (!rst_n) begin
             acount      <= 3'd0;
             frame_index <= 8'd0;
-        end else if (push_audio && src_ready) begin
+        end else if (push_audio) begin
             frame_index <= (frame_next >= 9'd192) ? frame_next - 9'd192
                                                   : frame_next[7:0];
             acount      <= {2'b00, audio_valid};
@@ -217,8 +218,8 @@ module hdmi_tx #(
     hdmi_data_island #(.MAX_PACKETS(MAX_PACKETS)) u_isl (
         .clk_pixel(clk_pixel), .rst_n(rst_n),
         .hsync(hs), .vsync(vs),
-        .pkt_valid(pkt_valid), .pkt_header(pkt_header), .pkt_body(pkt_body),
-        .pkt_count(), .island_start(island_start), .island_mode(),
+        .pkt_valid(src_valid), .pkt_header(src_header), .pkt_body(src_body),
+        .pkt_count(pkt_count), .island_start(island_start), .island_mode(),
         .tmds_mode(isl_mode),
         .ch0_data(isl_ch0), .ch1_data(isl_ch1), .ch2_data(isl_ch2)
     );

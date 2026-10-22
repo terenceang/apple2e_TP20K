@@ -12,7 +12,7 @@
 //      constant latency shared by all three lanes, over tens of thousands of
 //      symbols covering video, control and data islands.
 //    * the HDMI audio strobe into hdmi_tx runs at 48 kHz and Audio Sample
-//      Packets (type 0x02) reach the island scheduler.
+//      Packets (type 0x02) go out in data islands.
 //  The content of those symbols is tb_video_hdmi's job (and the reference
 //  TN20K-HDMI project's tb_hdmi_tx for the packet layer); this only proves
 //  the path from hdmi_tx to the pins is lossless and in order.
@@ -102,7 +102,7 @@ module tb_top;
     end
 
     // HDMI audio: strobes into hdmi_tx, and Audio Sample Packets pushed.
-    integer n_audio = 0, n_asp = 0;
+    integer n_audio = 0, n_asp = 0, k;
     realtime t_audio0 = 0, t_audio1 = 0;
     always @(posedge dut.clk_pixel) if (dut.hdmi_rst_n) begin
         if (dut.hdmi_audio_valid) begin
@@ -110,9 +110,11 @@ module tb_top;
             t_audio1 = $realtime;
             n_audio  = n_audio + 1;
         end
-        if (dut.u_hdmi.src_valid && dut.u_hdmi.src_ready &&
-            dut.u_hdmi.src_header[7:0] == 8'h02)
-            n_asp = n_asp + 1;
+        // counted as an island starts, from the slots it is about to send
+        if (dut.u_hdmi.island_start)
+            for (k = 0; k < 3; k = k + 1)
+                if (k < dut.u_hdmi.u_isl.pkt_count && dut.u_hdmi.u_isl.hdr[k][7:0] == 8'h02)
+                    n_asp = n_asp + 1;
     end
 
     // Find the lag at which the pins replay the core's symbols.

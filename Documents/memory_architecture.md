@@ -76,18 +76,21 @@ To solve this, the design uses a **hybrid memory partitioning scheme**:
 
 ## 4. Current Resource Allocation Breakdown
 
-### BSRAM Allocation (46 / 46 Blocks Used — 100%)
+### BSRAM Allocation (43 / 46 Blocks Used — 93%)
+
+This table is the one place the block RAM budget is written down; source comments point here rather than quoting a count.
 
 | Module Instance | Source File | Blocks | Memory Size | Purpose |
 | :--- | :--- | :---: | :---: | :--- |
 | `u_core.u_ram` | `src/apple2_mem.v` | **24** | 48 KB | Apple //e Main Base RAM (`$0000`–`$BFFF`) |
 | `u_core.u_rom` | `src/apple2_mem.v` | **8** | 16 KB | Apple //e Enhanced System ROM (`$C000`–`$FFFF`) |
 | `u_aux.u_ddr3` | `src/ddr3_memory_interface/` | **8** | 16 KB | Gowin DDR3 Controller IP FIFOs & buffers |
-| `u_hdmi.u_sched` | `src/hdmi/hdmi_island_scheduler.v` | **3** | 6 KB | HDMI Audio & InfoFrame packet queuing |
 | `u_core.u_char_rom` | `src/apple2_mem.v` | **1** | 2 KB | Enhanced Character Generator ROM (2732 font) |
 | `u_core.u_disk2` | `src/disk2/disk2_card.v` | **1** | 256 B | Disk II P6 Controller Boot ROM (`$C600`–`$C6FF`) |
 | `u_debugger` | `src/serial_debugger.v` | **1** | 2 KB | Hardware Debugger UART TX FIFO |
-| **Total BSRAM** | | **46 / 46** | **92 KB** | **100.0% utilization** |
+| **Total BSRAM** | | **43 / 46** | **86 KB** | **93.5% utilization** |
+
+The HDMI scheduler used to keep an 8-deep packet FIFO in 3 blocks. It was removed (2026-10-23): this design pushes at most three packets a line, early in the line, and that line's island sends them all, so the packets now go straight into `hdmi_data_island`'s slots. That leaves 3 blocks free.
 
 ### DDR3 Memory Mapping (128 MB Total)
 

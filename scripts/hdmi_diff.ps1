@@ -24,6 +24,8 @@ $root           = Split-Path -Parent $PSScriptRoot
 $SNAPSHOT       = Join-Path $root 'scripts\hdmi_snapshot.sha256'
 $UPSTREAM_COMMIT = '388b39e'
 $DEFAULT_UPSTREAM = Join-Path $HOME 'TN20K-HDMI'
+# The deliberate local changes, and the only files expected to differ upstream.
+$LOCAL_CHANGES = 'hdmi_tx.v (RGB_QUANT; sources push straight into the island) and hdmi_island_scheduler.v (no packet FIFO)'
 
 if (-not $UpstreamPath) { $UpstreamPath = $DEFAULT_UPSTREAM }
 
@@ -56,7 +58,7 @@ if (-not $Upstream) {
 
     if ($allOk) {
         Write-Host "OK: src/hdmi/ is unmodified since the snapshot was taken."
-        Write-Host "    only hdmi_tx.v was ever meant to differ upstream (RGB_QUANT)."
+        Write-Host "    meant to differ upstream: $LOCAL_CHANGES."
     } else {
         Write-Error @'
 
@@ -114,7 +116,7 @@ else {
     if (-not $drift) {
         Write-Host "No drift: the upstream project has not changed src/hdmi/ since the snapshot."
     } else {
-        Write-Host "Drift found. Expected: hdmi_tx.v only (RGB_QUANT)."
+        Write-Host "Drift found. Expected: $LOCAL_CHANGES."
         Write-Host "Anything else means TN20K-HDMI has moved on; review each file with:"
         Write-Host "  Compare-Object (Get-Content src\hdmi\<file>) (Get-Content $UpstreamPath\src\hdmi\<file>)"
         Write-Host "then either port the change and re-baseline the snapshot, or record"

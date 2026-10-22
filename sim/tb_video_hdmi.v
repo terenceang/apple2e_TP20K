@@ -341,11 +341,37 @@ module tb_video_hdmi;
         end
     end
 
+    // Every packet pushed on a line goes out, unchanged and in order, in that
+    // line's island: the sources write hdmi_data_island's slots directly, so
+    // a fourth push or a push after the island would be lost silently.
+    reg [247:0] pushed [0:3];
+    integer n_push = 0, n_isl = 0, n_pkts = 0, s;
+    always @(posedge clk) if (rst_n) begin
+        if (u_tx.island_start) begin
+            n_isl = n_isl + 1;
+            if (u_tx.u_isl.pkt_count != n_push) begin
+                $display("FAIL: island with %0d packets, %0d were pushed", u_tx.u_isl.pkt_count, n_push);
+                errors = errors + 1;
+            end
+            for (s = 0; s < n_push && s < 3; s = s + 1)
+                if ({u_tx.u_isl.hdr[s], u_tx.u_isl.body[s]} !== pushed[s]) begin
+                    $display("FAIL: island slot %0d is not the packet pushed", s);
+                    errors = errors + 1;
+                end
+            n_pkts = n_pkts + n_push;
+            n_push = 0;
+        end
+        if (u_tx.src_valid) begin
+            if (n_push < 4) pushed[n_push] = {u_tx.src_header, u_tx.src_body};
+            n_push = n_push + 1;
+        end
+    end
+
     // AVI InfoFrame as pushed to the scheduler: full-range RGB (PB3 Q = 10)
     // and a checksum making header + PB0..PB13 sum to zero.
     integer n_avi = 0, k;
     reg [7:0] avi_sum;
-    always @(posedge clk) if (rst_n && u_tx.src_valid && u_tx.src_ready &&
+    always @(posedge clk) if (rst_n && u_tx.src_valid &&
                               u_tx.src_header[7:0] == 8'h82) begin
         n_avi   = n_avi + 1;
         avi_sum = u_tx.src_header[7:0] + u_tx.src_header[15:8] + u_tx.src_header[23:16];
@@ -500,6 +526,11 @@ module tb_video_hdmi;
             $display("FAIL: %0d AVI InfoFrames sent", n_avi);
             errors = errors + 1;
         end
+        if (n_isl < 10 || n_pkts < n_isl) begin
+            $display("FAIL: %0d islands carried %0d packets", n_isl, n_pkts);
+            errors = errors + 1;
+        end
+        $display("%0d islands carried %0d packets, each as pushed", n_isl, n_pkts);
         $display("%0d pixels checked (%0d Apple text, %0d colour bars)",
                  checked, frame_a_checked, checked - frame_a_checked);
 

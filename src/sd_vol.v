@@ -20,7 +20,7 @@
 //       order (dos2phys below for DOS order; tb_sdvol checks it against its own).
 //       Slot 7 files are not loaded: each block is read when prodos_hd asks
 //       (rb_go, below).
-//  Nothing is buffered (block RAM is 46/46): each sector is parsed as it goes
+//  Nothing is buffered (block RAM is scarce, Documents/memory_architecture.md): each sector is parsed as it goes
 //  past, and the SPI clock simply waits when the far side is not ready.
 //  `loading` is high for all of it, and top.v holds the CPU on it.
 //

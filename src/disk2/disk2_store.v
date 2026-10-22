@@ -2,7 +2,7 @@
 //
 // The card (src/disk2/disk2_card.v) works in disk bytes and never in sectors,
 // and it cannot afford to hold a track: 7040 disk bytes would be four block
-// RAMs on a device that spends all 46.  So the card asks this module for one
+// RAMs, which this device does not have to spare.  So the card asks this module for one
 // sector's values at a time, and this module keeps the images in the DDR3
 // (aux_ram's region 1, its dsk_* port).
 //
