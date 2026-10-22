@@ -83,6 +83,8 @@ module apple2_core (
     output wire [15:0] hd_wb_blk,
     output wire        hd_rb_go,
     input  wire        hd_rb_ok,
+    input  wire [15:0] hd_size0,      // slot 7 volumes' sizes in blocks (sd_vol)
+    input  wire [15:0] hd_size1,
     input  wire        hd_sd_busy,
 
     // Diagnostic status & Debugger Interface
@@ -399,7 +401,7 @@ module apple2_core (
         .slotc3rom(slotc3rom),
         .intc8rom(intc8rom),
         .card_present(card_present),
-        .card_exprom(7'd0),      // a Disk ][ has no $C800 expansion ROM
+        .card_exprom(7'b1000000), // slot 7's SmartPort lives in $C800 (prodos_hd_rom.s)
         .card_data(card_data),
         .int_in_n(1'b1),
         .card_irq_n(card_irq_n),
@@ -675,6 +677,8 @@ module apple2_core (
         .addr(effective_cpu_addr),
         .cpu_di(cpu_dout),
         .present(hd_present),
+        .size0(hd_size0),
+        .size1(hd_size1),
         .rom_data(hd_rom_data),
         .io_data(hd_io_data),
         .hd_go(hd_go),

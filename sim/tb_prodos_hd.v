@@ -8,7 +8,9 @@
 // this bench puts in the image.  That block calls the driver at $C729 (the
 // $C7FF entry) the way ProDOS does: WRITE block 5 from $0800, READ it back to
 // $1000 and compare, STATUS (65,535 blocks), and STATUS on drive 2 (no
-// volume there, so no device).  $0300 = $AA when all of it passed, and the
+// volume there, so no device), then two SmartPort STATUS calls through $C72C
+// and the $C800 ROM: unit 0's device count and unit 1's DIB name.  $0300 =
+// $AA when all of it passed, and the
 // written block must also have been handed to the TF card (wb_go).  Each
 // READ first asks the TF card for its block (rb_go, the image here is
 // already "on the card"), and the driver must wait while the card is busy.
@@ -52,7 +54,7 @@ module tb_prodos_hd;
         .char_rom_addr(12'd0), .char_rom_data(),
         .aux_rd_want(), .aux_rd_addr(), .aux_rd_hit(1'b1), .aux_rd_data(8'h00),
         .aux_wr_go(), .aux_wr_addr(), .aux_wr_data(), .aux_wr_busy(1'b0),
-        .hd_present(2'b01), .hd_go(hd_go), .hd_addr(hd_addr), .hd_we(hd_we), .hd_be(hd_be),
+        .hd_present(2'b01), .hd_size0(16'hFFFF), .hd_size1(16'h0000), .hd_go(hd_go), .hd_addr(hd_addr), .hd_we(hd_we), .hd_be(hd_be),
         .hd_wdata(hd_wdata), .hd_rdata(hd_rdata), .hd_ack(hd_ack),
         .hd_wb_go(wb_go), .hd_wb_drv(wb_drv), .hd_wb_blk(wb_blk), .hd_sd_busy(sd_busy),
         .hd_rb_go(rb_go), .hd_rb_ok(1'b1),
@@ -110,8 +112,29 @@ module tb_prodos_hd;
         img[82] = 8'h90; img[83] = 8'h08;                     //       BCC FAIL
         img[84] = 8'hC9; img[85] = 8'h28;                     //       CMP #$28
         img[86] = 8'hD0; img[87] = 8'h04;                     //       BNE FAIL
-        img[88] = 8'hA9; img[89] = 8'hAA;                     //       LDA #$AA
-        img[90] = 8'hD0; img[91] = 8'h02;                     //       BNE DONE
+        img[88] = 8'h4C; img[89] = 8'h00; img[90] = 8'h09;    //       JMP SP ($0900)
+        img[91] = 8'hEA;                                      //       NOP
+        // SP ($0900): the SmartPort, through the slot bus's $C800 claim
+        img[256] = 8'h20; img[257] = 8'h2C; img[258] = 8'hC7; // SP:   JSR $C72C
+        img[259] = 8'h00; img[260] = 8'h30; img[261] = 8'h09; //       STATUS, list $0930
+        img[262] = 8'hB0; img[263] = 8'h1E;                   //       BCS SPFAIL
+        img[264] = 8'hAD; img[265] = 8'h80; img[266] = 8'h02; //       LDA $0280
+        img[267] = 8'hC9; img[268] = 8'h02;                   //       CMP #$02     two units
+        img[269] = 8'hD0; img[270] = 8'h17;                   //       BNE SPFAIL
+        img[271] = 8'h20; img[272] = 8'h2C; img[273] = 8'hC7; //       JSR $C72C
+        img[274] = 8'h00; img[275] = 8'h38; img[276] = 8'h09; //       STATUS, list $0938
+        img[277] = 8'hB0; img[278] = 8'h0F;                   //       BCS SPFAIL
+        img[279] = 8'hAD; img[280] = 8'h85; img[281] = 8'h02; //       LDA $0285
+        img[282] = 8'hC9; img[283] = 8'h54;                   //       CMP #'T'     the DIB's name
+        img[284] = 8'hD0; img[285] = 8'h08;                   //       BNE SPFAIL
+        img[286] = 8'hA9; img[287] = 8'hAA;                   //       LDA #$AA
+        img[288] = 8'h8D; img[289] = 8'h00; img[290] = 8'h03; //       STA $0300
+        img[291] = 8'h4C; img[292] = 8'h23; img[293] = 8'h09; //       JMP *
+        img[294] = 8'hA9; img[295] = 8'hEE;                   // SPFAIL: LDA #$EE
+        img[296] = 8'h8D; img[297] = 8'h00; img[298] = 8'h03; //       STA $0300
+        img[299] = 8'h4C; img[300] = 8'h2B; img[301] = 8'h09; //       JMP *
+        img[304] = 8'h03; img[305] = 8'h00; img[306] = 8'h80; img[307] = 8'h02; img[308] = 8'h00;  // unit 0, code 0
+        img[312] = 8'h03; img[313] = 8'h01; img[314] = 8'h80; img[315] = 8'h02; img[316] = 8'h03;  // unit 1, the DIB
         img[92] = 8'hA9; img[93] = 8'hEE;                     // FAIL: LDA #$EE
         img[94] = 8'h8D; img[95] = 8'h00; img[96] = 8'h03;    // DONE: STA $0300
         img[97] = 8'h4C; img[98] = 8'h61; img[99] = 8'h08;    // HANG: JMP HANG

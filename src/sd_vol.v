@@ -107,6 +107,8 @@ module sd_vol #(
     input  wire [15:0] wb_blk,
     input  wire        rb_go,          // block in wb_drv/wb_blk
     output reg         rb_ok,
+    output wire [15:0] hd_size0,       // slot 7 files' sizes in blocks (65,535 at most,
+    output wire [15:0] hd_size1,       // ProDOS's limit); valid while `present`
     input  wire        mnt_go,
     input  wire [1:0]  mnt_drv,
 
@@ -280,6 +282,8 @@ module sd_vol #(
                      fw_active || rl_req != 4'd0;
 
     wire        hd_in  = present[{1'b1, hd_d}] && {1'b0, hd_b} < fnsec[{1'b1, hd_d}];
+    assign hd_size0 = fnsec[2][16] ? 16'hFFFF : fnsec[2][15:0];
+    assign hd_size1 = fnsec[3][16] ? 16'hFFFF : fnsec[3][15:0];
     wire [31:0] hd_lba = fstart[{1'b1, hd_d}] + {16'd0, hd_b};
 
     // the byte of an 8.3 name at position e (0-10), byte 0 first

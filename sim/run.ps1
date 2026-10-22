@@ -103,6 +103,19 @@ $mockingboard = @('src/mockingboard/mockingboard_card.v', 'src/mockingboard/via6
 $core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v',
            'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v', 'src/thunderclock.v') + $disk2 + $mockingboard
 Run-Tb 'tb_thunderclock' @('src/thunderclock.v')
+# slot 7's firmware: the included .vh must match src/prodos_hd_rom.s, and the
+# firmware is run against a model of its registers (py65; the system Python,
+# not the OSS CAD Suite's, which has no py65).  Judged by exit code alone.
+if (-not $Target -or $Target -in @('tb_prodos_hd', 'hdrom')) {
+    foreach ($py in @(@('scripts\hdrom.py', '--check'), @('scripts\hdrom_test.py'))) {
+        $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+        $out = & python (Join-Path $root $py[0]) $py[1..($py.Count - 1)] 2>&1
+        $code = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+        $out | ForEach-Object { "$_" }
+        if ($code -ne 0) { throw "FAILED: python $($py -join ' ')" }
+    }
+}
 Run-Tb 'tb_disk2'        $disk2 -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_diskimg'      @('src/serial_debugger.v', 'src/disk2/disk2_store.v') -Gen '2012'
 # tb_sdvol and tb_sdcopy boot from a FAT32 card built by the page's own FAT code

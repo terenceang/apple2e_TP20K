@@ -10,7 +10,7 @@ This project's code was written with AI assistance.
 - **128 KB**: 48 KB main RAM and the 16 KB ROM in block RAM; the aux 64 KB and the language card in the SOM's DDR3
 - **HDMI video** at 720×480p60 (CEA-861 VIC 2), with the 560×384 Apple display centered: text (40 and 80 column, MouseText), lo-res, hi-res and double hi-res, mixed mode and page 2; colour is an NTSC-style decode of the dot stream, so fills, fringes and the palette bit look as they do on a TV
 - **Audio** from the $C030 speaker and a **Mockingboard C** in slot 4, over HDMI (48 kHz L-PCM) and through the Dock's PT8211 DAC and amplifier to the 3.5 mm jack
-- **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files
+- **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes, also answering as a SmartPort), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files
 - **Clock** in slot 5 that ProDOS uses as a Thunderclock, so files get dated; the web page sets the time when it connects (there is no battery, so it is lost at power-off)
 - **Keyboard, gamepad and debugger over USB serial** at 1 Mbps; the [browser front end](web/README.md) in `web/` has the keyboard, the text screen, the debugger and the disk drives
 - **Built-in hardware debugger**: Ctrl+B freezes the CPU to inspect registers, single-step and dump memory
@@ -20,6 +20,7 @@ This project's code was written with AI assistance.
 - Tang Primer 20K with the Dock board, and a TF card (FAT32, so 32 GB or smaller, or a bigger one reformatted FAT32)
 - Gowin EDA 1.9.12.04 (`gw_sh` and `programmer_cli`, at the paths in `scripts/build.ps1` and `scripts/prog.ps1`)
 - [Icarus Verilog](https://github.com/steveicarus/iverilog) for the testbenches (the OSS CAD Suite's, found by `scripts/toolchain.ps1`)
+- Python 3 with [py65](https://github.com/mnaberez/py65) (`pip install py65`), to assemble and test slot 7's firmware (`scripts/hdrom.py`, `scripts/hdrom_test.py`)
 - Windows PowerShell 5.1; [GNU make](https://www.gnu.org/software/make/) is optional, as a shorthand (`winget install GnuWin32.Make`)
 - Node 20.19+ for the web front end
 - Apple //e ROM images. **These are not included**; see [`roms/README.md`](roms/README.md)
@@ -129,7 +130,8 @@ src/hdmi/               HDMI transmitter: timing, TMDS, data islands, audio/Info
 src/sound_generator.v   speaker and Mockingboard to the PT8211 DAC
 src/mockingboard/       Mockingboard C (two 6522 VIAs, two AY-3-8910s), slot 4
 src/disk2/              Disk II card and image store, slot 6
-src/prodos_hd.v         ProDOS block device, slot 7
+src/prodos_hd.v         ProDOS block device and SmartPort, slot 7
+src/prodos_hd_rom.s     its firmware, 6502 source (scripts/hdrom.py assembles it)
 src/thunderclock.v      clock card ProDOS takes for a Thunderclock, slot 5
 src/sd_vol.v            the TF card: finds the drives' files on FAT32, loads them, writes them back
 src/input_controller.v  UART RX, keyboard, gamepad, $C0xx input registers

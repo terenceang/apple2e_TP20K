@@ -145,6 +145,7 @@ module top (
     wire [24:0] core_hd_addr, sd_m_addr;
     wire [15:0] core_hd_wdata, sd_m_wdata;
     wire        hd_wb_go, hd_wb_drv, sd_mnt_go, hd_rb_go, hd_rb_ok;
+    wire [15:0] hd_size0, hd_size1;
     wire [1:0]  sd_mnt_drv;
     wire [15:0] hd_wb_blk;
     wire [2:0]  sd_estage;
@@ -357,7 +358,7 @@ module top (
         .present(sd_present), .fail(sd_fail), .fs_ok(sd_fs_ok),
         .loading(hd_loading), .busy(hd_sd_busy), .err(sd_err), .estage(sd_estage),
         .wb_go(hd_wb_go), .wb_drv(hd_wb_drv), .wb_blk(hd_wb_blk),
-        .rb_go(hd_rb_go), .rb_ok(hd_rb_ok),
+        .rb_go(hd_rb_go), .rb_ok(hd_rb_ok), .hd_size0(hd_size0), .hd_size1(hd_size1),
         .mnt_go(sd_mnt_go), .mnt_drv(sd_mnt_drv),
         .x_go(sd_x_go), .x_lba(sd_x_lba), .x_zero(sd_x_zero),
         .x_byte(sd_x_byte), .x_valid(sd_x_valid), .x_take(sd_x_take),
@@ -405,7 +406,7 @@ module top (
         .hd_go(core_hd_go), .hd_addr(core_hd_addr), .hd_we(core_hd_we), .hd_be(core_hd_be),
         .hd_wdata(core_hd_wdata), .hd_rdata(hd_rdata), .hd_ack(hd_ack),
         .hd_wb_go(hd_wb_go), .hd_wb_drv(hd_wb_drv), .hd_wb_blk(hd_wb_blk),
-        .hd_rb_go(hd_rb_go), .hd_rb_ok(hd_rb_ok),
+        .hd_rb_go(hd_rb_go), .hd_rb_ok(hd_rb_ok), .hd_size0(hd_size0), .hd_size1(hd_size1),
         .hd_sd_busy(hd_sd_busy),
         // held while the TF card's volumes load, so the boot finds them
         .cpu_rdy(cpu_rdy & !hd_loading),
