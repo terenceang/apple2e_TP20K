@@ -254,7 +254,13 @@ module serial_debugger (
     localparam [7:0] STR_HDUP_LEN   = 8'd13;
     localparam [8:0] STR_SECS_START = STR_HDUP_START + STR_HDUP_LEN;
     localparam [7:0] STR_SECS_LEN   = 8'd11;
-    localparam integer STR_BYTES = 218;
+    localparam [8:0] STR_VID_START = STR_SECS_START + STR_SECS_LEN;
+    localparam [7:0] STR_VID_LEN   = 8'd4;
+    localparam [8:0] STR_PLL_START = STR_VID_START + STR_VID_LEN;
+    localparam [7:0] STR_PLL_LEN   = 8'd5;
+    localparam [8:0] STR_DDR_START = STR_PLL_START + STR_PLL_LEN;
+    localparam [7:0] STR_DDR_LEN   = 8'd3;
+    localparam integer STR_BYTES = 230;
     // \015\012 is CR LF: Verilog-2001 has no \r escape.
     localparam [8*STR_BYTES-1:0] STR_TEXT = {
         "\015\012[ Apple //e Debugger ] (h=Help, c=Cont)\015\012> ",  // BANNER
@@ -276,7 +282,10 @@ module serial_debugger (
         "\015\012done\015\012",  // DONE
         "\015\012lost\015\012",  // LOST
         "\015\012UPLOAD HD\015\012",  // HDUP
-        "\015\012SECTORS\015\012"   // SECS
+        "\015\012SECTORS\015\012",  // SECS
+        "VID:",  // VID
+        " PLL:",  // PLL
+        " D:"   // DDR
     };
     reg [7:0] str_rom [0:STR_BYTES-1];
     integer si;
@@ -285,7 +294,7 @@ module serial_debugger (
             str_rom[si] = STR_TEXT[8 * (STR_BYTES - 1 - si) +: 8];
         // synthesis translate_off
         // a length that does not match its text leaves a NUL or cuts one off
-        if (STR_SECS_START + STR_SECS_LEN != STR_BYTES || str_rom[0] == 8'h00)
+        if (STR_DDR_START + STR_DDR_LEN != STR_BYTES || str_rom[0] == 8'h00)
             $display("FAIL: serial_debugger string table lengths do not add up");
         // synthesis translate_on
     end
@@ -1011,20 +1020,21 @@ module serial_debugger (
                             seq_step   <= 5'd1;
                             main_state <= M_STR;
                         end
-                        5'd1:  if (!tx_fifo_full) begin fifo_push("V"); seq_step <= 5'd2;  end
-                        5'd2:  if (!tx_fifo_full) begin fifo_push("I"); seq_step <= 5'd3;  end
-                        5'd3:  if (!tx_fifo_full) begin fifo_push("D"); seq_step <= 5'd4;  end
-                        5'd4:  if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd5;  end
-                        5'd5:  if (!tx_fifo_full) begin fifo_push(text_mode ? "T" : "G"); seq_step <= 5'd6; end
-                        5'd6:  if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd7;  end
-                        5'd7:  if (!tx_fifo_full) begin fifo_push("P"); seq_step <= 5'd8;  end
-                        5'd8:  if (!tx_fifo_full) begin fifo_push("L"); seq_step <= 5'd9;  end
-                        5'd9:  if (!tx_fifo_full) begin fifo_push("L"); seq_step <= 5'd10; end
-                        5'd10: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd11; end
-                        5'd11: if (!tx_fifo_full) begin fifo_push(pll_locked ? "1" : "0"); seq_step <= 5'd12; end
-                        5'd12: if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd13; end
-                        5'd13: if (!tx_fifo_full) begin fifo_push("D"); seq_step <= 5'd14; end
-                        5'd14: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd15; end
+                        // VID:T PLL:1 D:<ddr_diag>, which web/src/stream.js parses
+                        5'd1: begin
+                            str_pos <= STR_VID_START; str_cnt <= STR_VID_LEN;
+                            return_job <= M_STATUS; seq_step <= 5'd2; main_state <= M_STR;
+                        end
+                        5'd2: if (!tx_fifo_full) begin fifo_push(text_mode ? "T" : "G"); seq_step <= 5'd3; end
+                        5'd3: begin
+                            str_pos <= STR_PLL_START; str_cnt <= STR_PLL_LEN;
+                            return_job <= M_STATUS; seq_step <= 5'd4; main_state <= M_STR;
+                        end
+                        5'd4: if (!tx_fifo_full) begin fifo_push(pll_locked ? "1" : "0"); seq_step <= 5'd5; end
+                        5'd5: begin
+                            str_pos <= STR_DDR_START; str_cnt <= STR_DDR_LEN;
+                            return_job <= M_STATUS; seq_step <= 5'd15; main_state <= M_STR;
+                        end
                         5'd15: begin
                             hex_val <= ddr_diag[31:16]; hex_digits <= 3'd4;
                             return_job <= M_STATUS; seq_step <= 5'd16; main_state <= M_HEX;

@@ -36,7 +36,8 @@ const REGS_RE =
 // puts an extra one there so the halves of a 16-byte line line up), so split
 // on whitespace rather than matching a fixed pattern.
 const MEM_RE = /^\$([0-9A-F]{4}): (.*)\|([\x20-\x7e.]*)\|$/
-const STATUS_RE = /^VID:([TG]) PLL:([01])$/
+// serial_debugger.v M_STATUS: VID:T PLL:1 D:<eight hex digits of DDR3 diagnostics>
+export const STATUS_RE = /^VID:([TG]) PLL:([01])(?: D:[0-9A-F]{8})?$/
 
 /**
  * $SS <flags> then the 1 KB text page; $GF then 4 rows of 40; $SEND ends it.

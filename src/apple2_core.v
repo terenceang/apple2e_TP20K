@@ -392,14 +392,16 @@ module apple2_core (
     wire        d2_io_hit = (effective_cpu_addr[15:8] == 8'hC0) &&
                             (effective_cpu_addr[7:4] == 4'hE);
 
-    // Mockingboard Slot 4 decode:
-    // /IOSEL ($C400-$C4FF): VIA 1 ($C400-$C47F) & VIA 2 ($C480-$C4FF)
-    // /DEVSEL ($C0C0-$C0CF): VIA 1 ($C0C0-$C0C7) & VIA 2 ($C0C8-$C0CF)
-    wire        mock_iosel_hit  = (effective_cpu_addr[15:8] == 8'hC4);
-    wire        mock_devsel_hit = (effective_cpu_addr[15:8] == 8'hC0) &&
-                                  (effective_cpu_addr[7:4] == 4'hC);
-    wire        mock_iosel_n    = !mock_iosel_hit;
-    wire        mock_devsel_n   = !mock_devsel_hit;
+    // The Mockingboard (slot 4): its two VIAs at /IOSEL ($C400-$C4FF) and
+    // /DEVSEL ($C0C0-$C0CF).  Its $C4xx bytes reach the CPU as slot 4's
+    // card_data, so the internal ROM outranks it under INTCXROM as it does any
+    // card on a //e.  The selects are decoded from the address alone, not
+    // taken from slot_bus's strobes: those are gated by bus_cycle, i.e. by
+    // cpu_go, and the VIA's read data feeds cpu_din, so the strobes put the
+    // whole cpu_go chain in front of the read mux (clk_pixel fell 32 -> 28 MHz).
+    wire        mock_iosel_n  = !(effective_cpu_addr[15:8] == 8'hC4);
+    wire        mock_devsel_n = !((effective_cpu_addr[15:8] == 8'hC0) &&
+                                  (effective_cpu_addr[7:4] == 4'hC));
 
     wire [6:0]  card_irq_n = {1'b1, 1'b1, 1'b1, mock_irq_n, 1'b1, 1'b1, 1'b1};
 
@@ -579,18 +581,14 @@ module apple2_core (
                 cpu_din_comb = hd_io_data;      // slot 7, $C0F0-$C0FF
             end else if (effective_cpu_addr[7:4] == 4'hD) begin
                 cpu_din_comb = tc_io_data;      // slot 5, $C0D0-$C0DF
-            end else if (mock_devsel_hit) begin
+            end else if (!mock_devsel_n) begin
                 // Mockingboard alternate I/O registers at $C0C0-$C0CF
                 cpu_din_comb = mock_rom_data;
             end else begin
                 cpu_din_comb = vram_data;       // nothing answers: the floating bus
             end
         end else if (is_slot_rom) begin
-            // Slot 4 Mockingboard registers override internal ROM when accessed
-            if (mock_iosel_hit)
-                cpu_din_comb = mock_rom_data;
-            else
-                cpu_din_comb = slot_int_rom ? rom_dout : slot_dout;
+            cpu_din_comb = slot_int_rom ? rom_dout : slot_dout;
         end else if (is_lc_area) begin
             if (lc_read_ram)
                 cpu_din_comb = aux_rd_data; // Language Card RAM, main or aux: both in DDR3

@@ -57,18 +57,22 @@ module clk_gen (
     );
 
 
-    // 1.022727 MHz CPU clock enable accumulator:
-    // step = round(1022727.27 * 2^32 / 27000000) = 162708307
-    localparam [31:0] STEP_1M = 32'd162708307;
-    reg [32:0] acc_1m = 33'd0;
-
+    // 1.022727 MHz CPU clock enable: the //e's 14.31818 MHz / 14, which is
+    // exactly 5/132 of 27 MHz (14.31818 = 315/22, so (315/22/14)/27 = 5/132).
+    // An 8-bit accumulator gives that rate exactly; a pulse every 26 or 27
+    // clocks, as the 32-bit phase accumulator that was here did.
+    localparam [7:0] CE_NUM = 8'd5, CE_DEN = 8'd132;
+    reg [7:0] acc_1m = 8'd0;
     always @(posedge clk_pixel or posedge rst_in) begin
         if (rst_in) begin
-            acc_1m <= 33'd0;
+            acc_1m <= 8'd0;
             ce_1m  <= 1'b0;
+        end else if (acc_1m >= CE_DEN - CE_NUM) begin
+            acc_1m <= acc_1m - (CE_DEN - CE_NUM);
+            ce_1m  <= 1'b1;
         end else begin
-            acc_1m <= {1'b0, acc_1m[31:0]} + {1'b0, STEP_1M};
-            ce_1m  <= acc_1m[32];
+            acc_1m <= acc_1m + CE_NUM;
+            ce_1m  <= 1'b0;
         end
     end
 

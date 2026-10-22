@@ -36,7 +36,7 @@ function collect(chunks) {
 
 const REGS_LINE = '\r\n' + 'PC:$FA62 A:$00 X:$0A Y:$7B SP:$D6 P:[NV-BDIZC] OP:$AD'
 const MEM_LINE = '\r\n' + '$0300: 01 02 03 04 05 06 07 08  09 0A 0B 0C 0D 0E 0F 10 |................|'
-const STATUS_LINE = '\r\n' + 'VID:T PLL:1'
+const STATUS_LINE = '\r\n' + 'VID:T PLL:1 D:D3000C35'
 /** The prompt is its own string, "\r\n> ", so it brings its own line ending. */
 const PROMPT = String.fromCharCode(13, 10, 62)
 

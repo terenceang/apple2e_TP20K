@@ -27,6 +27,7 @@ import {
   SCR_FLAG,
   textPageIndex,
 } from '../src/protocol.js'
+import { STATUS_RE } from '../src/stream.js'
 
 test('a clock packet is FF 05 and YYMMDDWHHMMSS as ASCII digits, never 0x02', () => {
   // 2026-10-22 is a Thursday (4); local time, as ProDOS has no time zone
@@ -87,6 +88,9 @@ test('the firmware strings match serial_debugger.v byte for byte', () => {
   assert.equal(RESUME, rtl.RESUME)
   assert.equal(HELP, rtl.HELP)
   assert.equal(PROMPT, rtl.PROMPT)
+  // the `t` line, as M_STATUS builds it, is what stream.js parses
+  const line = rtl.VID + 'T' + rtl.PLL + '1' + rtl.DDR + 'D3000C35'
+  assert.ok(STATUS_RE.test(line), `stream.js does not parse the debugger's status line: ${line}`)
   // what web/src/disk.js waits for after `b` and `u`
   assert.ok(rtl.SECS.includes('SECTORS'))
   assert.ok(rtl.HDUP.includes('UPLOAD HD'))

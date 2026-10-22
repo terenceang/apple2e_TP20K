@@ -93,6 +93,34 @@ module tb_ay8910;
         end
     endtask
 
+    // ce_1m pulses between successive changes of a signal, measured twice
+    // after letting the first (partial) interval go by
+    integer ce_seen = 0;
+    always @(posedge clk) if (ce_1m) ce_seen = ce_seen + 1;
+    task gap(input integer which, output integer n);
+        integer t0, k2;
+        reg [16:0] was;
+        begin
+            for (k2 = 0; k2 < 2; k2 = k2 + 1) begin
+                was = (which == 0) ? dut.tone_out_a : (which == 1) ? dut.lfsr : dut.env_step;
+                while (((which == 0) ? dut.tone_out_a : (which == 1) ? dut.lfsr : dut.env_step) === was)
+                    @(posedge clk);
+                if (k2 == 0) t0 = ce_seen;
+            end
+            n = ce_seen - t0;
+        end
+    endtask
+    integer gn;
+    task measure_tone(input [15:0] want, input [1023:0] msg);
+        begin gap(0, gn); if (gn != want) $display("  tone gap %0d, want %0d", gn, want); check(msg, gn == want); end
+    endtask
+    task measure_lfsr(input [15:0] want, input [1023:0] msg);
+        begin gap(1, gn); if (gn != want) $display("  noise gap %0d, want %0d", gn, want); check(msg, gn == want); end
+    endtask
+    task measure_env(input [15:0] want, input [1023:0] msg);
+        begin gap(2, gn); if (gn != want) $display("  envelope gap %0d, want %0d", gn, want); check(msg, gn == want); end
+    endtask
+
     reg [7:0] rval;
     integer i, transitions;
     reg signed [15:0] last_a;
@@ -143,6 +171,23 @@ module tb_ay8910;
             end
         end
         check("Tone A generates transitions", transitions > 2);
+
+        // 2b. Rates (GI AY-3-8910 datasheet): tone f = fclk / (16 TP), so a
+        // half cycle is 8 TP input clocks; noise shifts every 16 NP clocks;
+        // the envelope steps every 16 EP clocks (f_E = fclk / (256 EP) for its
+        // 16 steps).  The Mockingboard clocks the AY at the Apple's 1.023 MHz,
+        // which is ce_1m here.
+        measure_tone(16'd32, "tone half cycle is 8 x TP clocks (TP=4)");
+        write_reg(4'h0, 8'h00);   // TP = 0 behaves as 1
+        measure_tone(16'd8, "tone half cycle with TP=0 is 8 clocks");
+        write_reg(4'h0, 8'h04);
+        write_reg(4'h6, 8'h03);
+        measure_lfsr(16'd48, "noise shifts every 16 x NP clocks (NP=3)");
+        write_reg(4'h8, 8'h10);   // A on the envelope
+        write_reg(4'hB, 8'h02); write_reg(4'hC, 8'h00);
+        write_reg(4'hD, 8'h0C);   // sawtooth up, repeating
+        measure_env(16'd32, "envelope steps every 16 x EP clocks (EP=2)");
+        write_reg(4'h8, 8'h0F);
 
         // 3. Envelope Generator Shape Test
         // Configure Channel A to use Envelope mode (R8 bit 4 = 1)
