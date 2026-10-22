@@ -156,7 +156,7 @@ module disk2_card (
     reg        rdy_q      = 1'b0;  // a byte has arrived under the head and has not been read
     reg [7:0]  wr_latch   = 8'h00; // the write-mode data register
 
-    localparam [7:0] TRACK_MAX = 8'd34;
+    localparam [7:0] TRACK_MAX = `GCR_TRACKS - 1;
     localparam [7:0] VOLUME    = 8'hFE;   // DOS 3.3 volumes are $FE
 
     // The head position the store and the address field work from.

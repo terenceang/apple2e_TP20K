@@ -109,10 +109,8 @@ module apple2_core (
     input  wire        img_dn_go,
     input  wire        img_dn_drive,
     input  wire [17:0] img_dn_addr,
-    input  wire        img_dn_last,
     output wire [7:0]  img_dn_data,
     output wire        img_dn_valid,
-    output wire        img_dn_done,
 
     output wire [7:0]  debug_dsk_head,   // the Disk ][ head's track (for the debugger's i command)
     output wire [15:0] debug_cpu_pc,
@@ -772,10 +770,8 @@ module apple2_core (
         .down_go(img_dn_go),
         .down_drive(img_dn_drive),
         .down_addr(img_dn_addr),
-        .down_last(img_dn_last),
         .down_data(img_dn_data),
         .down_valid(img_dn_valid),
-        .down_done(img_dn_done),
         .dsk_go(dsk_store_go),
         .dsk_addr(dsk_store_addr),
         .dsk_we(dsk_store_we),

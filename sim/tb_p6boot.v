@@ -82,8 +82,8 @@ module tb_p6boot;
         .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_aux(1'b0), .dbg_mem_ready(),
         .img_up_go(1'b0), .img_up_drive(1'b0), .img_up_addr(18'd0), .img_up_data(8'd0),
         .img_up_last(1'b0), .img_up_bad(1'b0), .img_up_busy(), .img_up_done(),
-        .img_dn_go(1'b0), .img_dn_drive(1'b0), .img_dn_addr(18'd0), .img_dn_last(1'b0),
-        .img_dn_data(), .img_dn_valid(), .img_dn_done(),
+        .img_dn_go(1'b0), .img_dn_drive(1'b0), .img_dn_addr(18'd0),
+        .img_dn_data(), .img_dn_valid(),
         .debug_cpu_pc(pc), .debug_cpu_addr(), .debug_cpu_dout(), .debug_cpu_we(),
         .debug_cpu_sync(sync), .debug_cpu_a(), .debug_cpu_x(), .debug_cpu_y(),
         .debug_cpu_s(), .debug_cpu_p(), .debug_cpu_ir()

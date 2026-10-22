@@ -208,105 +208,86 @@ module serial_debugger (
     reg       slot_tx_pend = 1'b0;
 
     // =========================================================================
-    // 4. Static String Table ROM (178 Bytes)
+    // 4. Static String Table ROM (218 Bytes)
     // =========================================================================
-    localparam STR_BANNER_START = 8'd0;
-    localparam STR_BANNER_LEN   = 8'd45;
-    localparam STR_RESUME_START = 8'd45;
-    localparam STR_RESUME_LEN   = 8'd17;
-    localparam STR_HELP_START = 8'd62;
-    localparam STR_HELP_LEN   = 8'd58;
-    localparam STR_PROMPT_START = 8'd119;
-    localparam STR_PROMPT_LEN   = 8'd4;
-    localparam STR_PC_LBL_START = 8'd124;
-    localparam STR_PC_LBL_LEN   = 8'd6;
-    localparam STR_A_LBL_START  = 8'd130;
-    localparam STR_A_LBL_LEN    = 8'd4;
-    localparam STR_X_LBL_START  = 8'd134;
-    localparam STR_X_LBL_LEN    = 8'd4;
-    localparam STR_Y_LBL_START  = 8'd138;
-    localparam STR_Y_LBL_LEN    = 8'd4;
-    localparam STR_S_LBL_START  = 8'd142;
-    localparam STR_S_LBL_LEN    = 8'd5;
-    localparam STR_P_LBL_START  = 8'd147;
-    localparam STR_P_LBL_LEN    = 8'd4;
-    localparam STR_OP_LBL_START = 8'd151;
-    localparam STR_OP_LBL_LEN   = 8'd6;
-    localparam STR_BAR_SP_START = 8'd157;
-    localparam STR_BAR_SP_LEN   = 8'd2;
-    localparam STR_CRLF_START   = 8'd159;
-    localparam STR_CRLF_LEN     = 8'd2;
-    localparam STR_SCR_START    = 8'd161;
-    localparam STR_SCR_LEN      = 8'd5;
-    localparam STR_GFX_START    = 8'd166;
-    localparam STR_GFX_LEN      = 8'd5;
-    localparam STR_END_START    = 8'd171;
-    localparam STR_END_LEN      = 8'd7;
-    localparam STR_DONE_START   = 9'd178;
-    localparam STR_DONE_LEN     = 8'd8;
-    localparam STR_LOST_START   = 9'd186;
-    localparam STR_LOST_LEN     = 8'd8;
-    localparam STR_HDUP_START   = 9'd194;
-    localparam STR_HDUP_LEN     = 8'd13;
-    localparam STR_SECS_START   = 9'd207;
-    localparam STR_SECS_LEN     = 8'd11;
-    reg [7:0] str_rom [0:217];
+    // Each string's start is the one before's start plus its length, so the
+    // lengths are the only numbers to keep right, and the text is STR_TEXT in
+    // the same order.  web/test/protocol.test.js reads this file and checks
+    // the strings the page depends on against web/src/protocol.js.
+    localparam [8:0] STR_BANNER_START = 9'd0;
+    localparam [7:0] STR_BANNER_LEN   = 8'd45;
+    localparam [8:0] STR_RESUME_START = STR_BANNER_START + STR_BANNER_LEN;
+    localparam [7:0] STR_RESUME_LEN   = 8'd17;
+    localparam [8:0] STR_HELP_START = STR_RESUME_START + STR_RESUME_LEN;
+    localparam [7:0] STR_HELP_LEN   = 8'd58;
+    localparam [8:0] STR_PROMPT_START = STR_HELP_START + STR_HELP_LEN;
+    localparam [7:0] STR_PROMPT_LEN   = 8'd4;
+    localparam [8:0] STR_PC_LBL_START = STR_PROMPT_START + STR_PROMPT_LEN;
+    localparam [7:0] STR_PC_LBL_LEN   = 8'd6;
+    localparam [8:0] STR_A_LBL_START = STR_PC_LBL_START + STR_PC_LBL_LEN;
+    localparam [7:0] STR_A_LBL_LEN   = 8'd4;
+    localparam [8:0] STR_X_LBL_START = STR_A_LBL_START + STR_A_LBL_LEN;
+    localparam [7:0] STR_X_LBL_LEN   = 8'd4;
+    localparam [8:0] STR_Y_LBL_START = STR_X_LBL_START + STR_X_LBL_LEN;
+    localparam [7:0] STR_Y_LBL_LEN   = 8'd4;
+    localparam [8:0] STR_S_LBL_START = STR_Y_LBL_START + STR_Y_LBL_LEN;
+    localparam [7:0] STR_S_LBL_LEN   = 8'd5;
+    localparam [8:0] STR_P_LBL_START = STR_S_LBL_START + STR_S_LBL_LEN;
+    localparam [7:0] STR_P_LBL_LEN   = 8'd4;
+    localparam [8:0] STR_OP_LBL_START = STR_P_LBL_START + STR_P_LBL_LEN;
+    localparam [7:0] STR_OP_LBL_LEN   = 8'd6;
+    localparam [8:0] STR_BAR_SP_START = STR_OP_LBL_START + STR_OP_LBL_LEN;
+    localparam [7:0] STR_BAR_SP_LEN   = 8'd2;
+    localparam [8:0] STR_CRLF_START = STR_BAR_SP_START + STR_BAR_SP_LEN;
+    localparam [7:0] STR_CRLF_LEN   = 8'd2;
+    localparam [8:0] STR_SCR_START = STR_CRLF_START + STR_CRLF_LEN;
+    localparam [7:0] STR_SCR_LEN   = 8'd5;
+    localparam [8:0] STR_GFX_START = STR_SCR_START + STR_SCR_LEN;
+    localparam [7:0] STR_GFX_LEN   = 8'd5;
+    localparam [8:0] STR_END_START = STR_GFX_START + STR_GFX_LEN;
+    localparam [7:0] STR_END_LEN   = 8'd7;
+    localparam [8:0] STR_DONE_START = STR_END_START + STR_END_LEN;
+    localparam [7:0] STR_DONE_LEN   = 8'd8;
+    localparam [8:0] STR_LOST_START = STR_DONE_START + STR_DONE_LEN;
+    localparam [7:0] STR_LOST_LEN   = 8'd8;
+    localparam [8:0] STR_HDUP_START = STR_LOST_START + STR_LOST_LEN;
+    localparam [7:0] STR_HDUP_LEN   = 8'd13;
+    localparam [8:0] STR_SECS_START = STR_HDUP_START + STR_HDUP_LEN;
+    localparam [7:0] STR_SECS_LEN   = 8'd11;
+    localparam integer STR_BYTES = 218;
+    // \015\012 is CR LF: Verilog-2001 has no \r escape.
+    localparam [8*STR_BYTES-1:0] STR_TEXT = {
+        "\015\012[ Apple //e Debugger ] (h=Help, c=Cont)\015\012> ",  // BANNER
+        "\015\012[Resuming...]\015\012",  // RESUME
+        "\015\012Cmds: r=Regs s=Step c=Cont m=Mem t=Stat w=Scr h=Help\015\012> ",  // HELP
+        "\015\012> ",  // PROMPT
+        "\015\012PC:$",  // PC_LBL
+        " A:$",  // A_LBL
+        " X:$",  // X_LBL
+        " Y:$",  // Y_LBL
+        " SP:$",  // S_LBL
+        " P:[",  // P_LBL
+        "] OP:$",  // OP_LBL
+        " |",  // BAR_SP
+        "\015\012",  // CRLF
+        "\015\012$SS",  // SCR
+        "\015\012$GF",  // GFX
+        "\015\012$SEND",  // END
+        "\015\012done\015\012",  // DONE
+        "\015\012lost\015\012",  // LOST
+        "\015\012UPLOAD HD\015\012",  // HDUP
+        "\015\012SECTORS\015\012"   // SECS
+    };
+    reg [7:0] str_rom [0:STR_BYTES-1];
+    integer si;
     initial begin
-        str_rom[0] = 8'h0D; str_rom[1] = 8'h0A; str_rom[2] = 8'h5B; str_rom[3] = 8'h20;
-        str_rom[4] = 8'h41; str_rom[5] = 8'h70; str_rom[6] = 8'h70; str_rom[7] = 8'h6C;
-        str_rom[8] = 8'h65; str_rom[9] = 8'h20; str_rom[10] = 8'h2F; str_rom[11] = 8'h2F;
-        str_rom[12] = 8'h65; str_rom[13] = 8'h20; str_rom[14] = 8'h44; str_rom[15] = 8'h65;
-        str_rom[16] = 8'h62; str_rom[17] = 8'h75; str_rom[18] = 8'h67; str_rom[19] = 8'h67;
-        str_rom[20] = 8'h65; str_rom[21] = 8'h72; str_rom[22] = 8'h20; str_rom[23] = 8'h5D;
-        str_rom[24] = 8'h20; str_rom[25] = 8'h28; str_rom[26] = 8'h68; str_rom[27] = 8'h3D;
-        str_rom[28] = 8'h48; str_rom[29] = 8'h65; str_rom[30] = 8'h6C; str_rom[31] = 8'h70;
-        str_rom[32] = 8'h2C; str_rom[33] = 8'h20; str_rom[34] = 8'h63; str_rom[35] = 8'h3D;
-        str_rom[36] = 8'h43; str_rom[37] = 8'h6F; str_rom[38] = 8'h6E; str_rom[39] = 8'h74;
-        str_rom[40] = 8'h29; str_rom[41] = 8'h0D; str_rom[42] = 8'h0A; str_rom[43] = 8'h3E;
-        str_rom[44] = 8'h20; str_rom[45] = 8'h0D; str_rom[46] = 8'h0A; str_rom[47] = 8'h5B;
-        str_rom[48] = 8'h52; str_rom[49] = 8'h65; str_rom[50] = 8'h73; str_rom[51] = 8'h75;
-        str_rom[52] = 8'h6D; str_rom[53] = 8'h69; str_rom[54] = 8'h6E; str_rom[55] = 8'h67;
-        str_rom[56] = 8'h2E; str_rom[57] = 8'h2E; str_rom[58] = 8'h2E; str_rom[59] = 8'h5D;
-        str_rom[60] = 8'h0D; str_rom[61] = 8'h0A; str_rom[62] = 8'h0D; str_rom[63] = 8'h0A;
-        str_rom[64] = 8'h43; str_rom[65] = 8'h6D; str_rom[66] = 8'h64; str_rom[67] = 8'h73;
-        str_rom[68] = 8'h3A; str_rom[69] = 8'h20; str_rom[70] = 8'h72; str_rom[71] = 8'h3D;
-        str_rom[72] = 8'h52; str_rom[73] = 8'h65; str_rom[74] = 8'h67; str_rom[75] = 8'h73;
-        str_rom[76] = 8'h20; str_rom[77] = 8'h73; str_rom[78] = 8'h3D; str_rom[79] = 8'h53;
-        str_rom[80] = 8'h74; str_rom[81] = 8'h65; str_rom[82] = 8'h70; str_rom[83] = 8'h20;
-        str_rom[84] = 8'h63; str_rom[85] = 8'h3D; str_rom[86] = 8'h43; str_rom[87] = 8'h6F;
-        str_rom[88] = 8'h6E; str_rom[89] = 8'h74; str_rom[90] = 8'h20; str_rom[91] = 8'h6D;
-        str_rom[92] = 8'h3D; str_rom[93] = 8'h4D; str_rom[94] = 8'h65; str_rom[95] = 8'h6D;
-        str_rom[96] = 8'h20; str_rom[97] = 8'h74; str_rom[98] = 8'h3D; str_rom[99] = 8'h53;
-        str_rom[100] = 8'h74; str_rom[101] = 8'h61; str_rom[102] = 8'h74; str_rom[103] = 8'h20;
-        str_rom[104] = 8'h77; str_rom[105] = 8'h3D; str_rom[106] = 8'h53; str_rom[107] = 8'h63;
-        str_rom[108] = 8'h72; str_rom[109] = 8'h20; str_rom[110] = 8'h68; str_rom[111] = 8'h3D;
-        str_rom[112] = 8'h48; str_rom[113] = 8'h65; str_rom[114] = 8'h6C; str_rom[115] = 8'h70;
-        str_rom[116] = 8'h0D; str_rom[117] = 8'h0A; str_rom[118] = 8'h3E; str_rom[119] = 8'h20;
-        str_rom[120] = 8'h0D; str_rom[121] = 8'h0A; str_rom[122] = 8'h3E; str_rom[123] = 8'h20;
-        str_rom[124] = 8'h0D; str_rom[125] = 8'h0A; str_rom[126] = 8'h50; str_rom[127] = 8'h43;
-        str_rom[128] = 8'h3A; str_rom[129] = 8'h24; str_rom[130] = 8'h20; str_rom[131] = 8'h41;
-        str_rom[132] = 8'h3A; str_rom[133] = 8'h24; str_rom[134] = 8'h20; str_rom[135] = 8'h58;
-        str_rom[136] = 8'h3A; str_rom[137] = 8'h24; str_rom[138] = 8'h20; str_rom[139] = 8'h59;
-        str_rom[140] = 8'h3A; str_rom[141] = 8'h24; str_rom[142] = 8'h20; str_rom[143] = 8'h53;
-        str_rom[144] = 8'h50; str_rom[145] = 8'h3A; str_rom[146] = 8'h24; str_rom[147] = 8'h20;
-        str_rom[148] = 8'h50; str_rom[149] = 8'h3A; str_rom[150] = 8'h5B; str_rom[151] = 8'h5D;
-        str_rom[152] = 8'h20; str_rom[153] = 8'h4F; str_rom[154] = 8'h50; str_rom[155] = 8'h3A;
-        str_rom[156] = 8'h24; str_rom[157] = 8'h20; str_rom[158] = 8'h7C; str_rom[159] = 8'h0D;
-        str_rom[160] = 8'h0A; str_rom[161] = 8'h0D; str_rom[162] = 8'h0A; str_rom[163] = 8'h24;
-        str_rom[164] = 8'h53; str_rom[165] = 8'h53; str_rom[166] = 8'h0D; str_rom[167] = 8'h0A;
-        str_rom[168] = 8'h24; str_rom[169] = 8'h47; str_rom[170] = 8'h46; str_rom[171] = 8'h0D;
-        str_rom[172] = 8'h0A; str_rom[173] = 8'h24; str_rom[174] = 8'h53; str_rom[175] = 8'h45;
-        str_rom[176] = 8'h4E; str_rom[177] = 8'h44; str_rom[178] = 8'h0D; str_rom[179] = 8'h0A;
-        str_rom[180] = 8'h64; str_rom[181] = 8'h6F; str_rom[182] = 8'h6E; str_rom[183] = 8'h65;
-        str_rom[184] = 8'h0D; str_rom[185] = 8'h0A; str_rom[186] = 8'h0D; str_rom[187] = 8'h0A;
-        str_rom[188] = 8'h6C; str_rom[189] = 8'h6F; str_rom[190] = 8'h73; str_rom[191] = 8'h74;
-        str_rom[192] = 8'h0D; str_rom[193] = 8'h0A; str_rom[194] = 8'h0D; str_rom[195] = 8'h0A;
-        str_rom[196] = 8'h55; str_rom[197] = 8'h50; str_rom[198] = 8'h4C; str_rom[199] = 8'h4F;
-        str_rom[200] = 8'h41; str_rom[201] = 8'h44; str_rom[202] = 8'h20; str_rom[203] = 8'h48;
-        str_rom[204] = 8'h44; str_rom[205] = 8'h0D; str_rom[206] = 8'h0A; str_rom[207] = 8'h0D;
-        str_rom[208] = 8'h0A; str_rom[209] = 8'h53; str_rom[210] = 8'h45; str_rom[211] = 8'h43;
-        str_rom[212] = 8'h54; str_rom[213] = 8'h4F; str_rom[214] = 8'h52; str_rom[215] = 8'h53;
-        str_rom[216] = 8'h0D; str_rom[217] = 8'h0A;
+        for (si = 0; si < STR_BYTES; si = si + 1)
+            str_rom[si] = STR_TEXT[8 * (STR_BYTES - 1 - si) +: 8];
+        // synthesis translate_off
+        // a length that does not match its text leaves a NUL or cuts one off
+        if (STR_SECS_START + STR_SECS_LEN != STR_BYTES || str_rom[0] == 8'h00)
+            $display("FAIL: serial_debugger string table lengths do not add up");
+        // synthesis translate_on
     end
 
     // String printer sub-engine

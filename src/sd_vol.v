@@ -17,7 +17,7 @@
 //       up to 32 MB for slot 7.  A file that is missing, fragmented or the wrong size leaves
 //       its drive empty and sets its `fail` bit.
 //    5. Slot 6 files stream into disk2_store's up_* port in physical sector
-//       order (DOS_TO_PHYS for DOS order, the same table as web/src/disk.js).
+//       order (dos2phys below for DOS order; tb_sdvol checks it against its own).
 //       Slot 7 files are not loaded: each block is read when prodos_hd asks
 //       (rb_go, below).
 //  Nothing is buffered (block RAM is 46/46): each sector is parsed as it goes
@@ -152,7 +152,7 @@ module sd_vol #(
         endcase
     endfunction
 
-    // DOS 3.3 logical sector -> the store's physical position (web/src/disk.js)
+    // DOS 3.3 logical sector -> the store's physical position (the only copy)
     function [3:0] dos2phys(input [3:0] s);
         case (s)
             4'h0: dos2phys = 4'h0; 4'h1: dos2phys = 4'hD; 4'h2: dos2phys = 4'hB; 4'h3: dos2phys = 4'h9;
@@ -179,7 +179,9 @@ module sd_vol #(
     localparam [2:0] P_K0 = 0, P_K1 = 1, P_K2 = 2, P_K3 = 3, P_EQ = 4, P_N0 = 5, P_N = 6, P_SKIP = 7;
     localparam [87:0] SPACES  = {11{8'h20}};
     localparam [87:0] CFGNAME = "A2CONFIGTXT";
-    localparam [31:0] FLOPPY_BYTES = 32'd143360;
+    `include "src/disk2/gcr_defs.vh"   // GCR_TRACKS, shared with the card and the store
+    localparam integer TRACKS = `GCR_TRACKS;
+    localparam [31:0] FLOPPY_BYTES = TRACKS * 16 * 256;
 
     reg [4:0]  st = PWR;
     reg [2:0]  ph = CMD0;
@@ -253,7 +255,7 @@ module sd_vol #(
     reg [1:0]  rl_d = 2'd0;             // ...the one being looked at
     reg        ej_pend = 1'b0;          // pulse f_up_bad next clock (f_up_drive is set)
     // floppy write-back
-    reg [34:0] dirty0 = 0, dirty1 = 0;
+    reg [TRACKS-1:0] dirty0 = 0, dirty1 = 0;
     reg [QUIET_BITS-1:0] quiet = 0;
     wire       quiet_up = &quiet;
     reg        fs_drv = 1'b0;           // the scan for a dirty track
@@ -261,7 +263,7 @@ module sd_vol #(
     reg        fw_active = 1'b0, fw_k = 1'b0;
     reg [5:0]  fw_t = 6'd0;
     reg [2:0]  fw_j = 3'd0;
-    wire [34:0] dsel   = fs_drv ? dirty1 : dirty0;
+    wire [TRACKS-1:0] dsel   = fs_drv ? dirty1 : dirty0;
     wire        fs_hit = dsel[fs_trk];
     // a reload waits for its drive's tracks; otherwise ~1 s after the last write
     wire        fs_go  = fs_hit && (rl_req[fs_drv] || (quiet_up && !bg_hold));
@@ -360,7 +362,7 @@ module sd_vol #(
         // a written track of a drive that holds its file; quiet counts from the last
         if (fl_wr) begin
             quiet <= 0;
-            if (present[fl_wr_drv] && fl_wr_trk < 6'd35) begin
+            if (present[fl_wr_drv] && fl_wr_trk < TRACKS) begin
                 if (fl_wr_drv) dirty1[fl_wr_trk] <= 1'b1; else dirty0[fl_wr_trk] <= 1'b1;
             end
         end else if (!quiet_up) quiet <= quiet + 1'b1;
@@ -508,7 +510,7 @@ module sd_vol #(
                               f_up_go <= 1'b1; fl_pend <= 1'b1; f_up_drive <= k[0];
                               f_up_data <= rxv;
                               f_up_addr <= {blk[8:3], fdos[k[0]] ? dos2phys(fl_sec) : fl_sec, bcnt[7:0]};
-                              f_up_last <= blk == 16'd279 && bcnt == 9'd511;
+                              f_up_last <= blk == TRACKS * 8 - 1 && bcnt == 9'd511;
                           end
                           default: begin r_byte <= rxv; r_valid <= 1'b1; end   // T_RAW
                       endcase
@@ -716,7 +718,7 @@ module sd_vol #(
                 end
                 // the dirty-track scan steps on past anything it cannot flush yet
                 if (!fs_go) begin
-                    if (fs_trk == 6'd34) begin fs_trk <= 6'd0; fs_drv <= ~fs_drv; end
+                    if (fs_trk == TRACKS - 1) begin fs_trk <= 6'd0; fs_drv <= ~fs_drv; end
                     else fs_trk <= fs_trk + 1'b1;
                 end
             end

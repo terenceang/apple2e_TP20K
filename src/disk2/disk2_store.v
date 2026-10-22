@@ -2,38 +2,28 @@
 //
 // The card (src/disk2/disk2_card.v) works in disk bytes and never in sectors,
 // and it cannot afford to hold a track: 7040 disk bytes would be four block
-// RAMs on a device that already spends 42 of 46.  So the card asks this module
-// for one sector at a time, and this module keeps the images in the board's
-// SDRAM, where there are 8 MB and the aux RAM's 64 KB is all that is otherwise
-// used.
+// RAMs on a device that spends all 46.  So the card asks this module for one
+// sector's values at a time, and this module keeps the images in the DDR3
+// (aux_ram's region 1, its dsk_* port).
 //
-// Where in SDRAM
-// --------------
-// The images live in bank 1 (the controller's addr[21:20] = 01), which the aux
-// RAM never touches -- aux RAM is bank 0, rows 0..63.  Inside a bank, a byte
-// address splits into a row, a column and one of the two halves of a 16-bit
-// word, exactly as aux_ram.v does it, and a sector is 256 bytes = 128 words.
+// Where
+// -----
+// A byte address within the store splits into a word and which half of it,
+// and a sector is 256 bytes = 128 words:
 //
 //   drive 0, byte 0      = track 0, sector 0, byte 0
 //   drive 1, byte 143360 = track 0, sector 0, byte 0
 //
-// 35 tracks x 16 sectors x 256 bytes = 143,360 bytes per drive and 286,720 for
-// both, which is 140 KB out of bank 1's 2 MB.  Two drives, one card.
+// GCR_TRACKS x 16 sectors x 256 bytes = 143,360 bytes per drive.  Every client
+// moves whole 16-bit words: a sector is an even number of bytes, so pairing is
+// free and there is one path through the engine instead of two.
 //
-// All four clients move whole 16-bit words, never single bytes: the SDRAM
-// controller hands back a full word on a read and takes a full word on a write,
-// and a sector is an even number of bytes, so pairing is free and there is one
-// path through the engine instead of two.
-//
-// Sector interleave
-// -----------------
+// Sector order
+// ------------
 // The card lays a track out as 16 sectors at positions 0..15, which is the
-// ProDOS (.po) order: sector n at position n.  A DOS order (.do) image stores
-// its sectors in the interleave DOS's own RWTS uses, so the host is asked to
-// hand over images already in the order the card wants (web/src/disk.js does
-// that conversion, because a browser is a far better place for an interleave
-// table than this module).  What arrives here is therefore plain physical
-// order and this module stays format-agnostic.
+// ProDOS (.po) order: sector n at position n.  sd_vol puts a DOS-order image
+// into that order as it loads it (its dos2phys), and reads it back the same
+// way, so this module only ever sees physical order and stays format-agnostic.
 //
 // The write path
 // --------------
@@ -84,9 +74,9 @@ module disk2_store (
     output wire [1:0]  drv_present,   // a drive holds an image
     output wire [1:0]  drv_writable,  // ...and it is writable
 
-    // The debugger's bulk transfer port (src/serial_debugger.v), one byte at a
-    // time because that is all the UART carries.  Addresses are byte offsets
-    // within the drive's image, 0..143359.
+    // The bulk port sd_vol loads an image through (up_*) and flushes written
+    // tracks back through (down_*), a byte at a time.  Addresses are byte
+    // offsets within the drive's image, 0..143359.
     input  wire        up_go,         // take up_data at up_addr
     input  wire        up_drive,
     input  wire [17:0] up_addr,
@@ -98,10 +88,8 @@ module disk2_store (
     input  wire        down_go,       // serve the byte at down_addr
     input  wire        down_drive,
     input  wire [17:0] down_addr,     // a byte offset, 0..143359
-    input  wire        down_last,     // ...and this is the last one
     output reg  [7:0]  down_data,
     output reg         down_valid,    // down_data is good
-    output reg         down_done,     // down_last and it has been served
 
     // SDRAM port to aux_ram's arbiter (src/aux_ram.v), lowest priority
     output reg         dsk_go,        // request a slot; addr/we/wdata are set
@@ -118,7 +106,7 @@ module disk2_store (
     `include "src/disk2/gcr_defs.vh"
 
     localparam integer SEC_BYTES  = 256;
-    localparam integer NTRACKS    = 35;
+    localparam integer NTRACKS    = `GCR_TRACKS;
     localparam integer DRIVE_BYTES = NTRACKS * 16 * SEC_BYTES;   // 143,360
 
     // Byte address of a drive's image within the store's bank.
@@ -261,16 +249,19 @@ module disk2_store (
     // after (in the 256 data bytes), so the two halves of a byte are never in
     // hand at the same time until its partner byte's data byte arrives.
     //
-    // So the low two bits go in wr_lo -- 256 two-bit entries, 512 flip-flops and
-    // one two-bit read -- and each *word* is written back to SDRAM as soon as
-    // its second byte's top six bits turn up.  A whole 256-byte buffer with two
-    // read addresses, which is what holding the sector and writing it back
-    // afterwards needs, costs two eight-bit 256-to-1 muxes: about 4,000 LUT4,
-    // on a design that has 20,736 and was already at 48% before the card
-    // existed.  343 disk bytes take 11 ms of drive time and the 128 words take
-    // 40 us, so streaming them out is not a timing question at all.
-    reg [1:0]  wr_lo  [0:255];
-    reg [5:0]  wr_top = 6'd0;        // the top six of the odd-numbered partner
+    // So each auxiliary byte's decoded group goes in wr_aux as it arrives -- 86
+    // six-bit entries, one write and one read port, which synthesis can make a
+    // distributed RAM -- and each *word* is written back to SDRAM as soon as
+    // its second byte's top six bits turn up.  A byte's low two bits are read
+    // out of its group (gcr_aux_k / gcr_aux_lo) when its top six arrive.  A
+    // whole 256-byte buffer with two read addresses, which is what holding the
+    // sector and writing it back afterwards needs, costs two eight-bit 256-to-1
+    // muxes: about 4,000 LUT4.  (Keeping the 256 two-bit pairs instead, written
+    // three at a time, was ~1,300.)  343 disk bytes take 11 ms of drive time
+    // and the 128 words take 40 us, so streaming them out is not a timing
+    // question at all.
+    reg [5:0]  wr_aux [0:85];
+    reg [7:0]  wr_top = 8'd0;        // the even partner byte, top six and low two
     reg [15:0] wr_wd_data = 16'd0;    // a word waiting to go to SDRAM
     reg [18:0] wr_wd_ba   = 19'd0;
     reg        wr_wq      = 1'b0;    // ...and this says there is one
@@ -312,7 +303,6 @@ module disk2_store (
             dsk_addr       <= 22'd0;
             up_done        <= 1'b0;
             down_valid     <= 1'b0;
-            down_done      <= 1'b0;
             up_have        <= 1'b0;
             up_hold        <= 8'd0;
             sec_data_q     <= 16'd0;
@@ -331,7 +321,6 @@ module disk2_store (
             dsk_go     <= 1'b0;
             if (!up_go)   up_done    <= 1'b0;
             if (!down_go) down_valid <= 1'b0;
-            down_done  <= 1'b0;
             grp_ack    <= 1'b0;
             if (grp_ack) g_run <= 1'b0;
             // A request is taken when it is new, and "new" has to mean *newer
@@ -394,7 +383,7 @@ module disk2_store (
                     end else if (down_go && !down_valid && dn_hit) begin
                         down_data  <= dn_low ? sec_data_q[7:0] : sec_data_q[15:8];
                         down_valid <= 1'b1;
-                        if (down_last) down_done <= 1'b1;
+
                     end else if (down_go && !down_valid) begin
                         dsk_we   <= 1'b0;
                         dsk_addr <= sd_word_addr(ba_dn);
@@ -451,7 +440,7 @@ module disk2_store (
                             down_data      <= dn_low ? dsk_rdata[7:0]
                                                      : dsk_rdata[15:8];
                             down_valid     <= 1'b1;
-                            if (down_last) down_done <= 1'b1;
+
                             state          <= S_IDLE;
                         end
                         K_UP: begin
@@ -496,34 +485,26 @@ module disk2_store (
     // The low two bits of a sector byte arrive first (the aux bytes come before
     // the data bytes) and the top six after, so the two halves of a byte are in
     // hand at different times and each is kept where it is needed: the low two
-    // bits in wr_lo, and the top six of a byte in wr_top until its partner byte
+    // bits in their group in wr_aux, and the even byte in wr_top until its partner byte
     // completes the word.
     reg [5:0] wr_val;
     reg [5:0] wr_cur;
     reg [5:0] wr_prev = 6'd0;
-    reg [8:0] wr_a, wr_b, wr_c;
     reg [8:0] wr_d;
 
     always @(*) begin
         wr_val = gcr_decode(wr_byte);
         // The XOR chain: the first byte of the field has nothing before it.
         wr_cur = (wr_off == 9'd0) ? wr_val : (wr_val ^ wr_prev);
-        // Defaults for the four, so the unused ones do not infer a latch: an
-        // address past the end of the sector is not a thing that happens, but a
-        // latch on it is a thing yosys will build and a simulation will not
-        // show.
-        wr_a = 9'd0;
-        wr_b = 9'd0;
-        wr_c = 9'd0;
-        wr_d = 9'd0;
-        if (wr_off < `GCR_AUX_N) begin
-            wr_a = gcr_aux_src(2'd0, wr_off);
-            wr_b = gcr_aux_src(2'd1, wr_off);
-            wr_c = gcr_aux_src(2'd2, wr_off);
-        end else if (wr_off < `GCR_PAR_OFF) begin
-            wr_d = wr_off - `GCR_DATA_OFF;
-        end
+        wr_d   = wr_off - `GCR_DATA_OFF;       // the sector byte, in the data section
     end
+    // An auxiliary byte's group, kept whole; the pair that would belong to
+    // byte 257 is the one the encoding drops, and nothing reads it back.  Its
+    // own block, without the reset, so it can be a RAM.
+    always @(posedge clk)
+        if (wr_seen && wr_in_data && wr_off < `GCR_AUX_N) wr_aux[wr_off[6:0]] <= wr_cur;
+    // this byte's low two bits, from its auxiliary group
+    wire [1:0] wr_lo2 = gcr_aux_lo(wr_aux[gcr_aux_k(wr_d[7:0])], wr_d[7:0]);
 
     // Where the word that sector bytes n-1 and n make lives, as a byte address
     // in a drive.  A sector is 16 sectors of 256 bytes and a track is 16 of
@@ -534,7 +515,7 @@ module disk2_store (
     always @(posedge clk or posedge reset) begin
         if (reset) begin
             wr_wq      <= 1'b0;
-            wr_top     <= 6'd0;
+            wr_top     <= 8'd0;
             wr_prev    <= 6'd0;
         end else begin
             // The engine has carried the queued word to SDRAM, so the slot is
@@ -544,23 +525,15 @@ module disk2_store (
             if (wr_wq && wr_taken) wr_wq <= 1'b0;
             if (wr_seen && wr_in_data) begin
                 wr_prev <= wr_cur;
-                if (wr_off < `GCR_AUX_N) begin
-                    // The two groups that would land past sector byte 255 are the
-                    // two the encoding drops, and they arrive as zeros, so they
-                    // are left out rather than wrapped onto byte 0.
-                    if (wr_a < SEC_BYTES) wr_lo[wr_a[7:0]] <= gcr_pair_swap(wr_cur[5:4]);
-                    wr_lo[wr_b[7:0]] <= gcr_pair_swap(wr_cur[3:2]);
-                    wr_lo[wr_c[7:0]] <= gcr_pair_swap(wr_cur[1:0]);
-                end else if (wr_off < `GCR_PAR_OFF) begin
+                if (wr_off >= `GCR_AUX_N && wr_off < `GCR_PAR_OFF) begin
                     if (wr_d[0] == 1'b0) begin
                         // The low half of the word: wait for its partner.
-                        wr_top <= wr_cur;
+                        wr_top <= {wr_cur, wr_lo2};
                     end else begin
                         // The high half, so the word is whole: queue it.  The
                         // low two bits of both bytes came with the auxiliary
                         // bytes, long before this point.
-                        wr_wd_data <= {wr_cur,       wr_lo[wr_d[7:0]],
-                                       wr_top,       wr_lo[wr_d[7:0] - 8'd1]};
+                        wr_wd_data <= {wr_cur, wr_lo2, wr_top};
                         wr_wd_ba   <= wr_sector + {1'b0, wr_d} - 19'd1;
                         wr_wq      <= 1'b1;
                     end

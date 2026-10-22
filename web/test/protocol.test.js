@@ -4,6 +4,9 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   encodeKey,
@@ -59,11 +62,35 @@ test('paddles clamp to a byte', () => {
   assert.equal(clampPaddle('nonsense'), 128)
 })
 
+// The debugger's strings, read out of the RTL itself: each STR_TEXT piece is a
+// Verilog literal with a `// NAME` comment, CR LF written as \015\012.
+function rtlStrings() {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const v = readFileSync(join(here, '..', '..', 'src', 'serial_debugger.v'), 'utf8')
+  const body = v.slice(v.indexOf('STR_TEXT = {'), v.indexOf('};', v.indexOf('STR_TEXT = {')))
+  const out = {}
+  for (const m of body.matchAll(/^\s*"((?:[^"\\]|\\.)*)"[,\s]*\/\/\s*(\w+)/gm)) {
+    out[m[2]] = m[1].replace(/\\([0-7]{3}|.)/g, (_, e) => (e.length === 3 ? String.fromCharCode(parseInt(e, 8)) : e))
+  }
+  // each piece's length must be the STR_<NAME>_LEN the ROM addresses it by
+  for (const [name, text] of Object.entries(out)) {
+    const len = v.match(new RegExp(`STR_${name}_LEN\\s*=\\s*8'd(\\d+)`))
+    assert.ok(len, `STR_${name}_LEN missing`)
+    assert.equal(text.length, Number(len[1]), `STR_${name}_LEN is not the length of its text`)
+  }
+  return out
+}
+
 test('the firmware strings match serial_debugger.v byte for byte', () => {
-  assert.equal(BANNER, '\r\n[ Apple //e Debugger ] (h=Help, c=Cont)\r\n> ')
-  assert.equal(RESUME, '\r\n[Resuming...]\r\n')
-  assert.equal(HELP, '\r\nCmds: r=Regs s=Step c=Cont m=Mem t=Stat w=Scr h=Help\r\n> ')
-  assert.equal(PROMPT, '\r\n> ')
+  const rtl = rtlStrings()
+  assert.equal(BANNER, rtl.BANNER)
+  assert.equal(RESUME, rtl.RESUME)
+  assert.equal(HELP, rtl.HELP)
+  assert.equal(PROMPT, rtl.PROMPT)
+  // what web/src/disk.js waits for after `b` and `u`
+  assert.ok(rtl.SECS.includes('SECTORS'))
+  assert.ok(rtl.HDUP.includes('UPLOAD HD'))
+  assert.ok(rtl.LOST.includes('lost'))
   // the handshake serial-link uses to tell the FPGA's UART from the BL616's
   // own console
   assert.ok(HELP.includes(HANDSHAKE))

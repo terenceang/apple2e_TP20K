@@ -238,8 +238,8 @@ module tb_disk2;
         .drv_present(drv_present), .drv_writable(drv_writable),
         .up_go(1'b0), .up_drive(1'b0), .up_addr(18'd0), .up_data(8'h00),
         .up_last(1'b0), .up_busy(), .up_done(),
-        .down_go(1'b0), .down_drive(1'b0), .down_addr(18'd0), .down_last(1'b0),
-        .down_data(), .down_valid(), .down_done(),
+        .down_go(1'b0), .down_drive(1'b0), .down_addr(18'd0),
+        .down_data(), .down_valid(),
         .dsk_go(dsk_go), .dsk_addr(dsk_addr), .dsk_we(dsk_we), .dsk_wdata(dsk_wdata),
         .dsk_rdata(dsk_rdata), .dsk_ack(dsk_ack), .dsk_idle(dsk_idle)
     );

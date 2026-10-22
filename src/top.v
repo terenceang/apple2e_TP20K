@@ -99,10 +99,9 @@ module top (
     wire        img_up_go, img_up_drive, img_up_last, img_up_bad, img_up_busy, img_up_done;
     wire [17:0] img_up_addr;
     wire [7:0]  img_up_data;
-    wire        img_dn_go, img_dn_drive, img_dn_last, img_dn_valid, img_dn_done;
+    wire        img_dn_go, img_dn_drive, img_dn_valid;
     wire [17:0] img_dn_addr;
     wire [7:0]  img_dn_data;
-    assign img_dn_last = 1'b0;
     wire        fl_wr, fl_wr_drv;
     wire [5:0]  fl_wr_trk;
 
@@ -420,10 +419,8 @@ module top (
         .img_dn_go(img_dn_go),
         .img_dn_drive(img_dn_drive),
         .img_dn_addr(img_dn_addr),
-        .img_dn_last(img_dn_last),
         .img_dn_data(img_dn_data),
         .img_dn_valid(img_dn_valid),
-        .img_dn_done(img_dn_done),
         .debug_cpu_pc(debug_cpu_pc),
         .debug_dsk_head(debug_dsk_head),
         .debug_cpu_addr(debug_cpu_addr),

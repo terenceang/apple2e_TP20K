@@ -207,6 +207,23 @@ function [8:0] gcr_aux_src(input [1:0] n, input [8:0] k);
     end
 endfunction
 
+// The other way round: sector byte b's low two bits are in auxiliary position
+// gcr_aux_k(b), as source n = 0 for b >= 172, 1 for b >= 86, else 2, and source
+// n is bits [5-2n -: 2] of the position's group (the order the store builds a
+// group in, {source 0, source 1, source 2}).  gcr_aux_lo takes that group and
+// hands back the byte's two bits, already swapped back.
+function [6:0] gcr_aux_k(input [7:0] b);
+    begin
+        gcr_aux_k = (b >= 8'd172) ? b - 8'd172 : (b >= 8'd86) ? b - 8'd86 : b[6:0];
+    end
+endfunction
+
+function [1:0] gcr_aux_lo(input [5:0] grp, input [7:0] b);
+    begin
+        gcr_aux_lo = gcr_pair_swap((b >= 8'd172) ? grp[5:4] : (b >= 8'd86) ? grp[3:2] : grp[1:0]);
+    end
+endfunction
+
 // A data field: 86 low-bits bytes, then 256 data bytes, then the checksum byte.
 // 343, which is what RWTS reads and what a ProDOS-order image stores per sector.
 `define GCR_AUX_N     86
@@ -215,3 +232,7 @@ endfunction
 `define GCR_DATA_OFF  86
 // The checksum byte, the last of the field.
 `define GCR_PAR_OFF   342
+// Tracks on a 5.25" disk, and so in an image: 35 x 16 sectors x 256 bytes =
+// 143,360.  The card stops the head at the last, the store and sd_vol size an
+// image by it.
+`define GCR_TRACKS    35

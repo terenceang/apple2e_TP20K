@@ -345,8 +345,11 @@ module aux_ram (
     wire         m_cmd_en = (e == E_CMD) && m_cmd_ready && (!m_wr || m_wr_rdy);
     wire [15:0]  m_word   = m_rd_data[{m_addr[2:0], 4'd0} +: 16];
 
-    reg  [7:0]  linebuf [0:LINE_BYTES-1];
-    assign line_data = linebuf[col];
+    // A burst per word: five 64-bit words, one written per burst, so it can be
+    // a distributed RAM rather than 40 byte registers.
+    reg  [63:0] linebuf [0:LINE_BYTES/8-1];
+    wire [63:0] line_word = linebuf[col[5:3]];
+    assign line_data = line_word[{col[2:0], 3'd0} +: 8];
 
     // Init: after calibration, write one burst of eight distinct words, read
     // it back, overwrite word 3 alone with a byte mask, and read it back
@@ -417,8 +420,6 @@ module aux_ram (
                         if (!t_ok) begin tbad <= 1'b1; tval <= t_bad_word; end
                         else if (tst == 2'd3) init_done <= 1'b1;
                     end else if (op == OP_FILL) begin
-                        for (k = 0; k < 8; k = k + 1)
-                            linebuf[{fb, 3'd0} + k] <= m_rd_data[16*k +: 8];
                         if (fb == 3'd4) begin
                             open <= 1'b0; ack_t <= ~ack_t;
                         end else begin
@@ -435,6 +436,13 @@ module aux_ram (
         endcase
     end
     assign ddr_ready = init_done;
+
+    // the fill's bursts, each aux byte the low byte of its word
+    reg [63:0] fill_bytes;
+    integer fk;
+    always @* for (fk = 0; fk < 8; fk = fk + 1) fill_bytes[8*fk +: 8] = m_rd_data[16*fk +: 8];
+    always @(posedge mclk)
+        if (e == E_RD && m_rd_valid && !testing && op == OP_FILL) linebuf[fb] <= fill_bytes;
 
     // Write data: the self-test's burst, or the request's word in all eight
     // slots with the mask picking the one that lands.
