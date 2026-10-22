@@ -141,6 +141,21 @@ web/                    the browser front end (see web/README.md)
 Documents/              board documentation, memory architecture, design notes
 ```
 
+## Credits
+
+This project uses work by others, with thanks:
+
+| What | Where | By | Terms |
+|------|-------|----|-------|
+| 6502 CPU core | `src/cpu/` | Arlet Ottens ([verilog-6502](https://github.com/Arlet/verilog-6502)) | keep the copyright notice (in the file headers) |
+| 65C02 extensions to it | `src/cpu/` | David Banks and Ed Spittles ([hoglet67/verilog-6502](https://github.com/hoglet67/verilog-6502)) | as above |
+| DDR3 Memory Interface IP (encrypted netlist) | `src/ddr3_memory_interface/` | Gowin Semiconductor, via Sipeed's [TangPrimer-20K-example](https://github.com/sipeed/TangPrimer-20K-example) (© 2022 LAKKA) | BSD-3-Clause, [`LICENSE`](src/ddr3_memory_interface/LICENSE) there |
+| HDMI transmitter | `src/hdmi/` | the author's own TN20K-HDMI project, snapshot at `388b39e` | MIT |
+| React | bundled in the web page | Meta Platforms, Inc. | MIT; the published page carries `LICENSES.md` |
+| Apple //e ROMs (system, character, Disk II boot) | `roms/`, not distributed | Apple Computer, Inc. | copyright; supply your own (see [`roms/README.md`](roms/README.md)) |
+
+Built with Gowin EDA, simulated with Icarus Verilog, and the web page with Vite and TypeScript; none of them is part of this repository.
+
 ## License
 
 The version is in [`VERSION`](VERSION).

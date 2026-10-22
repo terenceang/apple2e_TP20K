@@ -14,6 +14,10 @@ const HERE = dirname(fileURLToPath(import.meta.url))
  *   base './'            GitHub Pages serves /docs at /<repo>/, not at /, so
  *                        absolute asset paths would 404
  *   no sourcemaps        they are 1.2 MB of noise and name source paths
+ *
+ * Either way the build writes LICENSES.md, the licences of every dependency
+ * bundled into the page (React), which a published copy must carry.
+ *
  *   no character ROM     src/charset.js imports generated/charset.json, and
  *                        Vite inlines it, so a build made after `npm run
  *                        charset` carries all 4096 bytes of Apple's 2732 in
@@ -40,5 +44,9 @@ export default defineConfig({
   server: {
     port: 5273,
   },
-  build: PAGES ? { outDir: 'dist', sourcemap: false } : { outDir: 'dist', sourcemap: true },
+  build: {
+    outDir: 'dist',
+    sourcemap: !PAGES,
+    license: { fileName: 'LICENSES.md' },
+  },
 })

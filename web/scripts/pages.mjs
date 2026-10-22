@@ -44,7 +44,7 @@ const OUT = join(REPO, 'docs')
 const CHECK_ONLY = process.argv.includes('--check')
 
 /** Only these, so clearing docs/ cannot eat a document someone added. */
-const OURS = new Set(['index.html', 'assets', '.nojekyll'])
+const OURS = new Set(['index.html', 'assets', 'LICENSES.md', '.nojekyll'])
 
 const log = (...a) => console.log('[pages]', ...a)
 
@@ -124,6 +124,14 @@ for (const m of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
   }
 }
 if (problems === 0) log('asset paths are relative, so this works from a subpath')
+
+// React is MIT and bundled into the page, so its notice must be published
+// with it; Vite writes every bundled dependency's licence here.
+const lic = join(DIST, 'LICENSES.md')
+if (!existsSync(lic) || !(await readFile(lic, 'utf8')).includes('react')) {
+  console.error('[pages] FAIL: dist/LICENSES.md is missing or does not list React')
+  problems++
+} else log('LICENSES.md lists the bundled dependencies')
 
 if (problems) {
   console.error('\n[pages] not publishing. Fix the above first.')
