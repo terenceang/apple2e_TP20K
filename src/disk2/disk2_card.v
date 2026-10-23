@@ -18,10 +18,12 @@
 // A bit cell is 4 CPU cycles, as on a //e, where the sequencer runs off the
 // same clock as the 6502: a track of ~50,000 bits turns in 200 ms, 300 rpm.
 // The cells count `step`, the 6502's own steps (ce_1m while the Z80 has the
-// bus), not ce_1m: here the CPU can lose a step to a memory stall, and a disk
-// that turned on regardless would hand a 7-cycle poll a byte it never sees
-// and take a written byte late (seen on the board: DOS 3.3 read sector 0,
-// then dropped bytes and crashed).  On the CPU's clock it cannot drift.
+// bus), not ce_1m.  The CPU gets every cycle (tb_cpusteps, and timed on the
+// board), but a step can come up to 3 clocks after its ce_1m when the video
+// has the RAM; with the latch window counted in ce_1m, a poll on time at the
+// window's start and late at its end saw only 6 of its 7 cycles, so a 7-cycle
+// LDA/BPL poll could miss a byte (seen on the board: DOS 3.3 read sector 0,
+// then dropped bytes and crashed).  On the CPU's own steps it cannot drift.
 //
 // Read (Q7 low): each bit goes through an MC3470 model -- more than three
 // zero bits in a row read as random bits, as the real amplifier's noise does
