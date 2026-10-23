@@ -148,11 +148,18 @@ module tb_auxstress;
                 6:            emit_abs(8'h8D, 16'hC05E + ($unsigned($random(seed)) % 2));  // DHIRES
                 7:            emit_abs(8'h8D, 16'hC050 + ($unsigned($random(seed)) % 2));  // TEXT
                 8: begin      // LC: read RAM always (code is there); bank and write-enable vary
-                    case ($unsigned($random(seed)) % 4)
+                    case ($unsigned($random(seed)) % 5)
                         0: begin emit_abs(8'hAD, 16'hC083); emit_abs(8'hAD, 16'hC083); end
                         1: begin emit_abs(8'hAD, 16'hC08B); emit_abs(8'hAD, 16'hC08B); end
                         2: emit_abs(8'hAD, 16'hC080);
                         3: emit_abs(8'hAD, 16'hC088);
+                        // a write between the two reads resets PRE-WRITE: from
+                        // write-protected ($C088), $C08B read/write/read stays
+                        // protected, so the store below must not land
+                        4: begin emit_abs(8'hAD, 16'hC088);
+                                 emit_abs(8'hAD, 16'hC08B); emit_abs(8'h8D, 16'hC08B); emit_abs(8'hAD, 16'hC08B);
+                                 emit(8'hA9); emit($random(seed));
+                                 emit_abs(8'h8D, 16'hD123); emit_abs(8'hAD, 16'hD123); end
                     endcase
                 end
                 9, 10:        begin emit(8'hA9); emit($random(seed)); end            // LDA #

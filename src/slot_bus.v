@@ -52,6 +52,7 @@ module slot_bus (
     input  wire        clk,           // 27.0 MHz
     input  wire        reset,         // Active-high reset
     input  wire        bus_cycle,     // a real bus cycle (CPU, or the debugger)
+    input  wire        cpu_cycle,     // a CPU step only (cpu_go): just these move the $C800 claim
     input  wire [15:0] addr,          // effective CPU address this cycle
 
     // Softswitch state, owned by apple2_core
@@ -143,7 +144,7 @@ module slot_bus (
     always @(posedge clk or posedge reset) begin
         if (reset)
             c8_owner <= 3'd0;
-        else if (bus_cycle) begin
+        else if (bus_cycle && cpu_cycle) begin
             if (iostrobe_hit)
                 c8_owner <= 3'd0;
             else if (c8_claim_hit)

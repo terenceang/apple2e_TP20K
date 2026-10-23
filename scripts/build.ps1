@@ -154,8 +154,9 @@ if ($text -match 'Max Frequency Summary(.{0,1500})') { Write-Host ("Fmax:" + ($M
 if ($text -match 'Total Negative Slack Summary(.{0,600})') {
     $tnsBlock = $Matches[1]
     Write-Host "TNS: $tnsBlock"
-    if ($tnsBlock -match '-[1-9]\d*\.\d+' -or $tnsBlock -match '-0\.[5-9]\d*') {
-        throw "FAILED: excessive negative setup slack; see impl\pnr\top_tr_content.html"
+    # any negative slack at all: mclk has ~0.1 ns to spare, so a tolerance would ship a failing DDR3 clock
+    if ($tnsBlock -match '-\d+\.\d*[1-9]') {
+        throw "FAILED: negative setup slack; see impl\pnr\top_tr_content.html"
     }
 } else {
     throw "no 'Total Negative Slack Summary' in the timing report; cannot check timing"

@@ -134,6 +134,13 @@ module tb_ssc;
         acc(4'h9, 1'b0, 8'h00, v); check("status shows IRQ and RDRF", v[7] && v[3]);
         check("reading status clears the IRQ", irq_n == 1'b1);
         acc(4'h8, 1'b0, 8'h00, v);
+        // a status read in the very clock a byte lands must not lose its IRQ
+        send(8'h6A);
+        @(negedge clk); while (!dut.f_take) @(negedge clk);
+        addr = 16'hC099; we = 1'b0; devsel_n = 1'b0; bus_cycle = 1'b1;
+        @(negedge clk); devsel_n = 1'b1; bus_cycle = 1'b0;
+        check("a status read as a byte lands keeps its IRQ", irq_n == 1'b0);
+        acc(4'h9, 1'b0, 8'h00, v); acc(4'h8, 1'b0, 8'h00, v);
         wr(4'hA, 8'h0B);                       // RX IRQ off
         send(8'h77);
         repeat (CHAR + 10) @(posedge clk);

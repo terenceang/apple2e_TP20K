@@ -244,7 +244,6 @@ module apple2_core (
     wire        mock_irq_n;
 
     wire addr_is_c0 = (cpu_addr[15:8] == 8'hC0);
-    assign io_addr  = cpu_addr[7:0];
     assign io_read  = cpu_go && !cpu_we && addr_is_c0;
     assign io_write = cpu_go &&  cpu_we && addr_is_c0;
 
@@ -309,65 +308,69 @@ module apple2_core (
             ramwrt       <= 1'b0;
             altzp        <= 1'b0;
             spkr_pulse   <= 1'b0;
-        end else if (cpu_go) begin
-            spkr_pulse <= 1'b0;
+        end else begin
+            spkr_pulse <= 1'b0;     // one clock per access: back-to-back $C03x accesses each toggle
+            if (cpu_go) begin
 
-            // INTC8ROM: set by any $C3xx access with SLOTC3ROM off, cleared by
-            // $CFFF.  A card claiming $C800 for itself is u_slot_bus's own
-            // state (c8_owner), not this switch: on a real //e the two cannot
-            // both hold the space, and u_slot_bus already keeps its card out
-            // of the bus whenever this bit is set.
-            if (cpu_addr[15:8] == 8'hC3 && !slotc3rom)
-                intc8rom <= 1'b1;
-            else if (cpu_addr == 16'hCFFF)
-                intc8rom <= 1'b0;
+                // INTC8ROM: set by any $C3xx access with SLOTC3ROM off, cleared by
+                // $CFFF.  A card claiming $C800 for itself is u_slot_bus's own
+                // state (c8_owner), not this switch: on a real //e the two cannot
+                // both hold the space, and u_slot_bus already keeps its card out
+                // of the bus whenever this bit is set.
+                if (cpu_addr[15:8] == 8'hC3 && !slotc3rom)
+                    intc8rom <= 1'b1;
+                else if (cpu_addr == 16'hCFFF)
+                    intc8rom <= 1'b0;
 
-            if (addr_is_c0) begin
-                // Speaker toggle at $C030
-                if (cpu_addr[7:4] == 4'h3) begin
-                    spkr_pulse <= 1'b1;
-                end
+                if (addr_is_c0) begin
+                    // Speaker toggle at $C030
+                    if (cpu_addr[7:4] == 4'h3) begin
+                        spkr_pulse <= 1'b1;
+                    end
 
-                // Video softswitches ($C050 - $C057)
-                if (cpu_addr[7:4] == 4'h5) begin
-                    case (cpu_addr[3:1])
-                        3'd0: text_mode  <= cpu_addr[0]; // $C050/$C051: TEXT / GRAPHICS
-                        3'd1: mixed_mode <= cpu_addr[0]; // $C052/$C053: FULL / MIXED
-                        3'd2: page2      <= cpu_addr[0]; // $C054/$C055: PAGE1 / PAGE2
-                        3'd3: hires_mode <= cpu_addr[0]; // $C056/$C057: LORES / HIRES
-                        3'd7: dhires     <= ~cpu_addr[0]; // $C05E/$C05F: DHIRES on / off (AN3)
-                        default: ;
-                    endcase
-                end
+                    // Video softswitches ($C050 - $C057)
+                    if (cpu_addr[7:4] == 4'h5) begin
+                        case (cpu_addr[3:1])
+                            3'd0: text_mode  <= cpu_addr[0]; // $C050/$C051: TEXT / GRAPHICS
+                            3'd1: mixed_mode <= cpu_addr[0]; // $C052/$C053: FULL / MIXED
+                            3'd2: page2      <= cpu_addr[0]; // $C054/$C055: PAGE1 / PAGE2
+                            3'd3: hires_mode <= cpu_addr[0]; // $C056/$C057: LORES / HIRES
+                            3'd7: dhires     <= ~cpu_addr[0]; // $C05E/$C05F: DHIRES on / off (AN3)
+                            default: ;
+                        endcase
+                    end
 
-                // Apple //e aux softswitches ($C000-$C00F writes)
-                if (cpu_we && (cpu_addr[7:4] == 4'h0)) begin
-                    case (cpu_addr[3:1])
-                        3'd0: store80  <= cpu_addr[0]; // $C000/$C001: 80STORE
-                        3'd1: ramrd    <= cpu_addr[0]; // $C002/$C003: RAMRD
-                        3'd2: ramwrt   <= cpu_addr[0]; // $C004/$C005: RAMWRT
-                        3'd3: intcxrom <= cpu_addr[0]; // $C006/$C007: INTCXROM
-                        3'd4: altzp    <= cpu_addr[0]; // $C008/$C009: ALTZP
-                        3'd5: slotc3rom <= cpu_addr[0]; // $C00A/$C00B: SLOTC3ROM
-                        3'd6: col80    <= cpu_addr[0]; // $C00C/$C00D: 80COL
-                        3'd7: altchar  <= cpu_addr[0]; // $C00E/$C00F: ALTCHAR
-                        default: ;
-                    endcase
-                end
+                    // Apple //e aux softswitches ($C000-$C00F writes)
+                    if (cpu_we && (cpu_addr[7:4] == 4'h0)) begin
+                        case (cpu_addr[3:1])
+                            3'd0: store80  <= cpu_addr[0]; // $C000/$C001: 80STORE
+                            3'd1: ramrd    <= cpu_addr[0]; // $C002/$C003: RAMRD
+                            3'd2: ramwrt   <= cpu_addr[0]; // $C004/$C005: RAMWRT
+                            3'd3: intcxrom <= cpu_addr[0]; // $C006/$C007: INTCXROM
+                            3'd4: altzp    <= cpu_addr[0]; // $C008/$C009: ALTZP
+                            3'd5: slotc3rom <= cpu_addr[0]; // $C00A/$C00B: SLOTC3ROM
+                            3'd6: col80    <= cpu_addr[0]; // $C00C/$C00D: 80COL
+                            3'd7: altchar  <= cpu_addr[0]; // $C00E/$C00F: ALTCHAR
+                            default: ;
+                        endcase
+                    end
 
-                // Language Card Bank Switching ($C080 - $C08F)
-                if (cpu_addr[7:4] == 4'h8) begin
-                    lc_bank2    <= ~cpu_addr[3]; // A3=0 -> Bank 2, A3=1 -> Bank 1
-                    lc_read_ram <= ~(cpu_addr[1] ^ cpu_addr[0]); // A0=A1 -> RAM read, A0!=A1 -> ROM read
+                    // Language Card Bank Switching ($C080 - $C08F)
+                    if (cpu_addr[7:4] == 4'h8) begin
+                        lc_bank2    <= ~cpu_addr[3]; // A3=0 -> Bank 2, A3=1 -> Bank 1
+                        lc_read_ram <= ~(cpu_addr[1] ^ cpu_addr[0]); // A0=A1 -> RAM read, A0!=A1 -> ROM read
 
-                    if (!cpu_we && cpu_addr[0]) begin
-                        // Two successive reads with A0=1 enable write
-                        if (lc_pre_write)
-                            lc_write_ram <= 1'b1;
-                        lc_pre_write <= 1'b1;
-                    end else if (!cpu_addr[0]) begin
-                        lc_write_ram <= 1'b0;
-                        lc_pre_write <= 1'b0;
+                        if (!cpu_we && cpu_addr[0]) begin
+                            // Two successive reads with A0=1 enable write
+                            if (lc_pre_write)
+                                lc_write_ram <= 1'b1;
+                            lc_pre_write <= 1'b1;
+                        end else begin
+                            // an even access, or any write, resets PRE-WRITE;
+                            // only an even one also write-protects
+                            lc_pre_write <= 1'b0;
+                            if (!cpu_addr[0]) lc_write_ram <= 1'b0;
+                        end
                     end
                 end
             end
@@ -376,6 +379,7 @@ module apple2_core (
 
     // Effective address: CPU address during normal operation, dbg_mem_addr when paused
     wire [15:0] effective_cpu_addr = (!cpu_rdy) ? dbg_mem_addr : cpu_addr;
+    assign io_addr = effective_cpu_addr[7:0];   // so the debugger's m over $C0xx reads what it shows
 
     // The slot bus.  card_present (below) lists the cards; the empty slots'
     // card-side inputs are tied to their inactive levels.  The active-low ties
@@ -426,6 +430,7 @@ module apple2_core (
         .clk(clk),
         .reset(reset),
         .bus_cycle(bus_cycle),
+        .cpu_cycle(cpu_go),      // the $C800 claim: the debugger's reads must not move it
         .addr(effective_cpu_addr),
         .intcxrom(intcxrom),
         .slotc3rom(slotc3rom),

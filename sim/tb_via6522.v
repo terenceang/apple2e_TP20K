@@ -103,6 +103,8 @@ module tb_via6522;
     endtask
 
     reg [7:0] rdata;
+    integer nce = 0, p0, p1;           // ce_1m count, for the T1 period
+    always @(posedge clk) if (ce_1m) nce = nce + 1;
     integer cycles;
 
     initial begin
@@ -181,6 +183,14 @@ module tb_via6522;
             cycles = cycles + 1;
         end
         check("Free-running mode re-asserts IRQ automatically", irq_n == 1'b0);
+
+        // the period is N + 2 cycles, as on a 6522 (0, then $FFFF, then the latch)
+        p0 = nce;
+        read_via(4'h4, rdata);
+        while (irq_n == 1'b1) @(posedge clk);
+        p1 = nce;
+        check("Free-running T1 period is latch + 2", p1 - p0 == 12);
+        if (p1 - p0 != 12) $display("  T1 period %0d cycles, want 12", p1 - p0);
 
         // Clear again by writing T1L_H
         write_via(4'h7, 8'h00);

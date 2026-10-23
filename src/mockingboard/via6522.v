@@ -42,6 +42,7 @@ module via6522 (
 
     reg        t1_loaded;
     reg        t1_int_arm;
+    reg        t1_reload;     // free-running: $FFFF this cycle, the latch the next
     reg        t2_loaded;
     reg        t2_int_arm;
     reg [11:0] cb1_delay;
@@ -106,6 +107,7 @@ module via6522 (
             ier        <= 7'h00;
             t1_loaded  <= 1'b0;
             t1_int_arm <= 1'b0;
+            t1_reload  <= 1'b0;
             t2_loaded  <= 1'b0;
             t2_int_arm <= 1'b0;
             cb1_delay  <= 12'd0;
@@ -152,10 +154,15 @@ module via6522 (
             // to measure timer decrements across successive reads of T1C_L ($C404).
             if (ce_1m) begin
                 if (t1_loaded && acr[6]) begin
-                    // Free-running continuous mode: reload from latch at 0
-                    if (t1c == 16'd0) begin
-                        nifr[6] = 1'b1;
-                        t1c    <= t1l;
+                    // Free-running: 0, then $FFFF (the flag rises here), then
+                    // the latch: a period of N + 2 cycles, as on a 6522
+                    if (t1_reload) begin
+                        t1c       <= t1l;
+                        t1_reload <= 1'b0;
+                    end else if (t1c == 16'd0) begin
+                        nifr[6]    = 1'b1;
+                        t1c       <= 16'hFFFF;
+                        t1_reload <= 1'b1;
                     end else begin
                         t1c <= t1c - 16'd1;
                     end
@@ -200,6 +207,7 @@ module via6522 (
                         // Write T1 High Latch, load counter, clear interrupt, arm
                         t1l[15:8]  <= din;
                         t1c        <= {din, t1l[7:0]};
+                        t1_reload  <= 1'b0;
                         nifr[6]     = 1'b0;
                         t1_loaded  <= 1'b1;
                         t1_int_arm <= 1'b1;

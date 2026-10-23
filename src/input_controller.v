@@ -428,8 +428,10 @@ module input_controller (
     // $C063: PB2 (Game Pushbutton 2), bit 7
     // $C064: PDL0 analog countdown, bit 7
     // $C065: PDL1 analog countdown, bit 7
+    // $C070-$C07F only trigger the paddles (io_read above); a read there is
+    // the floating bus, as on a //e
     assign io_hit = (io_addr[7:4] == 4'h0) || (io_addr == 8'h10) ||
-                    (io_addr[7:4] == 4'h6) || (io_addr[7:4] == 4'h7);
+                    (io_addr[7:4] == 4'h6);
 
     reg in_bit;
     always @(*) begin

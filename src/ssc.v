@@ -131,6 +131,11 @@ module ssc (
             tx_t <= 22'd0; tdre <= 1'b1; tx_req <= 1'b0;
             st_req <= 1'b0; st_sent <= 5'h1F;
         end else begin
+            // the CPU's reads clear first, so a flag raised in the same clock
+            // wins (a status read as a byte lands must not lose its IRQ)
+            if (rd_data_acc)   begin rdrf <= 1'b0; ovr <= 1'b0; end
+            if (rd_status_acc) irq_flag <= 1'b0;
+
             // the FIFO, and RDR at the line's pace
             if (rx_t != 22'd0) rx_t <= rx_t - 22'd1;
             case ({rx_valid && dtr && f_n != 7'd64, f_take})
@@ -160,9 +165,7 @@ module ssc (
             if (st_req && st_ack) begin st_req <= 1'b0; st_sent <= st_now; end
             else if (!st_req && st_now != st_sent) st_req <= 1'b1;
 
-            // the CPU
-            if (rd_data_acc)   begin rdrf <= 1'b0; ovr <= 1'b0; end
-            if (rd_status_acc) irq_flag <= 1'b0;
+            // the CPU's writes
             if (wr) case (ra)
                 4'h8: begin
                     tx_byte <= din;

@@ -24,6 +24,7 @@ module tb_slots;
 
     reg         reset = 1'b1;
     reg         bus_cycle = 1'b0;
+    reg         cpu_cycle = 1'b1;    // 0: the debugger's read (bus_cycle without a CPU step)
     reg  [15:0] addr = 16'd0;
     reg         intcxrom = 1'b1;
     reg         slotc3rom = 1'b0;
@@ -63,7 +64,7 @@ module tb_slots;
 
     slot_bus dut (
         .clk(clk), .reset(reset),
-        .bus_cycle(bus_cycle), .addr(addr),
+        .bus_cycle(bus_cycle), .cpu_cycle(cpu_cycle), .addr(addr),
         .intcxrom(intcxrom), .slotc3rom(slotc3rom), .intc8rom(intc8rom),
         .card_present(card_present), .card_exprom(card_exprom), .card_data(card_data),
         .int_in_n(int_in_n), .card_irq_n(card_irq_n),
@@ -283,6 +284,13 @@ module tb_slots;
                               slot_dout === card_byte(6));
         bus(16'hC500);
         look(16'hC800); check("bus() does move the $C800 claim",
+                              slot_dout === card_byte(5));
+        // The debugger's reads strobe the cards but must not move the claim:
+        // m over $C600 or $CFFF while paused in $C800 code
+        cpu_cycle = 1'b0;
+        bus(16'hC600); bus(16'hCFFF);
+        cpu_cycle = 1'b1;
+        look(16'hC800); check("a debugger read cannot move the $C800 claim",
                               slot_dout === card_byte(5));
         bus(16'hCFFF);
 
