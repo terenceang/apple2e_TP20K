@@ -127,6 +127,7 @@ module apple2_core (
     output wire [7:0]  debug_cpu_dout,
     output wire        debug_cpu_we,
     output wire        debug_cpu_sync,
+    output wire        debug_z80_on,     // the SoftCard's Z80 has the bus
     output wire [7:0]  debug_cpu_a,
     output wire [7:0]  debug_cpu_x,
     output wire [7:0]  debug_cpu_y,
@@ -251,6 +252,7 @@ module apple2_core (
     assign debug_cpu_dout = c02_dout;
     assign debug_cpu_we   = c02_we;
     assign debug_cpu_sync = cpu_sync;
+    assign debug_z80_on   = z80_on;
 
     // 65C02 CPU Core
     cpu_65c02 u_cpu (

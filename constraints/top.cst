@@ -1,4 +1,6 @@
-// Tang Primer 20K (SOM 3961 + Dock 3713/3714+) pin constraints for the Apple //e
+// Tang Primer 20K (SOM 3961 + Dock Rev 3713) pin constraints for the Apple //e.
+// This board: S4 (RCFG) on B10 = RECONFIG_N, DIP 1 on C7.  Check your board's
+// wiring first (Documents/pinout.md): on one with DIP 1 on B10, C7 is a button.
 // Target: GW2A-LV18PG256C8/I7. Balls from Documents/pinout.md.
 // Build options this needs (scripts/build.ps1 sets them): use_sspi_as_gpio
 // (T10, N9), use_done_as_gpio (C13), use_ready_as_gpio (A13).
@@ -16,7 +18,7 @@ IO_PORT "key_s1_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC "key_s2_n" T3;
 IO_PORT "key_s2_n" IO_TYPE=LVCMOS15 PULL_MODE=UP;
 
-// Persistent configuration via DIP switches (Rev 3714+ silkscreen):
+// Persistent configuration via DIP switches:
 // DIP1: C7 (Color TV mode, 1 = ON, 0 = OFF)
 // DIP2: E9 (Scanlines bit 1)
 // DIP3: E8 (Scanlines bit 0)

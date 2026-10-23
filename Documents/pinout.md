@@ -23,7 +23,7 @@ B10 (S4 / RECONFIG_N), R9 (LCD_CLK/FASTRD_N) and P9 (MIC_LED_CLK) build without 
 | 0, 1 | 3.3 V (R5 0R; optional F_VCCO0&1 from SODIMM) | `LVCMOS33` | HDMI, Ethernet, camera, USB PHY, audio, LEDs 2–5 |
 | 2 | 3.3 V | `LVCMOS33` | UART, JTAG, SD card, USB PHY |
 | 3 | 3.3 V | `LVCMOS33` | LCD, mic/PMOD, config pins, LED0/1, S0/key 1, S4/RCFG |
-| 4 | **1.5 V** (DDR3) | `LVCMOS15` | DDR3, buttons S1–S3, DIP switches 1–5 (Rev 3714+) |
+| 4 | **1.5 V** (DDR3) | `LVCMOS15` | DDR3, buttons S1–S3, DIP switches 1–5 |
 | 5, 6 | 1.5 V (DDR3) | — | DDR3 only |
 | 7 | 3.3 V (R9 0R; optional F_VCCO7) | `LVCMOS33` | LCD G/B, Ethernet, touch panel |
 
@@ -50,41 +50,46 @@ Net names ending `_1V5` are on bank 4. Never drive them as LVCMOS33.
 Silkscreen reference designators are LED4–LED9 (Orange_LED0 = LED4 … Orange_LED5 = LED9).
 Not FPGA-controlled: LED1/LED2 (BL702 status), LED3 (USB PHY power), LED10 (5 V power).
 
-## Push buttons & DIP switches (Revision differences: Rev 3713 vs Rev 3714+)
+## Push buttons & DIP switches
 
-Sipeed revised the Dock pinout between **Rev 3713** (early schematic) and **Rev 3714+** (production silkscreen):
-- **Rev 3713**: SW1 was on `B10` (`RECONFIG_N`), and Key 5 was `C7`.
-- **Rev 3714+**: To prevent users from accidentally locking `RECONFIG_N` with DIP 1, `B10` and `C7` were swapped:
-  - Button **S4 (silkscreened `RCFG`)** is wired to **`B10`** (`RECONFIG_N`).
-  - DIP Switch **DIP 1** is wired to **`C7`** (`LVCMOS15`).
-  - DIP Switch **DIP 2** is wired to **`E9`** (`LVCMOS15`).
-  - DIP Switch **DIP 3** is wired to **`E8`** (`LVCMOS15`).
+This is the configuration the project is built for, as wired on its board (Dock **Rev 3713**):
+button **S4 (silkscreened `RCFG`)** is on **`B10`** (`RECONFIG_N`, reloads the FPGA), and
+**DIP 1** is on **`C7`**. Check your own board before relying on it (see the note at the end of
+this section).
 
 ### Push buttons (active LOW — 10 k pull-up, press = GND)
 
-| Silkscreen | Rev 3713 | Rev 3714+ Ball | Bank | Voltage | Function |
-|---|---|---|---|---|---|
-| **S0** | S1 | **T10** | 3 | 3.3 V | Apple reset (also `FPGA_RST`) |
-| **S1** | S2 | **T3** | 4 | 1.5 V | HDMI colour-bar test pattern |
-| **S2** | S3 | **T2** | 4 | 1.5 V | Spare user button |
-| **S3** | S4 | **D7** | 4 | 1.5 V | Spare user button |
-| **S4 / RCFG** | S5 (`C7`) | **B10** | 3 | 3.3 V | Dedicated `RECONFIG_N` reload button |
+| Silkscreen | Ball | Bank | Voltage | Function |
+|---|---|---|---|---|
+| **S0** | **T10** | 3 | 3.3 V | Apple reset (also `FPGA_RST`) |
+| **S1** | **T3** | 4 | 1.5 V | HDMI colour-bar test pattern |
+| **S2** | **T2** | 4 | 1.5 V | Spare user button |
+| **S3** | **D7** | 4 | 1.5 V | Spare user button |
+| **S4 / RCFG** | **B10** | 3 | 3.3 V | `RECONFIG_N`: reloads the FPGA (not a user input) |
 
 ### DIP switch positions 1–5 (active HIGH — ON = high 1.5 V, OFF = pulled down by 13k to GND)
 
-| Silkscreen | Rev 3713 | Rev 3714+ Ball | Bank | Voltage | Project Assignment |
-|---|---|---|---|---|---|
-| **DIP 1** | `B10` (RECFG) | **C7** | 4 | 1.5 V | **Colour TV mode** (`sw_color_tv`, 1 = ON, 0 = OFF) |
-| **DIP 2** | `E9` | **E9** | 4 | 1.5 V | **Scanline mode [1]** (`sw_scanline[1]`) |
-| **DIP 3** | `E8` | **E8** | 4 | 1.5 V | **Scanline mode [0]** (`sw_scanline[0]`) |
-| **DIP 4** | `T4` | **T4** | 4 | 1.5 V | Spare DIP switch |
-| **DIP 5** | `T5` | **T5** | 4 | 1.5 V | Spare DIP switch |
+| Silkscreen | Ball | Bank | Voltage | Project Assignment |
+|---|---|---|---|---|
+| **DIP 1** | **C7** | 4 | 1.5 V | **Colour TV mode** (`sw_color_tv`, 1 = ON, 0 = OFF) |
+| **DIP 2** | **E9** | 4 | 1.5 V | **Scanline mode [1]** (`sw_scanline[1]`) |
+| **DIP 3** | **E8** | 4 | 1.5 V | **Scanline mode [0]** (`sw_scanline[0]`) |
+| **DIP 4** | **T4** | 4 | 1.5 V | Spare DIP switch |
+| **DIP 5** | **T5** | 4 | 1.5 V | Spare DIP switch |
 
 Scanline modes on DIP 2 & 3:
 - `00`: Scanlines off
 - `01`: 25% scanlines
 - `10`: 50% scanlines
 - `11`: 75% scanlines
+
+> **Check your board's revision and wiring.** The Dock's revision number does not settle
+> which of `B10` / `C7` is the `RCFG` button and which is DIP 1: an early Rev 3713 schematic
+> shows DIP 1 on `B10` (`RECONFIG_N`) and a button on `C7`, while this project's Rev 3713 board
+> (and Rev 3714+) has the `RCFG` button on `B10` and DIP 1 on `C7`. Before building for another
+> board, confirm against its silkscreen and schematic. If DIP 1 is on `B10` there, it must stay
+> **ON** at power-up (holding `RECONFIG_N` low stops the FPGA configuring), colour TV mode
+> needs another ball, and `C7` is a button.
 
 ## UART (via BL702 USB-C debugger, appears as a COM port)
 
@@ -281,14 +286,14 @@ take ball assignments from Sipeed's DDR3 example `.cst` rather than this table.
 | F10 | USB_RESET, RTL_PHY_RST | Resets both PHYs together |
 | T10 | Key S1, FPGA_RST supervisor, SSPI | Low during power-up; fine as a reset input; needs `use_sspi_as_gpio` |
 | C10, T9, N9, M8 | SSPI config pins | Need `use_sspi_as_gpio` |
-| B10 | S4 / RECONFIG_N (Rev 3714+) / SW1 (Rev 3713) | On Rev 3714+ S4 button reconfigures FPGA; on Rev 3713 keep SW1 ON at boot |
+| B10 | S4 (`RCFG`) / RECONFIG_N | Pressing it reconfigures the FPGA; check your board's wiring (see Push buttons & DIP switches) |
 | A13, C13 | LED1/LED0, READY/DONE | Need `use_ready_as_gpio` / `use_done_as_gpio` |
 | R9 | RGB_LCD_CLK, FASTRD_N | OK after config |
 | J5/J6 | RGB LCD | PMOD or LCD, not both |
 | J12 | DVP D0–D7 | PMOD or camera, not both |
 | J14 | Mic array, WS2812 | PMOD or mic; T9 also drives the onboard WS2812 |
 
-## .cst snippet (common I/O - Rev 3714+)
+## .cst snippet (common I/O)
 
 ```
 IO_LOC "clk" H11;             IO_PORT "clk" IO_TYPE=LVCMOS33;

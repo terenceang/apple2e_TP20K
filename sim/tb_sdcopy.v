@@ -66,6 +66,7 @@ module tb_sdcopy;
         .r_take(r_take), .r_done(r_done), .r_ok(r_ok)
     );
 
+    reg z80 = 1'b0;                // the SoftCard's Z80 has the bus
     serial_debugger u_dbg (
         .clk(clk), .reset(reset), .ce_1m(1'b1), .uart_tx(),
         .rx_byte(rx_byte), .rx_valid(rx_valid),
@@ -80,6 +81,7 @@ module tb_sdcopy;
         .cpu_pc(16'hFA62), .dsk_head(8'd0), .cpu_a(8'h00), .cpu_x(8'h00), .cpu_y(8'h00),
         .cpu_s(8'hFF), .cpu_p(8'h20), .cpu_ir(8'h00), .cpu_addr(16'h0000),
         .cpu_sync(1'b0),
+        .z80_on(z80),
         .text_mode(1'b1), .mixed_mode(1'b0), .page2(1'b0), .hires_mode(1'b0),
         .pll_locked(1'b1), .ddr_diag(32'd0)
     );
@@ -184,6 +186,13 @@ module tb_sdcopy;
         // ---- i ----
         mark = n; send("i"); wait_idle;
         if (find("S:02A5", 6, mark) < 0) begin $display("FAIL: i did not say S:02A5"); fails = fails + 1; end
+
+        // s while the Z80 has the bus: refused with a prompt, not a step
+        // that waits for a 6502 SYNC that never comes
+        z80 = 1'b1; mark = n; send("s"); wait_idle; z80 = 1'b0;
+        if (u_dbg.step_fsm != 0 || find("> ", 2, mark) < 0) begin
+            $display("FAIL: s with the Z80 on the bus started a step (step_fsm %0d)", u_dbg.step_fsm); fails = fails + 1;
+        end
 
         // ---- u: four sectors of the HD file ----
         mark = n;

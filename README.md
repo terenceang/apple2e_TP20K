@@ -37,7 +37,7 @@ make flash      # write to the configuration flash (persistent)
 make clean
 ```
 
-`make` only wraps `scripts/build.ps1` and `scripts/prog.ps1`, which can be run directly. The build generates its Gowin Tcl from `fpga.yaml` (add new source files there), also writes `apple2e_TP20K.gprj` so the Gowin IDE opens the same project, and fails if the timing report shows excessive negative setup slack or any hold/removal timing violations. Programming uses the Dock's USB-JTAG; keep DIP switch 1 on.
+`make` only wraps `scripts/build.ps1` and `scripts/prog.ps1`, which can be run directly. The build generates its Gowin Tcl from `fpga.yaml` (add new source files there), also writes `apple2e_TP20K.gprj` so the Gowin IDE opens the same project, and fails if the timing report shows excessive negative setup slack or any hold/removal timing violations. Placement and routing run timing-driven (`place_option 2`, `route_option 1`, `replicate_resources 1` in `scripts/build.ps1`). Programming uses the Dock's USB-JTAG. The pins are for this project's Dock (Rev 3713, `RCFG` button on `B10`, DIP 1 on `C7` as colour TV mode); **check your board's revision and wiring** against [`Documents/pinout.md`](Documents/pinout.md) before building, since an early Rev 3713 schematic has DIP 1 on `B10` (`RECONFIG_N`), which must then stay on at power-up.
 
 ```sh
 powershell -File sim\run.ps1            # every testbench (tb_top needs the ROMs)

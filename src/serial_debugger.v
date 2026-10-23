@@ -72,6 +72,7 @@ module serial_debugger (
     input  wire [7:0]  cpu_ir,
     input  wire [15:0] cpu_addr,
     input  wire        cpu_sync,
+    input  wire        z80_on,       // the SoftCard's Z80 has the bus: s cannot step the 6502
 
     // The TF card (src/sd_vol.v)
     output reg         sd_mnt_go,
@@ -643,9 +644,12 @@ module serial_debugger (
                         seq_step   <= 5'd0;
                     end
 
-                    "s", "S": begin
-                        step_fsm <= S_START;
-                    end
+                    // The step waits on the 6502's SYNC, which never moves
+                    // while the Z80 has the bus: it would hang with the CPU
+                    // let go.  ponytail: refused; step the Z80 by m1_n if needed.
+                    "s", "S":
+                        if (z80_on) prompt;
+                        else        step_fsm <= S_START;
 
                     "c", "C": resume;
 
