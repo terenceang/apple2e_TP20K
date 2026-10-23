@@ -1,8 +1,9 @@
 # web/ -- Apple //e keyboard, console and debugger
 
 A browser front end for the Apple //e on the [Tang Primer 20K](../README.md). It
-puts the machine's own keyboard, its text screen, its hardware debugger and its
-disk drives in the browser.
+puts the machine's own keyboard, its text screen, its hardware debugger, its
+disk drives (`.woz` on the TF card, converted on upload) and the modem on its
+Super Serial Card in the browser.
 
 ```
 browser ──Web Serial──▶  USB ──▶  BL616  ──▶  FPGA

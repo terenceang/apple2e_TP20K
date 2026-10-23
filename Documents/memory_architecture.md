@@ -87,10 +87,12 @@ This table is the one place the block RAM budget is written down; source comment
 | `u_aux.u_ddr3` | `src/ddr3_memory_interface/` | **8** | 16 KB | Gowin DDR3 Controller IP FIFOs & buffers |
 | `u_core.u_char_rom` | `src/apple2_mem.v` | **1** | 2 KB | Enhanced Character Generator ROM (2732 font) |
 | `u_core.u_disk2` | `src/disk2/disk2_card.v` | **1** | 256 B | Disk II P6 Controller Boot ROM (`$C600`–`$C6FF`) |
-| `u_debugger` | `src/serial_debugger.v` | **1** | 2 KB | Hardware Debugger UART TX FIFO |
-| **Total BSRAM** | | **43 / 46** | **86 KB** | **93.5% utilization** |
+| `u_debugger` | `src/serial_debugger.v` | **1** | 2 KB | Hardware Debugger message strings (`str_rom`); its TX FIFO is distributed RAM |
+| `u_sound.u_filter` | `src/audio_filter.v` | **1** | 288 B | The audio FIR's sample ring (128 x 18 bits) |
+| `u_core.u_ssc` | `src/ssc.v` | **(1)** | 2 KB | Super Serial Card firmware, only when `roms/ssc.hex` is supplied |
+| **Total BSRAM** | | **44 / 46** (45 with the SSC ROM) | | **95.7% utilization** |
 
-The HDMI scheduler used to keep an 8-deep packet FIFO in 3 blocks. It was removed (2026-10-23): this design pushes at most three packets a line, early in the line, and that line's island sends them all, so the packets now go straight into `hdmi_data_island`'s slots. That leaves 3 blocks free.
+The HDMI scheduler used to keep an 8-deep packet FIFO in 3 blocks. It was removed (2026-10-23): this design pushes at most three packets a line, early in the line, and that line's island sends them all, so the packets now go straight into `hdmi_data_island`'s slots. Blocks free today: 2, or 1 with the Super Serial Card's firmware.
 
 ### DDR3 Memory Mapping (128 MB Total)
 

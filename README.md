@@ -9,12 +9,13 @@ This project's code was written with AI assistance.
 - **65C02 CPU** at 1.023 MHz (Arlet Ottens' core with 65C02 extensions)
 - **128 KB**: 48 KB main RAM and the 16 KB ROM in block RAM; the aux 64 KB and the language card in the SOM's DDR3
 - **HDMI video** at 720×480p60 (CEA-861 VIC 2), with the 560×384 Apple display centered: text (40 and 80 column, MouseText), lo-res, hi-res and double hi-res, mixed mode and page 2; colour is an NTSC-style decode of the dot stream, so fills, fringes and the palette bit look as they do on a TV
-- **Audio** from the $C030 speaker and a **Mockingboard C** in slot 4, over HDMI (48 kHz L-PCM) and through the Dock's PT8211 DAC and amplifier to the 3.5 mm jack
+- **Colour TV mode and scanlines** on the Dock's keys: S3 softens hi-res and double hi-res the way a composite set blends fringes and bleeds colour at edges, and S4 steps scanlines off, 25%, 50% and 75%
+- **Audio** from the $C030 speaker and a **Mockingboard C** in slot 4 (two 6522s, two AY-3-8910s), filtered once to 48 kHz (no aliasing from high AY tones) and sent over HDMI (L-PCM) and through the Dock's PT8211 DAC and amplifier to the 3.5 mm jack
 - **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes, also answering as a SmartPort), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files. Floppies are **WOZ** files played bit by bit through a model of the controller's sequencer, so copy-protected originals, 13-sector disks and bit copiers work, and every write is kept exactly
 - **Clock** in slot 5 that ProDOS uses as a Thunderclock, so files get dated; the web page sets the time when it connects (there is no battery, so it is lost at power-off)
 - **Z-80 SoftCard** in slot 2 (Microsoft's, at its 2.045 MHz), for Apple CP/M; the Z80 takes the bus over from the 6502 as on the real card
 - **Super Serial Card** in slot 1 whose line is the USB link: the web page plays a **Hayes modem** on it (AT commands, `ATDT host:port` to a telnet BBS through a WebSocket gateway, `ATDT wss://...` direct, `ATDT LOOP` for a loopback), so ProTERM and other comm programs dial out from the Apple
-- **Keyboard, gamepad and debugger over USB serial** at 1 Mbps; the [browser front end](web/README.md) in `web/` has the keyboard, the text screen, the debugger and the disk drives
+- **Keyboard, gamepad and debugger over USB serial** at 1 Mbps; the [browser front end](web/README.md) in `web/` has the keyboard, the text screen, the debugger, the disk drives (with format conversion and new blank floppies) and the modem
 - **Built-in hardware debugger**: Ctrl+B freezes the CPU to inspect registers, single-step and dump memory
 
 ## Requirements
@@ -111,6 +112,10 @@ Copying through the board runs at the serial link's speed, about 20 s for a flop
 | 4 | Text mode |
 | 5 | Keyboard strobe pending |
 
+### Modem (Super Serial Card)
+
+Slot 1 holds a Super Serial Card whose serial line is the USB link, and the web page is the modem on the other end (the **Modem** pane). A comm program on the Apple talks to it as to a Hayes modem: `ATI`, `ATZ`, `ATDT bbs.example.org:23` and so on, `+++` to get back to command mode, `ATH` or dropping DTR to hang up. A browser cannot open a TCP connection, so `ATDT host:port` goes through a **WebSocket gateway** whose address you enter in the pane (for example a [websockify](https://github.com/novnc/websockify) you run yourself), with `{host}` and `{port}` in it; `ATDT wss://...` dials a BBS that offers WebSockets directly, and `ATDT LOOP` is a loopback for trying it out. The page speaks telnet to the BBS and paces bytes to the Apple at the baud it set. The card's firmware ROM (341-0065-A) is Apple's: put it in `roms/ssc.hex` and rebuild for `PR#1`/`IN#1` and for programs such as ProTERM that look for the card; without it the card's 6551 still works for software that drives it directly. Tried on the board: a 6502 program sent `ATI` through the 6551 and read the modem's answer back.
+
 ### CP/M (Z-80 SoftCard)
 
 Slot 2 holds a Microsoft Z-80 SoftCard. Put a SoftCard CP/M disk image (2.20 or 2.23) on the TF card as `S6D1` and boot it with `PR#6` (with a hard-disk volume in slot 7, the Autostart ROM boots that first). CP/M finds the card itself. The Z80 runs at the real card's 2.045 MHz and shares the Apple's memory and I/O, so the 6502 waits while it runs, as on the real card. Not yet tried on hardware.
@@ -128,7 +133,7 @@ python3 -m http.server -d web/dist 8000   # http://localhost:8000
 
 ## Video and HDMI
 
-The 560×384 Apple raster (40 columns × 14 pixel clocks, 192 lines doubled) is centered in the 720×480 frame at x = 80..639, y = 48..431; lines from 432 on are vertical blanking ($C019). `hdmi_tx` owns the raster and asks for each pixel combinationally, and `video_generator.v` registers its colour output, so `top.v` feeds it the next pixel (`h_cnt = pixel_x + 1`). Hi-res colour comes from decoding the 560-sample dot stream the way an NTSC set does: each pixel looks at a 4-sample window, luma is the lit count and chroma comes from the sample phases, so a `0101` pattern fills solid and colour edges fringe. The AVI InfoFrame declares full-range RGB (`RGB_QUANT = 2'b10`) so a TV does not crush the Apple's blacks. Audio is filtered to 48 kHz once (`audio_filter.v`: an exact CIC to 96 kHz, then a 47-tap halfband FIR on one DSP multiplier, so AY tones above 24 kHz do not alias), and the same samples go to the DAC and into HDMI data islands (ACR N = 6144, CTS = 27000).
+The 560×384 Apple raster (40 columns × 14 pixel clocks, 192 lines doubled) is centered in the 720×480 frame at x = 80..639, y = 48..431; lines from 432 on are vertical blanking ($C019). `hdmi_tx` owns the raster and asks for each pixel combinationally, and `video_generator.v` registers its colour output, so `top.v` feeds it the next pixel (`h_cnt = pixel_x + 1`). Hi-res colour comes from decoding the 560-sample dot stream the way an NTSC set does: each pixel looks at a 4-sample window, luma is the lit count and chroma comes from the sample phases, so a `0101` pattern fills solid and colour edges fringe. Colour TV mode (key S3) widens that to two colour cycles weighted 1 2 3 4 4 3 2 1, so edges blend while solid colours stay the same (the picture sits ~4 pixels right in that mode); scanlines (key S4) darken the second copy of each doubled Apple line. The AVI InfoFrame declares full-range RGB (`RGB_QUANT = 2'b10`) so a TV does not crush the Apple's blacks. Audio is filtered to 48 kHz once (`audio_filter.v`: an exact CIC to 96 kHz, then a 47-tap halfband FIR on one DSP multiplier, so AY tones above 24 kHz do not alias), and the same samples go to the DAC and into HDMI data islands (ACR N = 6144, CTS = 27000).
 
 ## Project layout
 
@@ -140,12 +145,14 @@ src/aux_ram.v           aux RAM, language card, Disk II and hard-disk storage in
 src/video_generator.v   Apple raster into the 720x480 frame
 src/hdmi/               HDMI transmitter: timing, TMDS, data islands, audio/InfoFrame packets
 src/sound_generator.v   speaker and Mockingboard to the PT8211 DAC
+src/audio_filter.v      the 48 kHz resampler (CIC in DSP blocks, halfband FIR)
 src/mockingboard/       Mockingboard C (two 6522 VIAs, two AY-3-8910s), slot 4
 src/disk2/              Disk II card and image store, slot 6
 src/prodos_hd.v         ProDOS block device and SmartPort, slot 7
 src/prodos_hd_rom.s     its firmware, 6502 source (scripts/hdrom.py assembles it)
 src/thunderclock.v      clock card ProDOS takes for a Thunderclock, slot 5
-src/softcard.v         Microsoft Z-80 SoftCard, slot 2 (Z80 core in src/z80/)
+src/softcard.v          Microsoft Z-80 SoftCard, slot 2 (Z80 core in src/z80/)
+src/ssc.v               Super Serial Card, slot 1 (its line is the USB link)
 src/sd_vol.v            the TF card: finds the drives' files on FAT32, loads them, writes them back
 src/input_controller.v  UART RX, keyboard, gamepad, $C0xx input registers
 src/serial_debugger.v   UART TX, console mirror, hardware debugger
@@ -170,7 +177,7 @@ This project uses work by others, with thanks:
 | DDR3 Memory Interface IP (encrypted netlist) | `src/ddr3_memory_interface/` | Gowin Semiconductor, via Sipeed's [TangPrimer-20K-example](https://github.com/sipeed/TangPrimer-20K-example) (© 2022 LAKKA) | BSD-3-Clause, [`LICENSE`](src/ddr3_memory_interface/LICENSE) there |
 | HDMI transmitter | `src/hdmi/` | the author's own TN20K-HDMI project, snapshot at `388b39e` | MIT |
 | React | bundled in the web page | Meta Platforms, Inc. | MIT; the published page carries `LICENSES.md` |
-| Apple //e ROMs (system, character, Disk II boot) | `roms/`, not distributed | Apple Computer, Inc. | copyright; supply your own (see [`roms/README.md`](roms/README.md)) |
+| Apple //e ROMs (system, character, Disk II boot, Super Serial Card) | `roms/`, not distributed | Apple Computer, Inc. | copyright; supply your own (see [`roms/README.md`](roms/README.md)) |
 
 Built with Gowin EDA, simulated with Icarus Verilog, and the web page with Vite and TypeScript; none of them is part of this repository.
 
@@ -180,4 +187,4 @@ The version is in [`VERSION`](VERSION).
 
 [MIT](LICENSE) © 2026 Terence Ang / motionfxdesign.
 
-The HDMI transmitter in `src/hdmi/` is a local copy of the one from the TN20K-HDMI project, taken at commit `388b39e` and differing only in `hdmi_tx`'s `RGB_QUANT` parameter. The 65C02 core in `src/cpu/` is by Arlet Ottens, David Banks and Ed Spittles, and stays under its original permissive terms (see the file headers). The DDR3 controller in `src/ddr3_memory_interface/` is Gowin's generated IP netlist, taken from Sipeed's BSD-3-Clause TangPrimer-20K-example (see its README). Apple //e ROMs are copyright Apple and are not part of this project.
+The HDMI transmitter in `src/hdmi/` is a local copy of the one from the TN20K-HDMI project, taken at commit `388b39e`; it differs in `hdmi_tx`'s `RGB_QUANT` parameter and in having no packet FIFO (`scripts/hdmi_diff.ps1` lists both). The 65C02 core in `src/cpu/` is by Arlet Ottens, David Banks and Ed Spittles, and stays under its original permissive terms (see the file headers). The DDR3 controller in `src/ddr3_memory_interface/` is Gowin's generated IP netlist, taken from Sipeed's BSD-3-Clause TangPrimer-20K-example (see its README). Apple //e ROMs are copyright Apple and are not part of this project.
