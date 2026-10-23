@@ -13,7 +13,7 @@
 module video_generator (
     input  wire        clk_pixel,    // 27.0 MHz
     input  wire        reset,
-    input  wire        flash_clk,    // ~1.6 Hz flashing text clock
+    input  wire        flash_clk,    // flashing text: changes every 16 frames (top.v)
 
     // Raster position of the next pixel, from hdmi_tx (see above)
     input  wire [9:0]  h_cnt,        // 0..719 active, >= 720 blanking

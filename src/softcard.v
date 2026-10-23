@@ -17,7 +17,7 @@
 //      Z80 $F000-$FFFF -> $0000-$0FFF     zero page, stack, text page
 //
 //  Timing.  The Z80 (tv80, src/z80/) runs off z_cen, a T-state enable at
-//  2.045 MHz (5/66 of 27 MHz, the real card's 14.31818 MHz / 7), held like
+//  2.045 MHz (two per ce_1m, the real card's 14.31818 MHz / 7), held like
 //  the 6502's cpu_ce while the bus is busy (video_busy: a video fetch, a DDR3
 //  cache miss or a write buffer still draining), so the aux and language-card
 //  latency stretches a T-state exactly as it stretches a 6502 cycle.  A
@@ -35,6 +35,7 @@
 module softcard (
     input  wire        clk,
     input  wire        reset,
+    input  wire        ce_1m,        // the 6502's cycle: the Z80 runs at twice it
     input  wire        cpu_rdy,      // the debugger's pause holds the Z80 too
     input  wire        video_busy,   // apple2_core's hold on a bus step
     input  wire        intcxrom,     // the internal ROM hides the card's $Cnxx
@@ -61,12 +62,14 @@ module softcard (
         else if (bus_go && bus_we && bus_addr[15:8] == {4'hC, SLOT} && !intcxrom)
             z80_on <= !z80_on;
 
-    // 2.045 MHz: an exact 5/66 of 27 MHz, as clk_gen makes ce_1m
-    reg [6:0] acc = 7'd0;
+    // 2.045 MHz: two T-states for every 6502 cycle, one on ce_1m and one 13
+    // clocks after it (ce_1m is 26 or 27 clocks apart), so the Z80's clock is
+    // the Apple's doubled and locked to it, as the real card derives it.
+    reg [3:0] half = 4'd0;            // clocks since ce_1m, to the midpoint
     reg       tick = 1'b0, pend = 1'b0;
     always @(posedge clk) begin
-        if (acc >= 7'd61) begin acc <= acc - 7'd61; tick <= 1'b1; end
-        else              begin acc <= acc + 7'd5;  tick <= 1'b0; end
+        tick <= ce_1m || half == 4'd12;
+        half <= ce_1m ? 4'd0 : (half == 4'd15 ? half : half + 4'd1);
     end
     wire run = z80_on && cpu_rdy;
     assign z_cen = run && (tick || pend) && !video_busy;

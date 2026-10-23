@@ -145,6 +145,13 @@ module tb_softcard;
         spk_q = dut.spkr_pulse;
         if (dut.z_go) zgo = zgo + 1;
     end
+    // the Z80's clock: two T-states per 6502 cycle while it runs (counted
+    // from the first T-state after a hand-over to the last before the next)
+    integer zt = 0, zce = 0;
+    always @(posedge clk) if (!reset && dut.z80_on) begin
+        if (dut.z_cen) zt = zt + 1;
+        if (ce_1m) zce = zce + 1;
+    end
     reg on_q = 1'b0;
     always @(posedge clk) begin
         on_q <= dut.z80_on;
@@ -183,6 +190,8 @@ module tb_softcard;
         check("speaker touched once", spk == 1);
         check("four handovers", handovers == 4);
         check("6502 has the bus", !dut.z80_on);
+        check("the Z80 ran two T-states per 6502 cycle", zt >= 2 * zce - 4 && zt <= 2 * zce + 4);
+        $display("%0d Z80 T-states in %0d 6502 cycles", zt, zce);
         $display("%0d Z80 bus cycles, %0d speaker pulses, %0d handovers", zgo, spk, handovers);
         if (fails == 0) $display("PASS"); else $display("FAIL: tb_softcard");
         $finish;

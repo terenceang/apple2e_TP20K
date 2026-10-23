@@ -648,6 +648,7 @@ module apple2_core (
     softcard u_softcard (
         .clk(clk),
         .reset(reset),
+        .ce_1m(ce_1m),
         .cpu_rdy(cpu_rdy),
         .video_busy(video_busy),
         .intcxrom(intcxrom),

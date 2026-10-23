@@ -75,7 +75,6 @@ module top (
     wire clk_pixel;
     wire pll_locked;
     wire ce_1m;
-    wire flash_clk;
 
     clk_gen u_clk_gen (
         .clk_in(clk),
@@ -83,8 +82,7 @@ module top (
         .clk_tmds(clk_tmds),
         .clk_pixel(clk_pixel),
         .pll_locked(pll_locked),
-        .ce_1m(ce_1m),
-        .flash_clk(flash_clk)
+        .ce_1m(ce_1m)
     );
 
     // Serial Debugger & Apple //e Console Mirror
@@ -481,6 +479,17 @@ module top (
         if (s4_press) scanlines <= scanlines + 2'd1;
     end
 
+    // Flashing text, as the //e makes it from its video counter: the state
+    // changes every 16 frames, ~1.9 Hz a full cycle (one clock of the frame,
+    // pixel (0, 0), counts it).  Locked to the picture, not free-running.
+    reg [3:0] flash_frames = 4'd0;
+    reg       flash_clk = 1'b0;
+    always @(posedge clk_pixel)
+        if (pixel_x == 10'd0 && pixel_y == 10'd0) begin
+            flash_frames <= flash_frames + 4'd1;
+            if (flash_frames == 4'd15) flash_clk <= ~flash_clk;
+        end
+
     video_generator u_video (
         .clk_pixel(clk_pixel),
         .reset(sys_reset),
@@ -608,7 +617,7 @@ module top (
     );
 
     // Diagnostic LEDs (active-low)
-    // LED 0: Heartbeat blinker (~1.6 Hz, driven by clk_gen flash_clk as SSOT)
+    // LED 0: Heartbeat blinker (~1.9 Hz: the text flash, below, as SSOT)
     // LED 1: PLLs locked and DDR3 calibrated (ON when all three)
     // LED 2: Reset status (ON when running)
     // LED 3: CPU Memory Write Activity
