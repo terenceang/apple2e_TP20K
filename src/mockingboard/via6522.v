@@ -45,6 +45,8 @@ module via6522 (
     reg        t2_loaded;
     reg        t2_int_arm;
     reg [11:0] cb1_delay;
+    reg [6:0]  nifr;      // next IFR: clears, then sets, so a flag raised in
+                          // the clock it is cleared or written is not lost
 
     // Pin drivers
     assign port_a_out = ora;
@@ -108,6 +110,19 @@ module via6522 (
             t2_int_arm <= 1'b0;
             cb1_delay  <= 12'd0;
         end else begin
+            nifr = ifr;
+
+            // -----------------------------------------------------------------
+            // Interrupt Flag Clearing on Register Read, and on IFR / ORB writes
+            // -----------------------------------------------------------------
+            if (read_strobe) begin
+                if (rs == 4'h4)      nifr[6] = 1'b0;  // T1C_L clears Timer 1
+                else if (rs == 4'h8) nifr[5] = 1'b0;  // T2C_L clears Timer 2
+                else if (rs == 4'h0) nifr[4] = 1'b0;  // ORB/IRB clears CB1
+            end
+            if (write_strobe && rs == 4'hD) nifr = nifr & ~din[6:0];
+            if (write_strobe && rs == 4'h0) nifr[4] = 1'b0;
+
             // -----------------------------------------------------------------
             // CB1 Speech Acknowledge (Mockingboard Sound/Speech Handshake)
             // -----------------------------------------------------------------
@@ -119,7 +134,7 @@ module via6522 (
                     if (cb1_delay < 12'd1000) begin
                         cb1_delay <= cb1_delay + 1'b1;
                     end else begin
-                        ifr[4] <= 1'b1;
+                        nifr[4] = 1'b1;
                     end
                 end else begin
                     cb1_delay <= 12'd0;
@@ -139,7 +154,7 @@ module via6522 (
                 if (t1_loaded && acr[6]) begin
                     // Free-running continuous mode: reload from latch at 0
                     if (t1c == 16'd0) begin
-                        ifr[6] <= 1'b1;
+                        nifr[6] = 1'b1;
                         t1c    <= t1l;
                     end else begin
                         t1c <= t1c - 16'd1;
@@ -148,7 +163,7 @@ module via6522 (
                     // One-shot mode or unconfigured: continuous countdown
                     if (t1c == 16'd0) begin
                         if (t1_loaded && t1_int_arm) begin
-                            ifr[6]     <= 1'b1;
+                            nifr[6]     = 1'b1;
                             t1_int_arm <= 1'b0;
                         end
                         t1c <= 16'hFFFF;
@@ -159,7 +174,7 @@ module via6522 (
 
                 if (t2c == 16'd0) begin
                     if (t2_loaded && t2_int_arm) begin
-                        ifr[5]     <= 1'b1;
+                        nifr[5]     = 1'b1;
                         t2_int_arm <= 1'b0;
                     end
                     t2c <= 16'hFFFF;
@@ -169,30 +184,11 @@ module via6522 (
             end
 
             // -----------------------------------------------------------------
-            // Interrupt Flag Clearing on Register Read
-            // -----------------------------------------------------------------
-            if (read_strobe) begin
-                if (rs == 4'h4) begin
-                    // Read T1C_L clears Timer 1 interrupt
-                    ifr[6] <= 1'b0;
-                end else if (rs == 4'h8) begin
-                    // Read T2C_L clears Timer 2 interrupt
-                    ifr[5] <= 1'b0;
-                end else if (rs == 4'h0) begin
-                    // Read ORB/IRB clears CB1 interrupt
-                    ifr[4] <= 1'b0;
-                end
-            end
-
-            // -----------------------------------------------------------------
             // Register Writes
             // -----------------------------------------------------------------
             if (write_strobe) begin
                 case (rs)
-                    4'h0: begin
-                        orb    <= din;
-                        ifr[4] <= 1'b0;
-                    end
+                    4'h0: orb  <= din;
                     4'h1: ora  <= din;
                     4'h2: ddrb <= din;
                     4'h3: ddra <= din;
@@ -204,7 +200,7 @@ module via6522 (
                         // Write T1 High Latch, load counter, clear interrupt, arm
                         t1l[15:8]  <= din;
                         t1c        <= {din, t1l[7:0]};
-                        ifr[6]     <= 1'b0;
+                        nifr[6]     = 1'b0;
                         t1_loaded  <= 1'b1;
                         t1_int_arm <= 1'b1;
                     end
@@ -215,7 +211,7 @@ module via6522 (
                     4'h7: begin
                         // Write T1 High Latch, clear interrupt, arm
                         t1l[15:8]  <= din;
-                        ifr[6]     <= 1'b0;
+                        nifr[6]     = 1'b0;
                         t1_loaded  <= 1'b1;
                         t1_int_arm <= 1'b1;
                     end
@@ -226,17 +222,13 @@ module via6522 (
                     4'h9: begin
                         // Write T2 High Counter, load low counter from latch, clear interrupt, arm
                         t2c        <= {din, t2l_l};
-                        ifr[5]     <= 1'b0;
+                        nifr[5]     = 1'b0;
                         t2_loaded  <= 1'b1;
                         t2_int_arm <= 1'b1;
                     end
                     4'hA: sr  <= din;
                     4'hB: acr <= din;
                     4'hC: pcr <= din;
-                    4'hD: begin
-                        // Writing 1 to bit clears that bit in IFR
-                        ifr <= ifr & ~din[6:0];
-                    end
                     4'hE: begin
                         // IER write: bit 7 = 1 enables bits, bit 7 = 0 disables bits
                         if (din[7])
@@ -247,6 +239,9 @@ module via6522 (
                     4'hF: ora <= din;
                 endcase
             end
+            // a timer load clears its flag after the sets above: the load
+            // restarts the count, so an expiry in the same clock is stale
+            ifr <= nifr;
         end
     end
 

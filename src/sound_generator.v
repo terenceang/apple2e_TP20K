@@ -1,8 +1,9 @@
 // Apple //e Sound Generator for Tang Primer 20K
 // Decodes $C030 speaker toggle and drives the Dock's PT8211 DAC (-> LPA4809
 // amplifier -> 3.5 mm jack).
-// Integrates Mockingboard C true stereo audio (Left & Right channels) mixed
-// with the Apple //e acoustic speaker click impulse model.
+// The speaker and the Mockingboard C's two AYs (left, right) are mixed and
+// filtered to 48 kHz by audio_filter, and the same samples go to the DAC and
+// to HDMI (audio_valid / audio_sample_l / audio_sample_r).
 //
 // The PT8211 is 16-bit LSB-justified ("Japanese" format), not I2S: it latches
 // the last 16 bits shifted in before WS changes.  So each 32-BCLK half-frame
@@ -11,15 +12,17 @@
 // shift register by one BCLK, the I2S delay).  WS low is the left half;
 // WS high is the right half.
 //
-// audio_sample updates once per I2S frame, at exactly 46875 Hz: 27 MHz is
-// 576 clocks per frame (27e6 / 46875 = 576) and a frame is 64 BCLKs, so the
-// BCLK period is 9 clocks.  top.v resamples that to the 48 kHz HDMI rate, so
-// the two rates are not independent -- changing one means changing the other.
+// A frame is one 48 kHz sample: 562 or 563 clocks (27 MHz / 48 kHz = 562.5),
+// from audio_filter's tick.  It holds 64 BCLKs, so BCLK is not a fixed
+// division: an accumulator spreads the frame's 128 edges over its clocks,
+// 4 or 5 clocks apart (BCLK 8 or 9 clocks, ~3.07 MHz).  The PT8211 has no
+// master clock and does not mind.
 `default_nettype none
 
 module sound_generator (
     input  wire        clk,        // 27.0 MHz
     input  wire        reset,
+    input  wire        ce_1m,
     input  wire        spkr_pulse, // Pulsed high whenever $C030 is accessed
     input  wire        test_tone_enable, // 1: output a 1kHz test tone instead of the speaker model
 
@@ -36,11 +39,12 @@ module sound_generator (
     // Direct 1-bit speaker output
     output reg         spkr_out,
 
-    // Current 16-bit signed PCM sample (the value sent on I2S), updated once
-    // per I2S frame; top.v resamples it at 48 kHz for HDMI audio.
-    output reg signed [15:0] audio_sample,
-    output reg signed [15:0] audio_sample_l,
-    output reg signed [15:0] audio_sample_r
+    // The 48 kHz samples the DAC is sent, for HDMI: a new pair on each
+    // audio_valid.  Not reset, so HDMI audio runs through an Apple reset.
+    output reg         audio_valid = 1'b0,
+    output reg signed [15:0] audio_sample   = 16'sd0,
+    output reg signed [15:0] audio_sample_l = 16'sd0,
+    output reg signed [15:0] audio_sample_r = 16'sd0
 );
 
     assign pa_en = 1'b1; // Keep power amplifier enabled
@@ -59,121 +63,77 @@ module sound_generator (
         end
     end
 
-    // Acoustic impulse model:
-    // Physical Apple II speaker produces a damped acoustic pop on each toggle.
-    reg prev_spkr_out;
-    reg signed [15:0] spkr_pcm;
+    wire               tick, tick_late;
+    wire signed [15:0] filt_l, filt_r;
 
-    // BCLK generation: 27 MHz / 9 = 3.0 MHz
-    // 64 BCLKs per sample frame -> 3.0 MHz / 64 = 46.875 kHz sample rate
-    //
-    // 27 MHz / 46875 kHz is exactly 576 clocks per frame = 9 clocks per BCLK
-    // period, and 9 is odd, so bclk_div free-runs 0..8 and toggles BCLK at
-    // both 4 and 8: 4 clocks high, 5 low.
-    localparam [3:0] BCLK_DIV_LAST = 4'd8; // bclk_div counts 0..8: a 9-clock period
-    localparam [3:0] BCLK_DIV_MID  = 4'd4; // first toggle: 4 clocks high, 5 low
-    localparam [5:0] BCLK_LAST     = 6'd63; // last BCLK of the 64-BCLK frame
+    audio_filter u_filter (
+        .clk(clk), .ce_1m(ce_1m), .spkr(spkr_out),
+        .mock_l(mock_left), .mock_r(mock_right),
+        .tick(tick), .tick_late(tick_late),
+        .out_l(filt_l), .out_r(filt_r)
+    );
+
+    // 1kHz test tone: phase accumulator advanced once per sample.
+    // step = round(1000 * 2^32 / 48000)
+    localparam [31:0] STEP_1KHZ = 32'd89478485;
+    reg [31:0] tone_phase = 32'd0;
+    wire signed [15:0] tone = tone_phase[31] ? 16'sd12000 : -16'sd12000;
+    wire signed [15:0] next_l = test_tone_enable ? tone : filt_l;
+    wire signed [15:0] next_r = test_tone_enable ? tone : filt_r;
+
+    always @(posedge clk) begin
+        audio_valid <= tick;
+        if (tick) begin
+            tone_phase     <= tone_phase + STEP_1KHZ;
+            audio_sample   <= next_l;
+            audio_sample_l <= next_l;
+            audio_sample_r <= next_r;
+        end
+    end
+
+    // PT8211 framing: a frame starts on tick; acc spreads the 127 BCLK edges
+    // in between over the frame's flen clocks, and the 128th is the next tick.
     localparam [5:0] BCLK_LEFT_END = 6'd31; // last BCLK of the left channel
 
-    reg [3:0]  bclk_div = 4'd0;
+    reg [9:0]  acc  = 10'd0;
+    reg [9:0]  flen = 10'd562;
     reg [5:0]  bit_cnt  = 6'd0; // 0..63
     reg [31:0] shift_reg = 32'd0;
 
-    // 1kHz test tone: phase accumulator advanced once per audio sample
-    // (46.875 kHz frame rate). step = round(1000 * 2^32 / 46875)
-    localparam [31:0] STEP_1KHZ = 32'd91625969;
-    reg [31:0] tone_phase = 32'd0;
-
-    // Saturating 16-bit adder for mixing Mockingboard + Speaker click
-    function signed [15:0] sat_add16;
-        input signed [15:0] a;
-        input signed [15:0] b;
-        reg signed [16:0] sum;
-        begin
-            sum = a + b;
-            if (sum > 17'sd32767)
-                sat_add16 = 16'sd32767;
-            else if (sum < -17'sd32768)
-                sat_add16 = -16'sd32768;
-            else
-                sat_add16 = sum[15:0];
-        end
-    endfunction
-
-    // Mockingboard stereo inputs directly connected
-    wire signed [15:0] safe_mock_l = mock_left;
-    wire signed [15:0] safe_mock_r = mock_right;
-
     always @(posedge clk or posedge reset) begin
         if (reset) begin
-            audio_sample   <= 16'sd0;
-            audio_sample_l <= 16'sd0;
-            audio_sample_r <= 16'sd0;
-            spkr_pcm       <= 16'sd0;
-            prev_spkr_out  <= 1'b0;
-            bclk_div       <= 4'd0;
-            bit_cnt        <= 6'd0;
-            i2s_bclk       <= 1'b0;
-            i2s_lrck       <= 1'b0;
-            i2s_din        <= 1'b0;
-            shift_reg      <= 32'd0;
-            tone_phase     <= 32'd0;
-        end else begin
-            // BCLK clock division
-            if (bclk_div == BCLK_DIV_MID || bclk_div == BCLK_DIV_LAST) begin
-                i2s_bclk <= ~i2s_bclk;
-                if (bclk_div == BCLK_DIV_LAST)
-                    bclk_div <= 4'd0;
-                else
-                    bclk_div <= BCLK_DIV_MID + 4'd1;
+            acc        <= 10'd0;
+            flen       <= 10'd562;
+            bit_cnt    <= 6'd0;
+            i2s_bclk   <= 1'b0;
+            i2s_lrck   <= 1'b0;
+            i2s_din    <= 1'b0;
+            shift_reg  <= 32'd0;
+        end else if (tick) begin
+            // the frame's last falling edge: left channel start
+            acc       <= 10'd0;
+            flen      <= tick_late ? 10'd563 : 10'd562;
+            i2s_bclk  <= 1'b0;
+            i2s_lrck  <= 1'b0;
+            i2s_din   <= shift_reg[31];
+            shift_reg <= {15'd0, next_l, 1'b0};
+            bit_cnt   <= 6'd0;
+        end else if (acc + 10'd128 >= flen) begin
+            acc      <= acc + 10'd128 - flen;
+            i2s_bclk <= ~i2s_bclk;
 
-                // Shift data out on falling edge of BCLK
-                if (i2s_bclk) begin
-                    i2s_din   <= shift_reg[31];
-                    shift_reg <= {shift_reg[30:0], 1'b0};
-
-                    if (bit_cnt == BCLK_LAST) begin
-                        bit_cnt  <= 6'd0;
-                        i2s_lrck <= 1'b0; // Left channel start
-
-                        tone_phase <= tone_phase + STEP_1KHZ;
-
-                        if (test_tone_enable) begin
-                            audio_sample   <= tone_phase[31] ? 16'sd12000 : -16'sd12000;
-                            audio_sample_l <= tone_phase[31] ? 16'sd12000 : -16'sd12000;
-                            audio_sample_r <= tone_phase[31] ? 16'sd12000 : -16'sd12000;
-                            shift_reg      <= {15'd0, tone_phase[31] ? 16'sd12000 : -16'sd12000, 1'b0};
-                        end else begin
-                            if (spkr_out != prev_spkr_out) begin
-                                prev_spkr_out <= spkr_out;
-                                spkr_pcm      <= spkr_out ? 16'sd16000 : -16'sd16000;
-                            end else begin
-                                spkr_pcm      <= spkr_pcm - (spkr_pcm >>> 6); // Damped decay
-                            end
-
-                            audio_sample_l <= sat_add16(safe_mock_l, spkr_pcm);
-                            audio_sample_r <= sat_add16(safe_mock_r, spkr_pcm);
-                            audio_sample   <= sat_add16(safe_mock_l, spkr_pcm);
-
-                            // Load Left channel into shift register for PT8211
-                            shift_reg <= {15'd0, sat_add16(safe_mock_l, spkr_pcm), 1'b0};
-                        end
-                    end else begin
-                        bit_cnt <= bit_cnt + 1'b1;
-                        if (bit_cnt == BCLK_LEFT_END) begin
-                            i2s_lrck <= 1'b1; // Right channel start
-                            if (test_tone_enable) begin
-                                shift_reg <= {15'd0, tone_phase[31] ? 16'sd12000 : -16'sd12000, 1'b0};
-                            end else begin
-                                // Load Right channel into shift register for PT8211
-                                shift_reg <= {15'd0, sat_add16(safe_mock_r, spkr_pcm), 1'b0};
-                            end
-                        end
-                    end
+            // Shift data out on falling edge of BCLK
+            if (i2s_bclk) begin
+                i2s_din   <= shift_reg[31];
+                shift_reg <= {shift_reg[30:0], 1'b0};
+                bit_cnt   <= bit_cnt + 1'b1;
+                if (bit_cnt == BCLK_LEFT_END) begin
+                    i2s_lrck  <= 1'b1; // Right channel start
+                    shift_reg <= {15'd0, audio_sample_r, 1'b0};
                 end
-            end else begin
-                bclk_div <= bclk_div + 1'b1;
             end
+        end else begin
+            acc <= acc + 10'd128;
         end
     end
 

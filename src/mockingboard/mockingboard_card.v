@@ -49,6 +49,7 @@ module mockingboard_card (
     wire [7:0] via1_port_a_out;
     wire [7:0] via1_port_a_in;
     wire [7:0] via1_port_b_out;
+    wire [7:0] via1_ddrb;
     wire       via1_irq_n;
 
     wire [7:0] psg1_da_out;
@@ -71,15 +72,16 @@ module mockingboard_card (
 
         .port_b_in(8'h00),
         .port_b_out(via1_port_b_out),
-        .port_b_oe()
+        .port_b_oe(via1_ddrb)
     );
 
     assign via1_port_a_in = psg1_da_out;
 
-    // Reset is driven by system reset only. On authentic Mockingboards, PB2 was
-    // not wired to active-low reset, and standard software writes 0x00 for bus
-    // inactive (which would hold the PSG in permanent reset if PB2 were inverted to reset).
-    wire psg1_reset = reset;
+    // PB2 is the AY's /RESET, as on the card (and in MAME and AppleWin):
+    // software writes $04 for "inactive" and $00 to reset.  A port B pin
+    // set as an input floats high, so the AY is only reset once DDRB drives
+    // PB2.  Registered (below), since it is the AY's asynchronous reset.
+    reg psg1_reset = 1'b1, psg2_reset = 1'b1;
     wire psg1_bdir  = via1_port_b_out[1];
     wire psg1_bc1   = via1_port_b_out[0];
 
@@ -104,6 +106,7 @@ module mockingboard_card (
     wire [7:0] via2_port_a_out;
     wire [7:0] via2_port_a_in;
     wire [7:0] via2_port_b_out;
+    wire [7:0] via2_ddrb;
     wire       via2_irq_n;
 
     wire [7:0] psg2_da_out;
@@ -126,12 +129,11 @@ module mockingboard_card (
 
         .port_b_in(8'h00),
         .port_b_out(via2_port_b_out),
-        .port_b_oe()
+        .port_b_oe(via2_ddrb)
     );
 
     assign via2_port_a_in = psg2_da_out;
 
-    wire psg2_reset = reset;
     wire psg2_bdir  = via2_port_b_out[1];
     wire psg2_bc1   = via2_port_b_out[0];
 
@@ -149,6 +151,11 @@ module mockingboard_card (
         .channel_c(),
         .audio_mix(audio_right)
     );
+
+    always @(posedge clk) begin
+        psg1_reset <= reset || (via1_ddrb[2] && !via1_port_b_out[2]);
+        psg2_reset <= reset || (via2_ddrb[2] && !via2_port_b_out[2]);
+    end
 
     // -------------------------------------------------------------------------
     // Composite Interrupt (wired-OR active-low /IRQ)

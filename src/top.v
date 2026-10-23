@@ -504,36 +504,11 @@ module top (
                          : hd_loading          ? 24'h000000
                                                : {vid_red, vid_green, vid_blue};
 
-    // HDMI audio: true stereo audio (Left & Right) from sound_generator,
-    // sampled at VM_AUDIO_HZ = 48 kHz. 27 MHz / 48 kHz = 562.5 clocks, so a
-    // fractional accumulator alternates 562 and 563.
-    //
-    // The two rates are coupled: sound_generator holds audio samples for one
-    // I2S frame of exactly 576 clocks, so it must stay at 46.875 kHz or this
-    // resampler plays it at the wrong speed. sim/tb_sound.v checks that.
-    wire signed [15:0] audio_sample_l;
-    wire signed [15:0] audio_sample_r;
-    reg  [24:0]        hdmi_audio_acc   = 25'd0;
-    reg                hdmi_audio_valid = 1'b0;
-    reg  [15:0]        hdmi_audio_pcm_l = 16'd0;
-    reg  [15:0]        hdmi_audio_pcm_r = 16'd0;
-
-    always @(posedge clk_pixel) begin
-        if (!hdmi_rst_n) begin
-            hdmi_audio_acc   <= 25'd0;
-            hdmi_audio_valid <= 1'b0;
-        end else begin
-            hdmi_audio_valid <= 1'b0;
-            if (hdmi_audio_acc + `VM_AUDIO_HZ >= `VM_PIXEL_HZ) begin
-                hdmi_audio_acc   <= hdmi_audio_acc + `VM_AUDIO_HZ - `VM_PIXEL_HZ;
-                hdmi_audio_valid <= 1'b1;
-                hdmi_audio_pcm_l <= audio_sample_l;
-                hdmi_audio_pcm_r <= audio_sample_r;
-            end else begin
-                hdmi_audio_acc <= hdmi_audio_acc + `VM_AUDIO_HZ;
-            end
-        end
-    end
+    // HDMI audio: sound_generator's 48 kHz samples, the same ones the DAC
+    // plays (audio_filter resamples the speaker and Mockingboard to 48 kHz).
+    wire        hdmi_audio_valid;
+    wire [15:0] hdmi_audio_pcm_l;
+    wire [15:0] hdmi_audio_pcm_r;
 
     // HDMI transmitter: 720x480p59.94 (VIC 2) with data islands carrying
     // 48 kHz L-PCM audio, ACR, and the AVI / Audio InfoFrames. Mode and audio
@@ -585,6 +560,7 @@ module top (
     sound_generator u_sound (
         .clk(clk_pixel),
         .reset(sys_reset),
+        .ce_1m(ce_1m),
         .spkr_pulse(spkr_pulse),
         .test_tone_enable(test_pattern_enable),
         .mock_left(mock_left),
@@ -594,9 +570,10 @@ module top (
         .i2s_din(i2s_din),
         .pa_en(pa_en),
         .spkr_out(),
+        .audio_valid(hdmi_audio_valid),
         .audio_sample(),
-        .audio_sample_l(audio_sample_l),
-        .audio_sample_r(audio_sample_r)
+        .audio_sample_l(hdmi_audio_pcm_l),
+        .audio_sample_r(hdmi_audio_pcm_r)
     );
 
     // Diagnostic LEDs (active-low)

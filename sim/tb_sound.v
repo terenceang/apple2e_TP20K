@@ -1,18 +1,15 @@
 // ============================================================================
-//  sim/tb_sound.v -- sound_generator: I2S frame rate and bit timing
+//  sim/tb_sound.v -- sound_generator: PT8211 frame rate and bit timing
 //
-//  There was no testbench for sound_generator.v, which is how its BCLK
-//  divider went unnoticed running at 42187.5 Hz while three comments (and
-//  top.v's HDMI resampler) all assumed 46875 Hz.  This pins the rate down.
+//  A frame is one 48 kHz sample, 562 or 563 clocks (27 MHz / 48 kHz =
+//  562.5), from audio_filter's tick, with 64 BCLKs spread over it: BCLK edges
+//  4 or 5 clocks apart, never two 5s running (4.39 on average), so a BCLK
+//  period of 8 or 9 clocks.  Frames must
+//  average exactly 562.5 clocks (HDMI takes the same samples at 48 kHz).
 //
-//  27 MHz / 46875 Hz = 576 clocks per frame, 64 BCLKs per frame, so the BCLK
-//  period must be exactly 9 clocks.  The divider is asymmetric (4 high, 5
-//  low) because 9 is odd; I2S only cares about the period.
-//
-//  The tone-frequency check is the end-to-end version of the same bug: the
-//  1 kHz test tone is resampled to 48 kHz by top.v, so a wrong frame rate
-//  puts 1 kHz out at 900 Hz (~-1.8 semitones).  It is checked here at the
-//  source, where the expected value is exactly 1000 Hz.
+//  The tone-frequency check is the end-to-end version of a past bug (the
+//  BCLK divider once ran the frames at 42187.5 Hz while everything assumed
+//  46875, which put the 1 kHz test tone out at ~900 Hz).
 //
 //  The DAC is a PT8211 (Tang Primer 20K Dock), which is LSB-justified: it
 //  keeps the last 16 bits clocked in on BCLK rising edges before WS changes.
@@ -25,9 +22,8 @@
 module tb_sound;
 
     localparam CLK_HZ      = 27_000_000;
-    localparam BCLK_CLKS   = 9;                  // clocks per BCLK period
-    localparam FRAME_CLKS  = 64 * BCLK_CLKS;     // 576 clocks per I2S frame
-    localparam FRAME_HZ    = CLK_HZ / FRAME_CLKS; // 46875
+    localparam FRAME_CLKS  = 563;                // the longer of 562 / 563
+    localparam FRAME_HZ    = 48000;
     localparam TONE_HZ     = 1000;               // 1 kHz test tone
     localparam TONE_FRAMES = 2000;               // window for the tone check
 
@@ -35,6 +31,14 @@ module tb_sound;
     reg reset = 1'b1;
     reg spkr_pulse = 1'b0;
     reg test_tone_enable = 1'b0;
+
+    // ce_1m as clk_gen makes it (the filter's high-passes run on it)
+    reg [7:0] ce_acc = 8'd0;
+    reg       ce_1m  = 1'b0;
+    always @(posedge clk) begin
+        ce_1m  <= (ce_acc + 8'd5 >= 8'd132);
+        ce_acc <= (ce_acc + 8'd5 >= 8'd132) ? ce_acc + 8'd5 - 8'd132 : ce_acc + 8'd5;
+    end
 
     always #5 clk = ~clk;   // 10 ns period => 27 MHz
 
@@ -44,6 +48,9 @@ module tb_sound;
     sound_generator u_dut (
         .clk              (clk),
         .reset            (reset),
+        .ce_1m            (ce_1m),
+        .mock_left        (16'sd0),
+        .mock_right       (16'sd0),
         .spkr_pulse       (spkr_pulse),
         .test_tone_enable (test_tone_enable),
         .i2s_bclk         (i2s_bclk),
@@ -122,7 +129,7 @@ module tb_sound;
         cyc = cyc + 1;
 
         if (i2s_bclk && !bclk_q) begin
-            if (bclk_last_rise >= 0) begin
+            if (bclk_last_rise >= 0 && cyc > 2000) begin   // the frame after reset starts mid-way
                 bclk_periods = bclk_periods + 1;
                 if (($time / 10 - bclk_last_rise) < bclk_min)
                     bclk_min = $time / 10 - bclk_last_rise;
@@ -134,7 +141,7 @@ module tb_sound;
         bclk_q <= i2s_bclk;
 
         if (lrck_q && !i2s_lrck) begin
-            if (lrck_last_fall >= 0) begin
+            if (lrck_last_fall >= 0 && cyc > 2000) begin
                 lrck_frames = lrck_frames + 1;
                 if (($time / 10 - lrck_last_fall) < frame_min)
                     frame_min = $time / 10 - lrck_last_fall;
@@ -158,8 +165,8 @@ module tb_sound;
 
     initial begin
         $display("== tb_sound: I2S frame rate and bit timing ==");
-        $display("   expecting BCLK %0d clk, frame %0d clk, %0d Hz, tone %0d Hz",
-                 BCLK_CLKS, FRAME_CLKS, FRAME_HZ, TONE_HZ);
+        $display("   expecting BCLK 8-9 clk, frame 562/563 clk, %0d Hz, tone %0d Hz",
+                 FRAME_HZ, TONE_HZ);
 
         repeat (4) @(posedge clk);
         reset = 1'b0;
@@ -174,15 +181,21 @@ module tb_sound;
             $display("FAIL: no BCLK rising edges observed");
             errors = errors + 1;
         end
-        expect_eq("BCLK period (clocks)", bclk_min, BCLK_CLKS);
-        expect_eq("BCLK period (clocks)", bclk_max, BCLK_CLKS);
+        expect_eq("shortest BCLK period (clocks)", bclk_min, 8);
+        expect_eq("longest BCLK period (clocks)", bclk_max, 9);
 
         if (lrck_frames == 0) begin
             $display("FAIL: no frame boundaries observed");
             errors = errors + 1;
         end
-        expect_eq("frame interval (clocks)", frame_min, FRAME_CLKS);
-        expect_eq("frame interval (clocks)", frame_max, FRAME_CLKS);
+        expect_eq("shortest frame (clocks)", frame_min, 562);
+        expect_eq("longest frame (clocks)", frame_max, 563);
+        begin : rate
+            integer f0;
+            f0 = lrck_frames;
+            repeat (1125 * 40) @(posedge clk);
+            expect_eq("frames in 45000 clocks", lrck_frames - f0, 80);
+        end
 
         if (pa_en !== 1'b1) begin
             $display("FAIL: pa_en = %b, expected 1", pa_en);
@@ -201,8 +214,6 @@ module tb_sound;
         errors = errors + pt_bad;
 
         // ---- part 2: 1 kHz tone really is 1 kHz ------------------------
-        // A wrong frame rate here is the user-visible symptom: top.v
-        // resamples this to 48 kHz, so 42187.5 Hz in => ~900 Hz out.
         tone_counting = 1'b1;
         repeat (FRAME_CLKS * TONE_FRAMES) @(posedge clk);
         tone_counting = 1'b0;
@@ -237,10 +248,8 @@ module tb_sound;
         end
 
         if (errors == 0) begin
-            $display("PASS: BCLK period is %0d clocks (%0d MHz)", bclk_min,
-                     CLK_HZ / 1000000 / BCLK_CLKS);
-            $display("PASS: frame interval is %0d clocks = %0d Hz, not 42187.5 Hz",
-                     frame_min, FRAME_HZ);
+            $display("PASS: BCLK period %0d-%0d clocks", bclk_min, bclk_max);
+            $display("PASS: frames %0d/%0d clocks, 48 kHz", frame_min, frame_max);
             $display("PASS: data changes on BCLK falling edge (I2S)");
             $display("PASS: pa_en held high");
             $display("PASS: %0d PT8211 words latched, all +/-12000", pt_words);

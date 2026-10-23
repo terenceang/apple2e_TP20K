@@ -30,6 +30,7 @@ sources:
   - src/colorbar_gen.v
   - src/input_controller.v
   - src/sound_generator.v
+  - src/audio_filter.v
   - src/serial_debugger.v
   - src/hdmi/hdmi_tmds_encoder.v
   - src/hdmi/hdmi_packet_ecc.v

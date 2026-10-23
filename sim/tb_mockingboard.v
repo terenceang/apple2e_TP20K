@@ -157,12 +157,12 @@ module tb_mockingboard;
         // 1. Initialize VIA 1 (Left, $C400)
         bus_write(16'hC402, 8'h07); // DDRB = bits [2:0] outputs
         bus_write(16'hC403, 8'hFF); // DDRA = all outputs
-        bus_write(16'hC400, 8'h00); // Standard Apple II inactive bus (PB2=0)
+        bus_write(16'hC400, 8'h00); // PB2=0: reset the AY, as software does
 
         // 2. Initialize VIA 2 (Right, $C480)
         bus_write(16'hC482, 8'h07); // DDRB = bits [2:0] outputs
         bus_write(16'hC483, 8'hFF); // DDRA = all outputs
-        bus_write(16'hC480, 8'h00); // Standard Apple II inactive bus (PB2=0)
+        bus_write(16'hC480, 8'h00); // PB2=0: reset the AY, as software does
 
         // 2b. Verify Timer 1 decrements on Slot 4 without prior timer configuration
         begin : test_timer_countdown
@@ -182,6 +182,13 @@ module tb_mockingboard;
         psg_write(16'hC480, 4'h8, 8'h0D); // Channel A Amplitude = 13 on Right PSG
         psg_read(16'hC480, 4'h8, rval);
         check("Mockingboard PSG 2 detection readback matches 0x0D", rval == 8'h0D);
+
+        // PB2 low is the AY's /RESET: its registers clear
+        bus_write(16'hC480, 8'h00);
+        psg_read(16'hC480, 4'h8, rval);
+        check("Port B $00 (PB2 low) resets PSG 2", rval == 8'h00);
+        psg_read(16'hC400, 4'h8, rval);
+        check("and leaves PSG 1 alone", rval == 8'h0B);
 
         // 4. Configure Distinct Audio on Left and Right (True Stereo)
         // Left PSG: Tone A with fast period 6
@@ -243,6 +250,18 @@ module tb_mockingboard;
         bus_read(16'hC404, rval);
         #100;
         check("Mockingboard card clears /IRQ after reading T1C_L", irq_n == 1'b1);
+
+        // 7. An IFR write in the clock Timer 1 expires must not lose its flag:
+        // write IFR (clearing only T2) on every clock across a one-shot expiry
+        bus_write(16'hC40B, 8'h00);   // one-shot
+        bus_write(16'hC404, 8'h10);
+        bus_write(16'hC405, 8'h00);   // T1 = 16, armed
+        @(posedge clk);
+        addr = 16'hC40D; din = 8'h20; cpu_we = 1'b1; bus_cycle = 1'b1; iosel_n = 1'b0;
+        repeat (26 * 24) @(posedge clk);
+        cpu_we = 1'b0; bus_cycle = 1'b0; iosel_n = 1'b1;
+        bus_read(16'hC40D, rval);
+        check("Timer 1 flag survives an IFR write in its expiry clock", rval[6] == 1'b1);
 
         if (fails == 0)
             $display("tb_mockingboard: PASS (%0d checks)", checks);
