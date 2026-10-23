@@ -94,6 +94,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $root 'roms\disk2_p6.hex'))) {
     $disk2Defines = @('-DDSK2_NO_P6_ROM')
     Write-Host "== no roms\disk2_p6.hex: the card's `$C600 stays zero (INTCXROM boots DOS anyway)"
 }
+# The Super Serial Card's firmware likewise (slot 1 reads zeros without it)
+if (-not (Test-Path -LiteralPath (Join-Path $root 'roms\ssc.hex'))) {
+    $disk2Defines += @('-DSSC_NO_ROM')
+}
 
 # What apple2_core instantiates, hand-made: the core, the CPU, the slot bus, the
 # memory, the slot-6 card, the slot-4 Mockingboard card, the slot-2 SoftCard and the slot-7 hard disk.  tb_cpu_trace and
@@ -103,8 +107,9 @@ $disk2 = @('src/disk2/disk2_card.v', 'src/disk2/disk2_store.v')
 $mockingboard = @('src/mockingboard/mockingboard_card.v', 'src/mockingboard/via6522.v', 'src/mockingboard/ay8910.v')
 $softcard = @('src/softcard.v', 'src/z80/tv80_core.v', 'src/z80/tv80_alu.v', 'src/z80/tv80_mcode.v', 'src/z80/tv80_reg.v')
 $core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v',
-           'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v', 'src/thunderclock.v') + $disk2 + $mockingboard + $softcard
+           'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v', 'src/thunderclock.v', 'src/ssc.v') + $disk2 + $mockingboard + $softcard
 Run-Tb 'tb_thunderclock' @('src/thunderclock.v')
+Run-Tb 'tb_ssc'          @('src/ssc.v') -Gen '2012' -Defines $disk2Defines
 # slot 7's firmware: the included .vh must match src/prodos_hd_rom.s, and the
 # firmware is run against a model of its registers (py65; the system Python,
 # not the OSS CAD Suite's, which has no py65).  Judged by exit code alone.

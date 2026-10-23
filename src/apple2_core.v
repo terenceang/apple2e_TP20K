@@ -71,6 +71,17 @@ module apple2_core (
     // ProDOS hard disk in slot 7 (src/prodos_hd.v); its DDR3 port goes to
     // aux_ram at the top level, shared there with the TF card (src/sd_vol.v),
     // which also takes the block write-backs.
+    // Super Serial Card in slot 1 (src/ssc.v): its line, through the USB link
+    input  wire [7:0]  ssc_rx_data,
+    input  wire        ssc_rx_valid,
+    input  wire [1:0]  ssc_lines,
+    output wire        ssc_tx_req,
+    output wire [7:0]  ssc_tx_byte,
+    input  wire        ssc_tx_ack,
+    output wire        ssc_st_req,
+    output wire [7:0]  ssc_st_byte,
+    input  wire        ssc_st_ack,
+
     input  wire [1:0]  hd_present,
     output wire        hd_go,
     output wire [24:0] hd_addr,
@@ -381,6 +392,9 @@ module apple2_core (
     wire [7:0]  hd_io_data;
     wire [7:0]  tc_rom_data;
     wire [7:0]  tc_io_data;
+    wire [7:0]  ssc_rom_data;
+    wire [7:0]  ssc_io_data;
+    wire        ssc_irq_n;
     wire        d2_any_disk;    // a Disk ][ drive holds an image (gates the $C600 ROM)
     wire [6:0]  card_present;
     // A byte per card, so 56 bits wide, not 7:
@@ -388,6 +402,7 @@ module apple2_core (
     // Slot 5 (index 4) is the clock.
     // Slot 6 (index 5) is the Disk ][.
     // Slot 7 (index 6) is the ProDOS hard disk.
+    // Slot 1 (index 0) is the Super Serial Card.
     wire [55:0] card_data;
     assign card_data = ({48'd0, hd_rom_data} << (6 * 8)) |
                        // no disk in either drive: slot 6 reads as empty (the
@@ -395,7 +410,8 @@ module apple2_core (
                        // falls into BASIC
                        ({48'd0, d2_any_disk ? d2_rom_data : vram_data} << (5 * 8)) |
                        ({48'd0, tc_rom_data} << (4 * 8)) |
-                       ({48'd0, mock_rom_data} << (3 * 8));
+                       ({48'd0, mock_rom_data} << (3 * 8)) |
+                       {48'd0, ssc_rom_data};
 
     // The card's registers are on the $C0Ex bus, which the read mux claims
     // after the motherboard's own $C0xx addresses and before the $00 an
@@ -415,7 +431,7 @@ module apple2_core (
     wire        mock_devsel_n = !((effective_cpu_addr[15:8] == 8'hC0) &&
                                   (effective_cpu_addr[7:4] == 4'hC));
 
-    wire [6:0]  card_irq_n = {1'b1, 1'b1, 1'b1, mock_irq_n, 1'b1, 1'b1, 1'b1};
+    wire [6:0]  card_irq_n = {1'b1, 1'b1, 1'b1, mock_irq_n, 1'b1, 1'b1, ssc_irq_n};
 
     slot_bus u_slot_bus (
         .clk(clk),
@@ -426,7 +442,7 @@ module apple2_core (
         .slotc3rom(slotc3rom),
         .intc8rom(intc8rom),
         .card_present(card_present),
-        .card_exprom(7'b1000000), // slot 7's SmartPort lives in $C800 (prodos_hd_rom.s)
+        .card_exprom(7'b1000001), // slot 7's SmartPort lives in $C800 (prodos_hd_rom.s), and slot 1's SSC firmware
         .card_data(card_data),
         .int_in_n(1'b1),
         .card_irq_n(card_irq_n),
@@ -595,6 +611,8 @@ module apple2_core (
                 cpu_din_comb = hd_io_data;      // slot 7, $C0F0-$C0FF
             end else if (effective_cpu_addr[7:4] == 4'hD) begin
                 cpu_din_comb = tc_io_data;      // slot 5, $C0D0-$C0DF
+            end else if (effective_cpu_addr[7:4] == 4'h9) begin
+                cpu_din_comb = ssc_io_data;     // slot 1, $C090-$C09F
             end else if (!mock_devsel_n) begin
                 // Mockingboard alternate I/O registers at $C0C0-$C0CF
                 cpu_din_comb = mock_rom_data;
@@ -656,7 +674,32 @@ module apple2_core (
     wire [7:0]  d2_qtr;
     wire [1:0]  d2_drv_present, d2_drv_writable;
 
-    assign card_present = 7'b1111000;   // slot 7 (bit 6): ProDOS hard disk, slot 6 (bit 5): the Disk ][, slot 5 (bit 4): clock, slot 4 (bit 3): Mockingboard
+    assign card_present = 7'b1111001;   // slot 7 (bit 6): ProDOS hard disk, slot 6 (bit 5): the Disk ][, slot 5 (bit 4): clock, slot 4 (bit 3): Mockingboard, slot 1 (bit 0): Super Serial Card
+
+    // ------------------------------------------------------------------
+    // Super Serial Card, slot 1 (its line is the page's modem)
+    // ------------------------------------------------------------------
+    ssc u_ssc (
+        .clk(clk),
+        .reset(reset),
+        .bus_cycle(cpu_go),
+        .cpu_we(cpu_we),
+        .addr(effective_cpu_addr),
+        .din(cpu_dout),
+        .devsel_n(devsel_n[0]),
+        .io_data(ssc_io_data),
+        .rom_data(ssc_rom_data),
+        .irq_n(ssc_irq_n),
+        .rx_data(ssc_rx_data),
+        .rx_valid(ssc_rx_valid),
+        .lines(ssc_lines),
+        .tx_req(ssc_tx_req),
+        .tx_byte(ssc_tx_byte),
+        .tx_ack(ssc_tx_ack),
+        .st_req(ssc_st_req),
+        .st_byte(ssc_st_byte),
+        .st_ack(ssc_st_ack)
+    );
     wire [7:0]  d2_dbg_head;
     assign debug_dsk_head = d2_dbg_head;
 

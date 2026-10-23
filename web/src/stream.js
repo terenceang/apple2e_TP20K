@@ -59,6 +59,7 @@ export class AppleStream {
     this.mode = 'console' // console | debugger
 
     this.cr = false // saw CR, so the next LF is part of the same line ending
+    this.sscNext = 0 // a 1E/1F marker was the last byte: the next is the card's
     this.afterPrompt = false // just emitted a prompt, so eat its trailing space
 
     // screen frame accumulation
@@ -86,6 +87,20 @@ export class AppleStream {
   }
 
   char(b) {
+    // The Super Serial Card's line (src/serial_debugger.v): 1E <byte> is a
+    // byte the Apple sent through slot 1, 1F <st> its DTR (bit 6) and baud
+    // (bits 3:0).  Nothing else the board sends is 1E or 1F, and a raw sector
+    // transfer does not come through here (disk.js takes the link for it).
+    if (this.sscNext) {
+      const k = this.sscNext
+      this.sscNext = 0
+      this.emit(k === 0x1e ? { t: 'ssc', b } : { t: 'sscst', dtr: Boolean(b & 0x40), baud: b & 15 })
+      return
+    }
+    if (b === 0x1e || b === 0x1f) {
+      this.sscNext = b
+      return
+    }
     if (b === 0x0d) {
       this.cr = true
       this.endLine()

@@ -23,6 +23,7 @@ sources:
   - src/disk2/disk2_store.v
   - src/prodos_hd.v
   - src/thunderclock.v
+  - src/ssc.v
   - src/spi_byte.v
   - src/sd_vol.v
   - src/apple2_core.v

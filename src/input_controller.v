@@ -17,6 +17,11 @@
 //                            (W = day of week, 0 = Sunday).  Digits, not BCD
 //                            bytes, so the payload can never hold 0x02 (the
 //                            debugger toggle) or another packet leader
+//   0xFF 0x06 <hi> <lo>      a byte for the Super Serial Card (slot 1) from the
+//                            page's modem: hi = 0xA0 | byte[7:4], lo = 0xB0 |
+//                            byte[3:0], so the payload is never 0x02, never a
+//                            packet leader and never echoed as console text
+//   0xFF 0x07 <l>            the modem's lines: l = 0xC0 | {DSR, DCD}
 //   0x1B '[' A|B|C|D         cursor keys, mapped to 0x0B/0x0A/0x15/0x08
 //   anything else            a single ASCII keystroke
 //
@@ -54,7 +59,12 @@ module input_controller (
 
     // Slot 5 clock (src/thunderclock.v)
     output reg         clk_set = 1'b0,
-    output reg  [51:0] clk_time = 52'd0  // BCD {YY, MO, DD, W, HH, MI, SS}
+    output reg  [51:0] clk_time = 52'd0, // BCD {YY, MO, DD, W, HH, MI, SS}
+
+    // Slot 1 Super Serial Card (src/ssc.v): bytes and lines from the page's modem
+    output reg  [7:0]  ssc_rx_data = 8'd0,
+    output reg         ssc_rx_valid = 1'b0,
+    output reg  [1:0]  ssc_lines = 2'b00  // {DSR, DCD}, 1 = asserted
 );
 
     // 1 Mbps baud receiver at 27 MHz; the divisor is src/uart_defs.vh
@@ -183,6 +193,9 @@ module input_controller (
     localparam PKT_KEY_BTN= 4'd9;
     localparam PKT_RST_BTN= 4'd10;
     localparam PKT_CLK    = 4'd11;
+    localparam PKT_SSC_HI = 4'd12;
+    localparam PKT_SSC_LO = 4'd13;
+    localparam PKT_SSC_LN = 4'd14;
     reg [3:0] clk_n = 4'd0;            // clock digits still to come
 
     reg [3:0] pkt_state = PKT_NORMAL;
@@ -243,6 +256,7 @@ module input_controller (
             joy_pdl1  <= 8'd128;
         end else begin
             clk_set <= 1'b0;
+            ssc_rx_valid <= 1'b0;
             // Clear keyboard strobe on $C010 access
             if ((io_read || io_write) && (io_addr == 8'h10)) begin
                 kbd_data[7] <= 1'b0;
@@ -322,7 +336,11 @@ module input_controller (
                         else if (urx_byte == 8'h05) begin
                             clk_n     <= 4'd12;
                             pkt_state <= PKT_CLK;
-                        end else begin
+                        end else if (urx_byte == 8'h06)
+                            pkt_state <= PKT_SSC_HI;
+                        else if (urx_byte == 8'h07)
+                            pkt_state <= PKT_SSC_LN;
+                        else begin
                             if (urx_byte == 8'h04) akd <= 1'b0; // all keys up
                             pkt_state <= PKT_NORMAL;
                         end
@@ -376,6 +394,22 @@ module input_controller (
                             clk_set   <= 1'b1;
                             pkt_state <= PKT_NORMAL;
                         end
+                    end
+
+                    // FF 06 <A0|hi> <B0|lo>: a byte for the serial card
+                    PKT_SSC_HI: begin
+                        ssc_rx_data[7:4] <= urx_byte[3:0];
+                        pkt_state <= PKT_SSC_LO;
+                    end
+                    PKT_SSC_LO: begin
+                        ssc_rx_data[3:0] <= urx_byte[3:0];
+                        ssc_rx_valid <= 1'b1;
+                        pkt_state <= PKT_NORMAL;
+                    end
+                    // FF 07 <C0|lines>
+                    PKT_SSC_LN: begin
+                        ssc_lines <= urx_byte[1:0];
+                        pkt_state <= PKT_NORMAL;
                     end
 
                     default: pkt_state <= PKT_NORMAL;

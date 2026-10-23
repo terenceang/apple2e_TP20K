@@ -119,6 +119,8 @@ keystroke, so a Bluetooth-to-UART module or `picocom` still works.
 | `FF 01 <btns> <x> <y>` | gamepad: buttons, paddle 0, paddle 1 |
 | `FF 03 <b>` | the RESET key: bit 3 = held, bits 0-2 = the paddle buttons (sent only with CONTROL down) |
 | `FF 04` | all keys up: drops any-key-down (`$C010` bit 7) |
+| `FF 06 <A0\|hi> <B0\|lo>` | a byte for the slot 1 Super Serial Card from the page's modem (`encodeSscBytes`): the payload is never `02`, a packet leader or echoed text |
+| `FF 07 <C0\|lines>` | the modem's lines: bit 0 carrier (DCD), bit 1 DSR (`encodeModemLines`) |
 | `FF 05 <13 digits>` | set the slot 5 clock: ASCII `YYMMDDWHHMMSS`, local time, W = day of week (0 = Sunday). The page sends it on every connect (`encodeClock`). Digits, not BCD bytes, so the payload can never contain `02` |
 | `1B 5B 41/42/43/44` | ANSI cursor keys, mapped to `$0B/$0A/$15/$08` |
 | anything else | a single ASCII keystroke, with CR/LF and DEL normalised |
@@ -293,3 +295,25 @@ bug and the dropped 8N1 were found.
   that is the whole of the machine's game input.
 - **Flash buttons.** Programming runs Gowin's `programmer_cli`, and the browser
   cannot start a subprocess. Use `make flash-sram` / `make flash` from a terminal.
+
+## The modem (slot 1 Super Serial Card)
+
+Slot 1 is a Super Serial Card whose serial line is this USB link, and the page
+is the modem on it (`src/modem.js`, the **Modem** pane).  The Apple's comm
+program types Hayes commands at the card as usual: `AT`, `E` `V` `Q` `H` `Z`
+`&F` `I` `O` `S`, `&C`/`&D`, `A/`, `+++` with a second of quiet each side, and
+DTR off hangs up.  `ATDT host:port` dials a telnet BBS through a **WebSocket
+gateway** set in the pane (`{host}` and `{port}` are filled in), because a page
+cannot open a TCP socket itself; `ATDT ws://...` or `wss://...` dials a
+WebSocket directly with no telnet layer; `ATDT LOOP` is a loopback.  The
+telnet layer answers option negotiation (DO/WILL ECHO and SGA, refuses the
+rest) and doubles an outgoing `FF`.  Results are words or digits (`ATV0`),
+`CONNECT` with the Apple's own baud, and bytes go to the Apple paced at that
+baud so the card's 64-byte FIFO never overflows.
+
+On the wire, the board frames the card's line into the console stream: `1E
+<byte>` is a byte the Apple sent, `1F <st>` its DTR (bit 6) and baud code (bits
+3-0); `stream.js` turns them into `ssc` and `sscst` events.  The other way is
+`FF 06` and `FF 07` above.  `test/modem.test.js` covers the command set, the
+loopback, a gateway dial with telnet negotiation, pacing at 300 baud, and the
+framing.

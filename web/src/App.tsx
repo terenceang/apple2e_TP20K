@@ -9,6 +9,7 @@ import { DebuggerPane } from './components/DebuggerPane'
 import { Gamepad } from './components/Gamepad'
 import { FlashBar } from './components/FlashBar'
 import { DiskPane } from './components/DiskPane'
+import { ModemPane } from './components/ModemPane'
 
 import {
   PREF_CONSOLE,
@@ -16,6 +17,7 @@ import {
   PREF_SCREEN,
   PREF_PADDLES,
   PREF_DISKS,
+  PREF_MODEM,
   getSavedBool,
   setSavedBool,
 } from './prefs.js'
@@ -34,6 +36,7 @@ export default function App() {
   const [showDebugger, setShowDebuggerState] = useState(() => getSavedBool(store, PREF_DEBUGGER, false))
   const [showPaddles, setShowPaddlesState] = useState(() => getSavedBool(store, PREF_PADDLES, true))
   const [showDisks, setShowDisksState] = useState(() => getSavedBool(store, PREF_DISKS, true))
+  const [showModem, setShowModemState] = useState(() => getSavedBool(store, PREF_MODEM, false))
 
   // One persistence wrapper; the five toggles differ only in key and setter.
   const useToggle = (
@@ -56,6 +59,7 @@ export default function App() {
   const setShowDebugger = useToggle(PREF_DEBUGGER, setShowDebuggerState)
   const setShowPaddles = useToggle(PREF_PADDLES, setShowPaddlesState)
   const setShowDisks = useToggle(PREF_DISKS, setShowDisksState)
+  const setShowModem = useToggle(PREF_MODEM, setShowModemState)
 
   // Ctrl+B is the debugger toggle. Automatically reveal the debugger pane when engaged.
   useEffect(() => {
@@ -127,11 +131,13 @@ export default function App() {
         showDebugger={showDebugger}
         showPaddles={showPaddles}
         showDisks={showDisks}
+        showModem={showModem}
         onToggleScreen={() => setShowScreen((s) => !s)}
         onToggleConsole={() => setShowConsole((s) => !s)}
         onToggleDebugger={() => setShowDebugger((s) => !s)}
         onTogglePaddles={() => setShowPaddles((s) => !s)}
         onToggleDisks={() => setShowDisks((s) => !s)}
+        onToggleModem={() => setShowModem((s) => !s)}
         onSerial={apple.connectSerial}
         onSerialNoVerify={apple.connectWithoutVerify}
         onDisconnect={apple.disconnect}
@@ -176,6 +182,16 @@ export default function App() {
         )}
 
         <div className="col-right">
+          {showModem && (
+            <ModemPane
+              status={apple.modemStatus}
+              log={apple.modemLog}
+              gateway={apple.modemGateway}
+              onGateway={apple.setModemGateway}
+              onHangup={apple.modemHangup}
+              onClose={() => setShowModem(false)}
+            />
+          )}
           {showDebugger && (
             <DebuggerPane
               mode={apple.mode}

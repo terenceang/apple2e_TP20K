@@ -68,6 +68,26 @@ export function encodeClock(d) {
   return Uint8Array.from([GAMEPAD_HDR, 0x05, ...Array.from(s, (c) => c.charCodeAt(0))])
 }
 
+/**
+ * Bytes for the slot 1 Super Serial Card (src/ssc.v) from the page's modem:
+ * FF 06 <A0|hi> <B0|lo> each, so no payload byte is ever 0x02 (the debugger
+ * toggle), a packet leader, or text the console would echo.
+ *
+ * @param {ArrayLike<number>} bytes
+ */
+export function encodeSscBytes(bytes) {
+  const out = new Uint8Array(bytes.length * 4)
+  for (let i = 0; i < bytes.length; i++) {
+    out.set([GAMEPAD_HDR, 0x06, 0xa0 | (bytes[i] >> 4), 0xb0 | (bytes[i] & 15)], i * 4)
+  }
+  return out
+}
+
+/** The modem's lines to the card: FF 07 <C0 | DSR<<1 | DCD>. */
+export function encodeModemLines(dcd, dsr) {
+  return Uint8Array.from([GAMEPAD_HDR, 0x07, 0xc0 | (dsr ? 2 : 0) | (dcd ? 1 : 0)])
+}
+
 /** A gamepad packet: PB0/PB1/PB2 in the low three bits, then two paddles. */
 export function encodeGamepad(buttons, x, y) {
   return Uint8Array.from([

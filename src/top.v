@@ -166,6 +166,12 @@ module top (
     wire        store80;
     wire        vbl;
 
+    // The Super Serial Card's line (slot 1, src/ssc.v): the page's modem, in
+    // and out over the USB link
+    wire [7:0] ssc_rx_data, ssc_tx_byte, ssc_st_byte;
+    wire       ssc_rx_valid, ssc_tx_req, ssc_tx_ack, ssc_st_req, ssc_st_ack;
+    wire [1:0] ssc_lines;
+
     serial_debugger u_debugger (
         .clk(clk_pixel),
         .reset(sys_reset),
@@ -173,6 +179,8 @@ module top (
         .uart_tx(uart_tx),
         .rx_byte(rx_byte),
         .rx_valid(rx_valid),
+        .ssc_tx_req(ssc_tx_req), .ssc_tx_byte(ssc_tx_byte), .ssc_tx_ack(ssc_tx_ack),
+        .ssc_st_req(ssc_st_req), .ssc_st_byte(ssc_st_byte), .ssc_st_ack(ssc_st_ack),
         .dbg_mode(dbg_mode),
         .cpu_rdy(cpu_rdy),
         .cpu_reset_req(cpu_reset_req),
@@ -231,7 +239,8 @@ module top (
         .key_strobe(key_strobe),
         .kbd_reset(kbd_reset),
         .clk_set(clk_set),
-        .clk_time(clk_time)
+        .clk_time(clk_time),
+        .ssc_rx_data(ssc_rx_data), .ssc_rx_valid(ssc_rx_valid), .ssc_lines(ssc_lines)
     );
 
     // Apple //e Core (CPU, Memory, Softswitches)
@@ -395,6 +404,9 @@ module top (
         .dsk_store_we(dsk_store_we), .dsk_store_wdata(dsk_store_wdata),
         .dsk_store_rdata(dsk_store_rdata), .dsk_store_ack(dsk_store_ack),
         .dsk_store_idle(dsk_store_idle),
+        .ssc_rx_data(ssc_rx_data), .ssc_rx_valid(ssc_rx_valid), .ssc_lines(ssc_lines),
+        .ssc_tx_req(ssc_tx_req), .ssc_tx_byte(ssc_tx_byte), .ssc_tx_ack(ssc_tx_ack),
+        .ssc_st_req(ssc_st_req), .ssc_st_byte(ssc_st_byte), .ssc_st_ack(ssc_st_ack),
         .hd_present(hd_present),
         .hd_go(core_hd_go), .hd_addr(core_hd_addr), .hd_we(core_hd_we), .hd_be(core_hd_be),
         .hd_wdata(core_hd_wdata), .hd_rdata(hd_rdata), .hd_ack(hd_m_ack && !hd_own_s),

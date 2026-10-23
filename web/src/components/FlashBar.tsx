@@ -11,11 +11,13 @@ interface Props {
   showDebugger: boolean
   showPaddles: boolean
   showDisks: boolean
+  showModem: boolean
   onToggleScreen: () => void
   onToggleConsole: () => void
   onToggleDebugger: () => void
   onTogglePaddles: () => void
   onToggleDisks: () => void
+  onToggleModem: () => void
   onSerial: () => void
   onSerialNoVerify?: () => void
   onDisconnect: () => void
@@ -38,11 +40,13 @@ export function FlashBar({
   showDebugger,
   showPaddles,
   showDisks,
+  showModem,
   onToggleScreen,
   onToggleConsole,
   onToggleDebugger,
   onTogglePaddles,
   onToggleDisks,
+  onToggleModem,
   onSerial,
   onSerialNoVerify,
   onDisconnect,
@@ -166,6 +170,15 @@ export function FlashBar({
           aria-pressed={showDisks}
         >
           Disks
+        </button>
+        <button
+          type="button"
+          className={'toggle-btn' + (showModem ? ' active' : '')}
+          onClick={onToggleModem}
+          title={showModem ? 'Hide the modem (slot 1 Super Serial Card)' : 'Show the modem (slot 1 Super Serial Card)'}
+          aria-pressed={showModem}
+        >
+          Modem
         </button>
       </div>
     </div>

@@ -39,6 +39,16 @@ module serial_debugger (
     input  wire [7:0]  rx_byte,
     input  wire        rx_valid,
 
+    // The Super Serial Card's line, framed into the console stream for the
+    // page's modem: 1E <byte> for a byte the Apple sent, 1F <st> for its DTR
+    // and baud.  Neither 1E nor 1F is anything else the console sends.
+    input  wire        ssc_tx_req,
+    input  wire [7:0]  ssc_tx_byte,
+    output reg         ssc_tx_ack = 1'b0,
+    input  wire        ssc_st_req,
+    input  wire [7:0]  ssc_st_byte,
+    output reg         ssc_st_ack = 1'b0,
+
     // Debug Mode Status (1: Debugger active, 0: Apple //e Console active)
     output reg         dbg_mode,
 
@@ -180,6 +190,8 @@ module serial_debugger (
             cout_prev_sync <= cpu_sync;
     end
 
+    reg [7:0] ssc_second = 8'd0;       // the byte after a 1E/1F marker
+    reg       ssc_second_pend = 1'b0;
     reg [7:0] cout_char_buf = 8'd0;
     reg       cout_pending  = 1'b0;
     reg       cout_need_lf  = 1'b0;
@@ -1216,11 +1228,23 @@ module serial_debugger (
                 default: main_state <= M_IDLE;
             endcase
 
-            // In Console Mode: stream Apple II COUT characters directly to UART TX
+            // In Console Mode: stream Apple II COUT characters directly to UART TX,
+            // and the serial card's line between them
+            ssc_tx_ack <= 1'b0;
+            ssc_st_ack <= 1'b0;
             if (!dbg_mode && (main_state == M_IDLE) && !tx_fifo_full && !rx_valid) begin
-                if (cout_need_lf) begin
+                if (ssc_second_pend) begin
+                    fifo_push(ssc_second);
+                    ssc_second_pend <= 1'b0;
+                end else if (cout_need_lf) begin
                     fifo_push(8'h0A); // '\n'
                     cout_need_lf <= 1'b0;
+                end else if (ssc_st_req && !ssc_st_ack) begin
+                    fifo_push(8'h1F);
+                    ssc_second <= ssc_st_byte; ssc_second_pend <= 1'b1; ssc_st_ack <= 1'b1;
+                end else if (ssc_tx_req && !ssc_tx_ack) begin
+                    fifo_push(8'h1E);
+                    ssc_second <= ssc_tx_byte; ssc_second_pend <= 1'b1; ssc_tx_ack <= 1'b1;
                 end else if (cout_pending) begin
                     cout_pending <= 1'b0;
                     if (cout_char_buf[6:0] == 7'h0D) begin

@@ -1508,3 +1508,9 @@ button.opt-pill.selected {
 }
 .dlg-actions .btn-disk-action.secondary { margin-left: auto; }
 .btn-disk-action.danger { background: #5c2620; border-color: #7a3027; }
+
+/* the modem pane (slot 1 Super Serial Card) */
+.modem-status { padding: 4px 8px; font-family: var(--mono, monospace); }
+.modem-gateway { display: flex; flex-direction: column; gap: 2px; padding: 0 8px 6px; font-size: 0.85em; }
+.modem-gateway input { font-family: var(--mono, monospace); width: 100%; box-sizing: border-box; }
+.modem-log { max-height: 10em; }

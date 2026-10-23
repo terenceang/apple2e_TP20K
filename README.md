@@ -13,6 +13,7 @@ This project's code was written with AI assistance.
 - **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes, also answering as a SmartPort), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files. Floppies are **WOZ** files played bit by bit through a model of the controller's sequencer, so copy-protected originals, 13-sector disks and bit copiers work, and every write is kept exactly
 - **Clock** in slot 5 that ProDOS uses as a Thunderclock, so files get dated; the web page sets the time when it connects (there is no battery, so it is lost at power-off)
 - **Z-80 SoftCard** in slot 2 (Microsoft's, at its 2.045 MHz), for Apple CP/M; the Z80 takes the bus over from the 6502 as on the real card
+- **Super Serial Card** in slot 1 whose line is the USB link: the web page plays a **Hayes modem** on it (AT commands, `ATDT host:port` to a telnet BBS through a WebSocket gateway, `ATDT wss://...` direct, `ATDT LOOP` for a loopback), so ProTERM and other comm programs dial out from the Apple
 - **Keyboard, gamepad and debugger over USB serial** at 1 Mbps; the [browser front end](web/README.md) in `web/` has the keyboard, the text screen, the debugger and the disk drives
 - **Built-in hardware debugger**: Ctrl+B freezes the CPU to inspect registers, single-step and dump memory
 

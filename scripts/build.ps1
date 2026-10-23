@@ -41,17 +41,26 @@ foreach ($d in @('build\gowin','build\bitstream','build\logs')) {
     New-Item -ItemType Directory -Force -Path (Join-Path $root $d) | Out-Null
 }
 
-# The Disk II card's $C600 boot ROM is Apple copyright and is not distributed
-# (see roms/README.md), so it is loaded only if the user has put it there:
-# $readmemh is a hard error on a missing file, and a fresh clone must still
-# build.  With INTCXROM on, which is the reset default, the //e's own ROM at
-# $C600 boots a Disk II without it.  gw_sh has no command-line define, so
-# without the ROM the card file is built from a copy that starts with
-# `define DSK2_NO_P6_ROM.
-$p6cards = @('src/disk2/disk2_card.v')
-$noP6 = -not (Test-Path -LiteralPath (Join-Path $root 'roms\disk2_p6.hex'))
-if ($noP6) {
-    Write-Host "== no roms\disk2_p6.hex: the card's `$C600 stays zero (INTCXROM boots DOS anyway)"
+# Apple's card ROMs are copyright and are not distributed (see roms/README.md),
+# so each is loaded only if the user has put it there: $readmemh is a hard
+# error on a missing file, and a fresh clone must still build.  gw_sh has no
+# command-line define, so without a ROM its card file is built from a copy that
+# starts with that ROM's `define.  Without the Disk II's P6 ROM the //e's own
+# ROM at $C600 boots a Disk II anyway (INTCXROM is on at reset); without the
+# Super Serial Card's, slot 1 reads zeros and only software that drives its
+# 6551 directly can use it.
+$optRoms = @(
+    @{ Hex = 'roms\disk2_p6.hex'; Define = 'DSK2_NO_P6_ROM'; File = 'src/disk2/disk2_card.v';
+       Note = "the card's `$C600 stays zero (INTCXROM boots DOS anyway)" },
+    @{ Hex = 'roms\ssc.hex';      Define = 'SSC_NO_ROM';     File = 'src/ssc.v';
+       Note = "slot 1's Super Serial Card has no firmware (its 6551 still works)" }
+)
+$romDefine = @{}
+foreach ($r in $optRoms) {
+    if (-not (Test-Path -LiteralPath (Join-Path $root $r.Hex))) {
+        Write-Host "== no $($r.Hex): $($r.Note)"
+        $romDefine[$r.File] = $r.Define
+    }
 }
 
 $tcl = @(
@@ -59,10 +68,10 @@ $tcl = @(
     "set_device -name GW2A-18C GW2A-LV18PG256C8/I7"
 )
 foreach ($src in (& (Join-Path $PSScriptRoot 'sources.ps1'))) {
-    if ($noP6 -and ($p6cards -contains $src)) {
+    if ($romDefine.ContainsKey($src)) {
         $copy = "build/gowin/" + (Split-Path $src -Leaf)
         $body = Get-Content -Raw (Join-Path $root $src)
-        [System.IO.File]::WriteAllText((Join-Path $root $copy), "``define DSK2_NO_P6_ROM`n" + $body)
+        [System.IO.File]::WriteAllText((Join-Path $root $copy), "``define $($romDefine[$src])`n" + $body)
         $src = $copy
     }
     $tcl += "add_file $src"

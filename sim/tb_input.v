@@ -49,6 +49,13 @@ module tb_input;
     wire [51:0] clk_time;
     integer     clk_sets = 0;
     always @(posedge clk) if (clk_set) clk_sets = clk_sets + 1;
+    // the Super Serial Card's bytes and lines from the page's modem (FF 06, FF 07)
+    wire [7:0]  ssc_rx_data;
+    wire        ssc_rx_valid;
+    wire [1:0]  ssc_lines;
+    integer     ssc_n = 0;
+    reg  [7:0]  ssc_last = 8'h00;
+    always @(posedge clk) if (ssc_rx_valid) begin ssc_n = ssc_n + 1; ssc_last = ssc_rx_data; end
 
     wire [7:0] rx_byte;
     wire       rx_valid;
@@ -69,7 +76,10 @@ module tb_input;
         .key_strobe(key_strobe),
         .kbd_reset (kbd_reset),
         .clk_set   (clk_set),
-        .clk_time  (clk_time)
+        .clk_time  (clk_time),
+        .ssc_rx_data (ssc_rx_data),
+        .ssc_rx_valid(ssc_rx_valid),
+        .ssc_lines   (ssc_lines)
     );
 
     integer failures = 0;
@@ -285,6 +295,21 @@ module tb_input;
         ok(clk_time === {8'h26, 8'h10, 8'h22, 4'h4, 8'h13, 8'h45, 8'h07}, "FF 05 time is BCD YYMMDDWHHMMSS");
         reg_read(8'h00);
         ok(io_dout[7] === 1'b0, "the clock packet types nothing");
+
+        // FF 06 <A0|hi> <B0|lo>: a byte for the serial card, here $02 (the
+        // debugger toggle, which must never appear on the wire as it is)
+        send_byte(8'hFF); send_byte(8'h06); send_byte(8'hA0); send_byte(8'hB2);
+        send_byte(8'hFF); send_byte(8'h06); send_byte(8'hAF); send_byte(8'hBE);
+        repeat (SETTLE) @(posedge clk);
+        ok(ssc_n == 2 && ssc_last === 8'hFE, "FF 06 delivers serial card bytes ($02, then $FE)");
+        reg_read(8'h00);
+        ok(io_dout[7] === 1'b0, "serial card bytes type nothing");
+        send_byte(8'hFF); send_byte(8'h07); send_byte(8'hC3);
+        repeat (SETTLE) @(posedge clk);
+        ok(ssc_lines === 2'b11, "FF 07 sets carrier and DSR");
+        send_byte(8'hFF); send_byte(8'h07); send_byte(8'hC0);
+        repeat (SETTLE) @(posedge clk);
+        ok(ssc_lines === 2'b00, "FF 07 drops them");
 
         // ------------------------------------------------------------------
         // 3. Cursor keys

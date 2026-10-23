@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppleStream } from './stream.js'
-import { encodeClock, encodeGamepad, encodeKey, encodeKeysUp, encodeReset, CTRL_B, CMD } from './protocol.js'
+import { encodeClock, encodeGamepad, encodeKey, encodeKeysUp, encodeReset, encodeSscBytes, encodeModemLines, CTRL_B, CMD } from './protocol.js'
+import { Modem } from './modem.js'
 import { SerialLink, serialSupported, BAUD } from './serial-link.js'
 import { isLetter, resolve } from './keymap.js'
 import { PREF_AUTOCONNECT, getSavedBool, setSavedBool } from './prefs.js'
@@ -63,6 +64,8 @@ type AppleEvent =
   | { t: 'help' }
   | { t: 'prompt' }
   | { t: 'bell' }
+  | { t: 'ssc'; b: number }
+  | { t: 'sscst'; dtr: boolean; baud: number }
   | ({ t: 'regs' } & Regs)
   | ({ t: 'mem' } & MemLine)
   | ({ t: 'status' } & Status)
@@ -142,6 +145,45 @@ const IDLE: Conn = { state: 'idle', detail: null, transport: null, error: null }
 
 export function useApple() {
   const link = useRef<Link | null>(null)
+
+  // The Hayes modem behind slot 1's Super Serial Card (modem.js): the card's
+  // line is the USB link, so the modem lives here and dials out by WebSocket.
+  const GATEWAY_KEY = 'a2e.modemGateway'
+  const loadGateway = () => {
+    try { return (typeof localStorage !== 'undefined' && localStorage.getItem(GATEWAY_KEY)) || '' } catch { return '' }
+  }
+  const [modemGateway, setModemGatewayState] = useState(loadGateway)
+  const [modemStatus, setModemStatus] = useState('on hook')
+  const [modemLog, setModemLog] = useState<string[]>([])
+  const modem = useRef<Modem | null>(null)
+  const getModem = useCallback(() => {
+    if (!modem.current) {
+      modem.current = new Modem(
+        {
+          toApple: (b: number[]) => link.current?.write(encodeSscBytes(b)),
+          setLines: (dcd: boolean, dsr: boolean) => link.current?.write(encodeModemLines(dcd, dsr)),
+          connect: (url: string, h: { onOpen: () => void; onData: (b: Uint8Array) => void; onClose: () => void }) => {
+            const ws = new WebSocket(url)
+            ws.binaryType = 'arraybuffer'
+            ws.onopen = () => h.onOpen()
+            ws.onmessage = (ev) =>
+              h.onData(typeof ev.data === 'string' ? new TextEncoder().encode(ev.data) : new Uint8Array(ev.data as ArrayBuffer))
+            ws.onclose = () => h.onClose()
+            return {
+              send: (b: Uint8Array) => { if (ws.readyState === WebSocket.OPEN) ws.send(b) },
+              close: () => ws.close(),
+            }
+          },
+          log: (line: string) => {
+            setModemLog((l) => [...l, line].slice(-50))
+            setModemStatus(modem.current?.status ?? 'on hook')
+          },
+        },
+        { gateway: loadGateway() },
+      )
+    }
+    return modem.current
+  }, [])
   const stream = useRef(new AppleStream())
   const quiet = useRef<ReturnType<typeof setTimeout> | null>(null)
   const queue = useRef<number[]>([])
@@ -234,12 +276,24 @@ export function useApple() {
           case 'bell':
             // Counted only for the tests; the UI does not surface it.
             break
+          case 'ssc': {
+            const m = getModem()
+            m.fromApple(e.b)
+            setModemStatus(m.status)
+            break
+          }
+          case 'sscst': {
+            const m = getModem()
+            m.fromDte(e.dtr, e.baud)
+            setModemStatus(m.status)
+            break
+          }
           default:
             break
         }
       }
     },
-    [release, flushQuiet],
+    [release, flushQuiet, getModem],
   )
 
   useEffect(() => {
@@ -258,6 +312,7 @@ export function useApple() {
       void link.current?.close()
       link.current = l
       l.onBytes = onBytes
+      getModem().setCarrier()   // the modem is "on": DSR to the card
       l.onState = (s: SerialState) =>
         setConn({
           state: s.state,
@@ -266,7 +321,7 @@ export function useApple() {
           error: s.state === 'error' ? s.detail : null,
         })
     },
-    [onBytes],
+    [onBytes, getModem],
   )
 
   /**
@@ -535,6 +590,18 @@ export function useApple() {
   const clearDiskError = useCallback(() => setDiskError(null), [])
 
   const clearConsole = useCallback(() => setLines([]), [])
+
+  /** The WebSocket gateway ATDT host:port dials through; {host} and {port} are filled in. */
+  const setModemGateway = useCallback((url: string) => {
+    setModemGatewayState(url)
+    try { localStorage.setItem(GATEWAY_KEY, url) } catch { /* private mode */ }
+    getModem().gateway = url
+  }, [getModem])
+  const modemHangup = useCallback(() => {
+    const m = getModem()
+    m.hangup(true)
+    setModemStatus(m.status)
+  }, [getModem])
   const clearMem = useCallback(() => setMem([]), [])
 
   return useMemo(
@@ -573,6 +640,11 @@ export function useApple() {
       reconnect,
       clearConsole,
       clearMem,
+      modemGateway,
+      modemStatus,
+      modemLog,
+      setModemGateway,
+      modemHangup,
     }),
     [
       conn,
@@ -608,6 +680,11 @@ export function useApple() {
       reconnect,
       clearConsole,
       clearMem,
+      modemGateway,
+      modemStatus,
+      modemLog,
+      setModemGateway,
+      modemHangup,
     ],
   )
 }
