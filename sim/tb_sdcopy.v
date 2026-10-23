@@ -70,7 +70,7 @@ module tb_sdcopy;
         .clk(clk), .reset(reset), .ce_1m(1'b1), .uart_tx(),
         .rx_byte(rx_byte), .rx_valid(rx_valid),
         .dbg_mode(), .cpu_rdy(), .cpu_reset_req(),
-        .dbg_mem_addr(), .dbg_mem_din(8'h00), .dbg_mem_ready(1'b1), .dbg_aux(),
+        .dbg_mem_addr(), .dbg_mem_din(8'h00), .dbg_mem_ready(1'b1),
         .sd_mnt_go(mnt_go), .sd_mnt_drv(mnt_drv),
         .sd_stat({loading, busy, err, estage, fs_ok, 1'b0, fail, present}),
         .sd_x_go(x_go), .sd_x_lba(x_lba), .sd_x_zero(x_zero),
@@ -78,8 +78,8 @@ module tb_sdcopy;
         .sd_r_go(r_go), .sd_r_lba(r_lba), .sd_r_cnt(r_cnt), .sd_r_byte(r_byte),
         .sd_r_valid(r_valid), .sd_r_take(r_take), .sd_r_done(r_done), .sd_r_ok(r_ok),
         .cpu_pc(16'hFA62), .dsk_head(8'd0), .cpu_a(8'h00), .cpu_x(8'h00), .cpu_y(8'h00),
-        .cpu_s(8'hFF), .cpu_p(8'h20), .cpu_ir(8'h00), .cpu_addr(16'h0000), .cpu_dout(8'h00),
-        .cpu_we(1'b0), .cpu_sync(1'b0),
+        .cpu_s(8'hFF), .cpu_p(8'h20), .cpu_ir(8'h00), .cpu_addr(16'h0000),
+        .cpu_sync(1'b0),
         .text_mode(1'b1), .mixed_mode(1'b0), .page2(1'b0), .hires_mode(1'b0),
         .pll_locked(1'b1), .ddr_diag(32'd0)
     );

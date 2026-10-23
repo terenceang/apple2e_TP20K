@@ -79,7 +79,7 @@ module tb_p6boot;
         .dsk_store_go(dsk_go), .dsk_store_addr(dsk_addr), .dsk_store_we(dsk_we),
         .dsk_store_wdata(dsk_wdata), .dsk_store_rdata(dsk_rdata),
         .dsk_store_ack(dsk_ack), .dsk_store_idle(dsk_idle),
-        .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_aux(1'b0), .dbg_mem_ready(),
+        .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_mem_ready(),
         .img_up_go(1'b0), .img_up_drive(1'b0), .img_up_addr(18'd0), .img_up_data(8'd0),
         .img_up_last(1'b0), .img_up_bad(1'b0), .img_up_busy(), .img_up_done(),
         .img_dn_go(1'b0), .img_dn_drive(1'b0), .img_dn_addr(18'd0),

@@ -62,8 +62,8 @@ Press **Ctrl+B** to pause the CPU and enter the debugger; press it again (or `c`
 |-----|--------|
 | `r` | CPU registers (PC, A, X, Y, SP, P, opcode) |
 | `s` | Single-step one instruction |
-| `c` | Continue (also `g`) |
-| `m` | Dump 16 bytes of memory; `@hhhh` or `0 1 4 8 f v k j` set the address |
+| `c` | Continue |
+| `m` | Dump 16 bytes of memory; `@hhhh` or `0 1 4 8 f v` set the address |
 | `t` | Hardware status (video mode, PLL and DDR3) |
 | `w` | Dump the text page, and the graphics page in mixed mode |
 | `i` | What the drives hold, and the TF card's state |
@@ -107,6 +107,10 @@ Copying through the board runs at the serial link's speed, about 13 s for a flop
 | 3 | CPU memory write |
 | 4 | Text mode |
 | 5 | Keyboard strobe pending |
+
+### CP/M (Z-80 SoftCard)
+
+Slot 2 holds a Microsoft Z-80 SoftCard. Put a 16-sector SoftCard CP/M disk image (2.20 or 2.23) on the TF card as `S6D1` and boot it with `PR#6` (with a hard-disk volume in slot 7, the Autostart ROM boots that first). CP/M finds the card itself. The Z80 runs at the real card's 2.045 MHz and shares the Apple's memory and I/O, so the 6502 waits while it runs, as on the real card. Not yet tried on hardware.
 
 ## Web front end
 

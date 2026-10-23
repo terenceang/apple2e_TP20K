@@ -92,7 +92,6 @@ module top (
     wire [15:0] dbg_mem_addr;
     wire [7:0]  dbg_mem_din;
     wire        dbg_mem_ready;
-    wire        dbg_aux;
 
     // The image store's byte ports (inside the core), from sd_vol only: every
     // drive's disk is a file on the TF card, loaded and written back by it.
@@ -177,7 +176,6 @@ module top (
         .dbg_mem_addr(dbg_mem_addr),
         .dbg_mem_din(dbg_mem_din),
         .dbg_mem_ready(dbg_mem_ready),
-        .dbg_aux(dbg_aux),
         .sd_mnt_go(sd_mnt_go),
         .sd_mnt_drv(sd_mnt_drv),
         .sd_stat({hd_loading, hd_sd_busy, sd_err, sd_estage, sd_fs_ok, 1'b0, sd_fail, sd_present}),
@@ -194,8 +192,6 @@ module top (
         .cpu_p(debug_cpu_p),
         .cpu_ir(debug_cpu_ir),
         .cpu_addr(debug_cpu_addr),
-        .cpu_dout(debug_cpu_dout),
-        .cpu_we(debug_cpu_we),
         .cpu_sync(debug_cpu_sync),
         .text_mode(text_mode),
         .mixed_mode(mixed_mode),
@@ -407,7 +403,6 @@ module top (
         .dbg_mem_addr(dbg_mem_addr),
         .dbg_mem_din(dbg_mem_din),
         .dbg_mem_ready(dbg_mem_ready),
-        .dbg_aux(dbg_aux),
         .img_up_go(img_up_go),
         .img_up_drive(img_up_drive),
         .img_up_addr(img_up_addr),

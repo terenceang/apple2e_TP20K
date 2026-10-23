@@ -51,7 +51,7 @@ module tb_auxstress;
         .hd_present(2'b00), .hd_go(), .hd_addr(), .hd_we(), .hd_be(), .hd_wdata(),
         .hd_rdata(16'd0), .hd_ack(1'b0), .hd_wb_go(), .hd_wb_drv(), .hd_wb_blk(),
         .hd_rb_go(), .hd_rb_ok(1'b0), .hd_size0(16'd0), .hd_size1(16'd0), .hd_sd_busy(1'b0),
-        .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_aux(1'b0), .dbg_mem_ready(),
+        .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_mem_ready(),
         .img_up_go(1'b0), .img_up_drive(1'b0), .img_up_addr(18'd0), .img_up_data(8'd0),
         .img_up_last(1'b0), .img_up_bad(1'b0), .img_up_busy(), .img_up_done(),
         .img_dn_go(1'b0), .img_dn_drive(1'b0), .img_dn_addr(18'd0),

@@ -62,7 +62,7 @@ module tb_cpu_trace;
         .cpu_rdy(1'b1),
         .dbg_mem_addr(16'd0),
         .dbg_mem_din(),
-        .dbg_aux(1'b0), .dbg_mem_ready(),
+        .dbg_mem_ready(),
         .debug_cpu_pc(debug_cpu_pc),
         .debug_cpu_addr(debug_cpu_addr),
         .debug_cpu_dout(debug_cpu_dout),

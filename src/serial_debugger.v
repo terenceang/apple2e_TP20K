@@ -1,44 +1,29 @@
-// Apple //e Dual-Mode Serial Console & Hardware Debugger for Tang Primer 20K
-// Operates over 1 Mbps (1000000 baud) UART (Pin 69 TX, Pin 70 RX)
+// Apple //e serial console and hardware debugger, over the Dock's 1 Mbps
+// UART (src/uart_defs.vh).  The web page (web/) is its client.
 //
-// Modes:
-// 1. Console Mode (Default):
-//    - Mirrors all Apple //e screen/Monitor text output (COUT / $FDED) to UART TX.
-//    - Direct Apple II software UART output via writes to $C088 (Slot 1) or $C098 (Slot 2).
-//    - Pass-through keyboard input to Apple //e.
+// Console mode (the default): the Apple's COUT ($FDED) output goes up the
+// UART as text, and received printable bytes are echoed back.
 //
-// Debugger commands (Ctrl+B enters, Ctrl+B or 'c' leaves):
-//   r  registers, s  step one instruction, c/g  continue, m  16 bytes of memory
-//   t  video and PLL status, w  dump the visible text page and, in mixed
-//      mode, the graphics page behind the bottom four lines
-//   h/?  help, x  CPU reset, CR  repeat the prompt
-//   a  toggle aux RAM view: m and w then read the aux 64 KB (the dump prints
-//      ';' after the address, and w sets bit 7 of its flags byte)
-//   i  print the Disk ][ head ("H:hh") and the TF card: "S:ssss", src/sd_vol.v's state
-//      ({loading, busy, err, estage[2:0], fs_ok, 0, fail[3:0], present[3:0]};
-//      drives 0-1 are slot 6, 2-3 slot 7)
+// Debugger mode (Ctrl+B, 0x02, toggles it; the CPU is held while it is on):
+//   r  registers, s  step one instruction, c  continue, x  CPU reset
+//   m  16 bytes of memory; 0 1 4 8 f v first set the address ($0000 $0100
+//      $0400 $0800 $FA60 $FFF0) and dump, m then pages on by 16; @hhhh sets
+//      any address (the README's card timing: @c0f0 then m)
+//   t  video, PLL and the DDR3 diagnostic word, w  the displayed text page and
+//      lo-res rows 20-23 (the mixed-mode lines), ?  help (the page's handshake)
+//   i  the Disk ][ head ("H:hh") and the TF card: "S:ssss", src/sd_vol.v's
+//      state ({loading, busy, err, estage[2:0], fs_ok, 0, fail[3:0],
+//      present[3:0]}; drives 0-1 are slot 6, 2-3 slot 7)
 //   uhhhhhhhh  write TF card sectors from LBA hhhhhhhh: "UPLOAD HD", then
 //      records (01 + 512 bytes = the next sector, 00 hi lo = (hi:lo)+1 zero
 //      sectors, 02 = done), one 06 back per record once it is on the card,
 //      then "done" or "lost"
 //   bhhhhhhhhcccc  read cccc TF card sectors from LBA hhhhhhhh: "SECTORS",
 //      the raw bytes, then "done" (or "lost": past the card's end)
-//   Every drive's disk is a file on the TF card; there is no other way in.
 //   y1-y4  reload a drive (S6D1 S6D2 S7D1 S7D2) from A2CONFIG.TXT on the
 //      card, after its written floppy tracks are back on it; the load runs on
 //      after the prompt, so poll i until S says not busy
-//   k j  set the dump address to $E000 / $D000
-//   0 1 4 8 f v  set the memory dump address ($0000 $0100 $0400 $0800
-//      $FA60 $FFF0) before m
-// 2. Hardware Debugger Mode (Toggle with Ctrl+B / ASCII 0x02):
-//    - Freezes 65C02 CPU execution (RDY = 0).
-//    - Commands:
-//        r - Display CPU registers (PC, A, X, Y, SP, Flags, Opcode)
-//        s - Single-step 1 instruction
-//        c - Continue / Resume Apple //e execution
-//        m - Dump 16 bytes of memory (RAM/ROM) in hex & ASCII
-//        t - Display hardware status (Softswitches, Video, Audio, Clocks)
-//        h - Help menu
+//   Every drive's disk is a file on the TF card; there is no other way in.
 
 `include "src/uart_defs.vh"
 
@@ -64,8 +49,7 @@ module serial_debugger (
     // Memory Inspection Bus
     output reg  [15:0] dbg_mem_addr,
     input  wire [7:0]  dbg_mem_din,
-    input  wire        dbg_mem_ready,   // dbg_mem_din is valid (aux RAM answers slowly)
-    output reg         dbg_aux,         // read aux RAM instead of main
+    input  wire        dbg_mem_ready,   // dbg_mem_din is valid (LC RAM is in DDR3 and answers slowly)
 
     // 65C02 CPU Registers & Bus Snooping
     input  wire [15:0] cpu_pc,
@@ -77,8 +61,6 @@ module serial_debugger (
     input  wire [7:0]  cpu_p,
     input  wire [7:0]  cpu_ir,
     input  wire [15:0] cpu_addr,
-    input  wire [7:0]  cpu_dout,
-    input  wire        cpu_we,
     input  wire        cpu_sync,
 
     // The TF card (src/sd_vol.v)
@@ -186,7 +168,7 @@ module serial_debugger (
     endtask
 
     // =========================================================================
-    // 3. Apple //e COUT ($FDED) and Slot Serial ($C088/$C098) Interceptor
+    // 3. Apple //e COUT ($FDED) Interceptor
     // =========================================================================
     reg cout_prev_sync = 1'b0;
     wire cout_hit = ce_1m && cpu_sync && !cout_prev_sync && (cpu_addr == 16'hFDED);
@@ -201,11 +183,6 @@ module serial_debugger (
     reg [7:0] cout_char_buf = 8'd0;
     reg       cout_pending  = 1'b0;
     reg       cout_need_lf  = 1'b0;
-
-    // Slot 1/2 Serial data write ($C088 or $C098)
-    wire slot_tx_hit = ce_1m && cpu_we && (cpu_addr == 16'hC088 || cpu_addr == 16'hC098);
-    reg [7:0] slot_tx_buf  = 8'd0;
-    reg       slot_tx_pend = 1'b0;
 
     // =========================================================================
     // 4. Static String Table ROM (218 Bytes)
@@ -319,8 +296,7 @@ module serial_debugger (
     // The six memory-dump preset keys ("0" "1" "4" "8" "f"/"F" "v"/"V")
     wire mem_preset = (rx_byte == "0") || (rx_byte == "1") || (rx_byte == "4") ||
                       (rx_byte == "8") || (rx_byte == "f") || (rx_byte == "F") ||
-                      (rx_byte == "v") || (rx_byte == "V") ||
-                      (rx_byte == "k") || (rx_byte == "j");
+                      (rx_byte == "v") || (rx_byte == "V");
 
     // =========================================================================
     // 5. Hardware Debugger State Machine & Micro-Sequencer
@@ -333,7 +309,6 @@ module serial_debugger (
     localparam M_STATUS  = 4'd5;
     localparam M_SCREEN  = 4'd6;
     localparam M_INFO    = 4'd8;   // the Disk ][ head and the TF card (the i command)
-    localparam M_HIST    = 4'd9;   // the last 32 instruction addresses before a BRK (p)
     localparam M_SDW     = 4'd10;  // u: records onto TF card sectors
     localparam M_SDR     = 4'd11;  // b: TF card sectors back
 
@@ -371,12 +346,6 @@ module serial_debugger (
     reg [7:0]  latched_ir;
 
     reg [15:0] dump_addr = 16'hFA60;
-    // PC history: the last 32 opcode fetches, frozen when the BRK/IRQ vector
-    // ($C3FA) is entered so p shows what led to it.
-    reg [15:0] ph [0:31];
-    reg [4:0]  ph_i   = 5'd0;
-    reg        ph_frz = 1'b0;
-    reg [5:0]  ph_n   = 6'd0;
     reg [2:0]  adr_n     = 3'd0;         // hex digits still owed after '@'
     reg        mnt_n     = 1'b0;         // the drive digit is owed after 'y'
     reg [3:0]  q_n       = 4'd0;         // hex digits still owed after 'u'
@@ -398,7 +367,6 @@ module serial_debugger (
                            (rx_byte >= "a" && rx_byte <= "f") ||
                            (rx_byte >= "A" && rx_byte <= "F");
     wire [3:0] rx_nib    = rx_byte[6] ? rx_byte[3:0] + 4'd9 : rx_byte[3:0];
-    wire       bp_hit    = 1'b0;
     reg [7:0]  mem_row [0:15];
     reg [3:0]  mem_col = 4'd0;
     reg [2:0]  mem_wait = 3'd0;
@@ -467,7 +435,6 @@ module serial_debugger (
             latched_ir     <= 8'h00;
             dump_addr      <= 16'hFA60;
             dbg_mem_addr   <= 16'hFA60;
-            dbg_aux        <= 1'b0;
             main_state     <= M_IDLE;
             return_job     <= M_IDLE;
             seq_step       <= 5'd0;
@@ -476,8 +443,6 @@ module serial_debugger (
             cout_char_buf  <= 8'd0;
             cout_pending   <= 1'b0;
             cout_need_lf   <= 1'b0;
-            slot_tx_buf    <= 8'd0;
-            slot_tx_pend   <= 1'b0;
             mem_col        <= 4'd0;
             mem_wait       <= 3'd0;
             scr_addr       <= 16'h0400;
@@ -491,10 +456,6 @@ module serial_debugger (
             sd_x_go      <= 1'b0;
             sd_r_go      <= 1'b0;
             sd_r_take    <= 1'b0;
-            if (ce_1m && cpu_sync && !ph_frz) begin
-                ph[ph_i] <= cpu_pc;
-                ph_i     <= ph_i + 1'b1;
-            end
 
             // Debugger CPU Reset Sequencer
             if (reset_timer != 8'd0) begin
@@ -512,14 +473,10 @@ module serial_debugger (
                 cpu_reset_req <= 1'b0;
             end
 
-            // Latch Apple II COUT and Slot TX events
+            // Latch Apple II COUT
             if (cout_hit && !dbg_mode) begin
                 cout_char_buf <= cpu_a;
                 cout_pending  <= 1'b1;
-            end
-            if (slot_tx_hit && !dbg_mode) begin
-                slot_tx_buf  <= cpu_dout;
-                slot_tx_pend <= 1'b1;
             end
 
             // Single Step FSM
@@ -554,19 +511,8 @@ module serial_debugger (
                 end
             endcase
 
-            // Mode switching via Breakpoint or Ctrl+B (ASCII 0x02)
-            if (bp_hit && (main_state == M_IDLE)) begin
-                dbg_mode   <= 1'b1;
-                cpu_rdy    <= 1'b0;
-                latch_regs;
-                dump_addr  <= cpu_pc;
-                // Print Banner
-                str_pos    <= STR_BANNER_START;
-                str_cnt    <= STR_BANNER_LEN;
-                return_job <= M_REGS;
-                seq_step   <= 5'd0;
-                main_state <= M_STR;
-            end else if (rx_valid && (rx_byte == 8'h02) && (main_state != M_SDW)) begin
+            // Mode switching via Ctrl+B (ASCII 0x02)
+            if (rx_valid && (rx_byte == 8'h02) && (main_state != M_SDW)) begin
                 if (!dbg_mode) begin
                     dbg_mode   <= 1'b1;
                     cpu_rdy    <= 1'b0;
@@ -651,11 +597,6 @@ module serial_debugger (
                     "y": mnt_n <= 1'b1;
                     "u": q_n   <= 4'd8;
                     "b": rd_n  <= 4'd12;
-                    "p": begin
-                        ph_n       <= 6'd0;
-                        seq_step   <= 5'd0;
-                        main_state <= M_HIST;
-                    end
                     "r", "R": begin
                         latch_regs;
                         main_state <= M_REGS;
@@ -666,19 +607,11 @@ module serial_debugger (
                         step_fsm <= S_START;
                     end
 
-                    "c", "C", "g", "G": begin
+                    "c", "C": begin
                         dbg_mode   <= 1'b0;
                         cpu_rdy    <= 1'b1;
                         str_pos    <= STR_RESUME_START;
                         str_cnt    <= STR_RESUME_LEN;
-                        return_job <= M_IDLE;
-                        main_state <= M_STR;
-                    end
-
-                    "a", "A": begin
-                        dbg_aux    <= ~dbg_aux;
-                        str_pos    <= STR_PROMPT_START;
-                        str_cnt    <= STR_PROMPT_LEN;
                         return_job <= M_IDLE;
                         main_state <= M_STR;
                     end
@@ -703,8 +636,6 @@ module serial_debugger (
                     "8":     dump_addr <= 16'h0800;
                     "f", "F": dump_addr <= 16'hFA60;
                     "v", "V": dump_addr <= 16'hFFF0;
-                    "k":     dump_addr <= 16'hE000;
-                    "j":     dump_addr <= 16'hD000;
 
                     "i", "I": begin
                         main_state <= M_INFO;
@@ -927,7 +858,7 @@ module serial_debugger (
                             seq_step   <= 5'd3;
                             main_state <= M_HEX;
                         end
-                        5'd3: if (!tx_fifo_full) begin fifo_push(dbg_aux ? ";" : ":"); seq_step <= 5'd4; end
+                        5'd3: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd4; end
                         5'd4: if (!tx_fifo_full) begin
                             fifo_push(" ");
                             mem_col  <= 4'd0;
@@ -1053,27 +984,6 @@ module serial_debugger (
                     endcase
                 end
 
-                M_HIST: begin
-                    case (seq_step)
-                        5'd0: begin
-                            hex_val <= ph[ph_i + ph_n[4:0]]; hex_digits <= 3'd4;
-                            return_job <= M_HIST; seq_step <= 5'd1; main_state <= M_HEX;
-                        end
-                        5'd1: if (!tx_fifo_full) begin
-                            fifo_push(ph_n[2:0] == 3'd7 ? 8'h0A : " ");
-                            ph_n     <= ph_n + 1'b1;
-                            seq_step <= (ph_n == 6'd31) ? 5'd2 : 5'd0;
-                        end
-                        default: begin
-                            ph_frz     <= 1'b0;
-                            str_pos    <= STR_PROMPT_START;
-                            str_cnt    <= STR_PROMPT_LEN;
-                            return_job <= M_IDLE;
-                            main_state <= M_STR;
-                        end
-                    endcase
-                end
-
                 // -------------------------------------------------------------
                 // i: CRLF, H:hh (the Disk ][ head), S:ssss (the TF card), a prompt
                 // -------------------------------------------------------------
@@ -1130,7 +1040,7 @@ module serial_debugger (
                 M_SCREEN: begin
                     case (seq_step)
                         5'd0: begin // "\r\n$SS"
-                            scr_flags <= {dbg_aux, 1'b0, pll_locked, hires_mode, mixed_mode,
+                            scr_flags <= {2'b00, pll_locked, hires_mode, mixed_mode,
                                           page2, text_mode};
                             str_pos    <= STR_SCR_START;
                             str_cnt    <= STR_SCR_LEN;
@@ -1323,9 +1233,6 @@ module serial_debugger (
                     end else if (cout_char_buf[6:0] == 7'h07) begin
                         fifo_push(8'h07); // Bell
                     end
-                end else if (slot_tx_pend) begin
-                    slot_tx_pend <= 1'b0;
-                    fifo_push(slot_tx_buf);
                 end
             end
         end

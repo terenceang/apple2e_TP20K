@@ -1,11 +1,11 @@
 // Apple //e slot bus -- the motherboard half of the 6502 peripheral architecture
 //
-// This is scaffolding, not cards.  It owns the decode and interrupt wiring the
-// //e motherboard provides, so a card is later a matter of driving the card-side
-// inputs and adding a card module, instead of re-deriving the //e's address and
-// interrupt rules inside apple2_core.  There are no cards yet: apple2_core ties
-// every card_* input inactive, so the bus is idle and $C100-$CFFF behaves
-// exactly as before (internal ROM, or $00 for an empty slot).
+// It owns the decode and interrupt wiring the //e motherboard provides, so a
+// card is a matter of driving the card-side inputs and adding a card module,
+// instead of re-deriving the //e's address and interrupt rules inside
+// apple2_core.  apple2_core lists the cards at card_present and ties an empty
+// slot's card_* inputs inactive, so its $Cn00 page reads the internal ROM or
+// the floating bus, as on a //e.
 //
 // What the real //e bus carries, and what this module does with it:
 //

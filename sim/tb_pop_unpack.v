@@ -71,7 +71,7 @@ module tb_pop_unpack;
         .aux_rd_data(aux_rd_data),
         .aux_wr_go(aux_wr_go), .aux_wr_addr(aux_wr_addr), .aux_wr_data(aux_wr_data),
         .aux_wr_busy(aux_wr_busy),
-        .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_aux(1'b0), .dbg_mem_ready(),
+        .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_mem_ready(),
         .debug_cpu_pc(debug_cpu_pc), .debug_cpu_addr(), .debug_cpu_dout(), .debug_cpu_we(),
         .debug_cpu_sync(debug_cpu_sync), .debug_cpu_a(), .debug_cpu_x(), .debug_cpu_y(),
         .debug_cpu_s(), .debug_cpu_p(), .debug_cpu_ir(debug_cpu_ir)

@@ -92,7 +92,6 @@ module apple2_core (
     input  wire        cpu_rdy,
     input  wire [15:0] dbg_mem_addr,
     output wire [7:0]  dbg_mem_din,
-    input  wire        dbg_aux,        // debugger reads aux RAM
     output wire        dbg_mem_ready,  // dbg_mem_din is valid
 
     // The Disk ][ image transfer, from the debugger to the image store that
@@ -479,14 +478,16 @@ module apple2_core (
     wire main_lc_wr = cpu_rdy && cpu_addr >= 16'hD000 && lc_write_ram && !altzp;
     wire ddr_sel_rd = aux_sel_cpu_rd || main_lc_rd;
     wire ddr_sel_wr = aux_sel_wr || main_lc_wr;
-    // The debugger, while it holds the CPU, can read aux RAM instead of main;
-    // main language-card RAM is in the DDR3 whichever it views.
-    wire dbg_lc     = dbg_mem_addr >= 16'hD000 && lc_read_ram;
-    wire dbg_aux_sel = !cpu_rdy && ((dbg_aux && dbg_mem_addr < 16'hC000) || dbg_lc);
-    wire dbg_main_lc = !cpu_rdy && !dbg_aux && dbg_lc;
-    wire aux_sel_rd    = ddr_sel_rd || dbg_aux_sel;
-    assign aux_rd_want = (ddr_sel_rd && !cpu_we) || dbg_aux_sel;
-    assign dbg_mem_ready = !dbg_aux_sel || aux_rd_hit;
+    // The debugger, while it holds the CPU, sees main memory; main
+    // language-card RAM is in the DDR3, so reading it waits on the port too.
+    // dbg_mem_ready is a clock late: it comes off aux_ram's tag compare, and
+    // the debugger waits four clocks after setting an address anyway.
+    wire dbg_lc_sel = !cpu_rdy && dbg_mem_addr >= 16'hD000 && lc_read_ram;
+    wire aux_sel_rd    = ddr_sel_rd || dbg_lc_sel;
+    assign aux_rd_want = (ddr_sel_rd && !cpu_we) || dbg_lc_sel;
+    reg dbg_ready_q = 1'b1;
+    always @(posedge clk) dbg_ready_q <= !dbg_lc_sel || aux_rd_hit;
+    assign dbg_mem_ready = dbg_ready_q;
     assign aux_stall   = (ddr_sel_rd && !cpu_we && !aux_rd_hit) || (ddr_sel_wr && cpu_we && aux_wr_busy);
     assign aux_wr_go   = cpu_go && cpu_we && ddr_sel_wr;
     assign aux_wr_data = cpu_dout;
@@ -500,7 +501,7 @@ module apple2_core (
 
     wire is_lc_bank2_d = lc_bank2 && (effective_cpu_addr >= 16'hD000 && effective_cpu_addr < 16'hE000);
     wire [15:0] cpu_ram_addr = is_lc_bank2_d ? {4'hC, effective_cpu_addr[11:0]} : effective_cpu_addr;
-    assign aux_rd_addr = {cpu_rdy ? main_lc_rd : dbg_main_lc, cpu_ram_addr};
+    assign aux_rd_addr = {cpu_rdy ? main_lc_rd : 1'b1, cpu_ram_addr};
     assign aux_wr_addr = {main_lc_wr, cpu_ram_addr};
     wire ram_addr_is_video = vram_req;
     wire [15:0] ram_addr   = ram_addr_is_video ? vram_addr : cpu_ram_addr;

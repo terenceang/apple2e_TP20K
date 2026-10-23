@@ -149,10 +149,10 @@ and everything unrecognised is console text.
 | `VID:T PLL:1` | video mode and PLL lock |
 | `$SS <flags>` ... `$SEND` | the screen dump, see below |
 
-**Commands** are `r s c/g m t w h/? x`, plus `0 1 4 8 f v` to set the memory
-dump address to `$0000 $0100 $0400 $0800 $FA60 $FFF0` before `m`. The
-firmware's own `?` only lists six of them; `x`, `g` and `w` work and are not in
-its help text.
+**Commands** are `r s c m t w h/? x`, plus `0 1 4 8 f v` to set the memory
+dump address to `$0000 $0100 $0400 $0800 $FA60 $FFF0` before `m` (and `@hhhh`
+for any address, typed by hand). The firmware's own `?` lists most of them;
+`x` and `w` work and are not in its help text.
 
 **The TF card is required**: every drive's disk is a file on it, and there is
 no other way in (an image from this computer is copied onto the card, then
