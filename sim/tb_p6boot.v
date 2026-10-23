@@ -83,6 +83,9 @@ module tb_p6boot;
         .dsk_store_go(dsk_go), .dsk_store_addr(dsk_addr), .dsk_store_we(dsk_we),
         .dsk_store_wdata(dsk_wdata), .dsk_store_rdata(dsk_rdata),
         .dsk_store_ack(dsk_ack), .dsk_store_idle(dsk_idle),
+        // slot 7: no volume and not busy, so its boot code goes on to slot 6
+        .hd_present(2'b00), .hd_rdata(16'd0), .hd_ack(1'b0), .hd_rb_ok(1'b0),
+        .hd_size0(16'd0), .hd_size1(16'd0), .hd_sd_busy(1'b0),
         .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_mem_ready(),
         .img_up_go(1'b0), .img_up_drive(1'b0), .img_up_addr(18'd0), .img_up_data(8'd0),
         .img_up_last(1'b0), .img_up_ro(1'b0), .img_up_bad(1'b0), .img_up_busy(), .img_up_done(),

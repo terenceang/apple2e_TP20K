@@ -15,9 +15,13 @@
 // way the hardware reads it: self-sync, nibble counts, odd marks and timing
 // all come out of the bits, and nothing in the FPGA knows what a sector is.
 //
-// A bit cell is 4 CPU cycles (4 ce_1m), as on a //e, where the sequencer runs
-// off the same crystal as the 6502: a track of ~50,000 bits turns in 200 ms,
-// 300 rpm.
+// A bit cell is 4 CPU cycles, as on a //e, where the sequencer runs off the
+// same clock as the 6502: a track of ~50,000 bits turns in 200 ms, 300 rpm.
+// The cells count `step`, the 6502's own steps (ce_1m while the Z80 has the
+// bus), not ce_1m: here the CPU can lose a step to a memory stall, and a disk
+// that turned on regardless would hand a 7-cycle poll a byte it never sees
+// and take a written byte late (seen on the board: DOS 3.3 read sector 0,
+// then dropped bytes and crashed).  On the CPU's clock it cannot drift.
 //
 // Read (Q7 low): each bit goes through an MC3470 model -- more than three
 // zero bits in a row read as random bits, as the real amplifier's noise does
@@ -47,6 +51,7 @@ module disk2_card (
     input  wire        clk,           // 27.0 MHz
     input  wire        reset,         // Active-high reset
     input  wire        ce_1m,         // 1.023 MHz clock enable
+    input  wire        step,          // a CPU cycle: the 6502's step (ce_1m while the Z80 runs)
 
     // Slot bus strobes, from slot_bus (src/slot_bus.v)
     input  wire        devsel_n,      // a $C0E0-$C0EF access is on the bus
@@ -165,8 +170,8 @@ module disk2_card (
     // The bit cell, and the sequencer
     // ------------------------------------------------------------------
     reg [1:0] bcell = 2'd0;             // ce_1m within the 4-cycle bit cell
-    always @(posedge clk) if (ce_1m) bcell <= bcell + 2'd1;
-    assign bit_tick = ce_1m && bcell == 2'd3 && motor_running;
+    always @(posedge clk) if (step) bcell <= bcell + 2'd1;
+    assign bit_tick = step && bcell == 2'd3 && motor_running;
 
     // The MC3470: four zero bits in a row (one bit late) read as noise, ~25% ones
     reg [3:0]  win = 4'd0;
@@ -184,7 +189,7 @@ module disk2_card (
     wire       w_load = io_sel && cpu_we && q6_nx && q7_nx;
 
     always @(posedge clk) begin
-        if (ce_1m && hold != 3'd0) hold <= hold - 3'd1;
+        if (step && hold != 3'd0) hold <= hold - 3'd1;
         if (bit_tick) begin
             lfsr <= {lfsr[0] ^ lfsr[2] ^ lfsr[3] ^ lfsr[5], lfsr[15:1]};
             if (!q7) begin

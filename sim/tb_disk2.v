@@ -53,7 +53,7 @@ module tb_disk2;
     reg         dsk_ack = 1'b0;
 
     disk2_card card (
-        .clk(clk), .reset(reset), .ce_1m(ce_1m),
+        .clk(clk), .reset(reset), .ce_1m(ce_1m), .step(bus_cycle),
         .devsel_n(devsel_n), .iosel_n(1'b1), .bus_cycle(bus_cycle), .cpu_we(we),
         .addr(addr), .cpu_di(di), .rom_data(rom_data), .io_data(io_data),
         .drive(drive), .qtr(qtr), .bit_tick(bit_tick), .wr_en(wr_en), .wr_bit(wr_bit),
@@ -115,13 +115,28 @@ module tb_disk2;
         end
     endtask
 
-    // ---- the 6502: one access per CPU cycle ----
+    // ---- the 6502: one step per CPU cycle, bus_cycle (cpu_go, and the card's
+    // step) on each ----
+    // As on the board, a step is now and then lost to a memory stall (one in
+    // 16 here): the disk has to turn on the CPU's steps, not ce_1m, for a
+    // 7-cycle poll to see every byte and a written byte to go out on time.
+    integer lost = 0;
+    reg     stalls = 1'b1;
+    task step_edge;   // the next ce_1m this CPU gets a step on
+        begin
+            @(negedge clk); while (!ce_1m) @(negedge clk);
+            if (stalls && ($random & 15) < 1) begin
+                lost = lost + 1;
+                @(negedge clk); while (!ce_1m) @(negedge clk);
+            end
+        end
+    endtask
     task tick;      // a cycle with nothing on the card's bus
-        begin @(negedge clk); while (!ce_1m) @(negedge clk); @(negedge clk); end
+        begin step_edge; bus_cycle = 1'b1; @(negedge clk); bus_cycle = 1'b0; end
     endtask
     task acc(input [3:0] a, input w, input [7:0] d, output [7:0] q);
         begin
-            @(negedge clk); while (!ce_1m) @(negedge clk);
+            step_edge;
             addr = 16'hC0E0 | a; we = w; di = d; devsel_n = 1'b0; bus_cycle = 1'b1;
             #1 q = io_data;
             @(negedge clk); devsel_n = 1'b1; bus_cycle = 1'b0; we = 1'b0;
@@ -428,6 +443,7 @@ module tb_disk2;
         check("drive 2 empty: write protected", b[7] === 1'b1);
         check("a disk is in some drive", dbg_any_disk === 1'b1);
 
+        $display("   %0d CPU steps lost to stalls", lost);
         if (fails == 0) $display("tb_disk2: PASS (%0d checks)", checks);
         else            $display("FAIL: tb_disk2 failed %0d of %0d checks", fails, checks);
         $finish;
