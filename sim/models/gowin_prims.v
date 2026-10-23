@@ -1,5 +1,6 @@
 // ============================================================================
 //  gowin_prims.v -- behavioural stand-ins for the Gowin primitives in top.v
+//  (and ALU54D, the DSP adder src/audio_filter.v accumulates in)
 //
 //  Yosys' gowin/cells_sim.v declares rPLL, CLKDIV and OSER10 as empty port
 //  shells, so top.v cannot be simulated with it.  These models implement
@@ -102,6 +103,26 @@ endmodule
 module TLVDS_OBUF (input wire I, output wire O, output wire OB);
     assign O  = I;
     assign OB = ~I;
+endmodule
+
+// ALU54D, the DSP block's 54-bit adder, in the shape src/audio_filter.v uses
+// it (Gowin's simlib/gw2a/prim_sim.v has the whole thing): ALUD_MODE 0, the
+// output registered, inputs not:  DOUT <= (ACCLOAD ? DOUT : 0) +/- B +/- A,
+// A and B sign-extended by ASIGN/BSIGN.  RESET synchronous.
+module ALU54D #(parameter AREG = 1'b0, BREG = 1'b0, ASIGN_REG = 1'b0, BSIGN_REG = 1'b0,
+                parameter ACCLOAD_REG = 1'b0, OUT_REG = 1'b1, B_ADD_SUB = 1'b0, C_ADD_SUB = 1'b0,
+                parameter ALUD_MODE = 0, ALU_RESET_MODE = "SYNC") (
+    output wire [53:0] DOUT, output wire [54:0] CASO,
+    input  wire [53:0] A, B, input wire [54:0] CASI,
+    input  wire ACCLOAD, ASIGN, BSIGN, CLK, CE, RESET
+);
+    reg  [54:0] q = 55'd0;
+    wire [54:0] ae = {ASIGN & A[53], A}, be = {BSIGN & B[53], B};
+    always @(posedge CLK)
+        if (RESET) q <= 55'd0;
+        else if (CE) q <= (ACCLOAD ? q : 55'd0) + (B_ADD_SUB ? -be : be) + (C_ADD_SUB ? -ae : ae);
+    assign DOUT = q[53:0];
+    assign CASO = q;
 endmodule
 
 `default_nettype wire

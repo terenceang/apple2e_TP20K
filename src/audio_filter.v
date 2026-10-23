@@ -17,6 +17,12 @@
 // flat to 20 kHz, -62 dB from 28 kHz up.  It runs on one multiplier (a DSP
 // block), shared by both channels, ~60 clocks per 48 kHz sample.
 //
+// The CIC's integrators run every clock, so they are DSP adders too (ALU54D,
+// two a channel, accumulating in the block's own 54-bit register), and the
+// capture and the two combs, which only run once per 96 kHz instant, are one
+// more ALU54D stepped through both channels in turn (`cst`): logic for the
+// filter is then mostly the high-passes and the FIR's sequencing.
+//
 // Two high-pass filters stand in for the coupling capacitors: the
 // Mockingboard's output at ~5 Hz (an AY channel with its tone off is a DC
 // level), and the speaker at ~120 Hz, which is the damped pop each $C030
@@ -24,7 +30,7 @@
 //
 // tick is the 48 kHz sample instant, a clock edge or half a clock in, so
 // ticks are 562 and 563 clocks apart; tick_late says this one was the half
-// (the next is 563 away).  out_l/out_r change ~70 clocks after a tick and
+// (the next is 563 away).  out_l/out_r change ~80 clocks after a tick and
 // hold until after the next, so a tick may take them.  No reset: HDMI audio
 // keeps running through an Apple reset, and the CIC needs none.
 // sim/tb_audio_filter.v measures the passband, the aliasing and the rate.
@@ -63,13 +69,71 @@ module audio_filter (
     always @(posedge clk) if (ce_1m) lps <= lps + (ds >>> 11) + (ds >>> 12);
     wire signed [17:0] spk = ds >>> 12;
 
-    wire signed [17:0] u_l, u_r;
-    wire               u_ok;
+    wire [38:0] i1_l, i2_l, i1_r, i2_r;
+    wire signed [17:0] x_l, x_r;
+    wire signed [19:0] x3_l, x3_r;
 
     audio_cic cic_l (.clk(clk), .ce_1m(ce_1m), .in(mock_l), .add(spk),
-                     .cap(cap), .m(m), .u(u_l), .u_ok(u_ok));
+                     .i1(i1_l), .i2(i2_l), .x(x_l), .x3(x3_l));
     audio_cic cic_r (.clk(clk), .ce_1m(ce_1m), .in(mock_r), .add(spk),
-                     .cap(cap), .m(m), .u(u_r), .u_ok());
+                     .i1(i1_r), .i2(i2_r), .x(x_r), .x3(x3_r));
+
+    // ---- capture and combs, both channels on one ALU54D ----------------
+    // At an instant m quarter steps into a clock, i2 has gone on to
+    // i2 + m i1 + T(m) x (T = 0, 1, 3, 6); that is s.  Then d1 = s - s1 and
+    // y = d1 - d1p, and u = y / 2^21.  Six steps a channel, left then right,
+    // each one add in the DSP's accumulator (DOUT is the running value):
+    //   0  i2          1  + 2 i1 (m[1])   2  + i1 (m[0])   3  + T x  -> s
+    //   4  - s1  -> d1 (s1 = s)            5  - d1p -> y (d1p = d1)
+    reg  [38:0] ci1 [0:1], ci2 [0:1];       // the integrators at the instant
+    reg  [20:0] ctx [0:1];                  // T(m) x, sign-extended below
+    reg  [1:0]  cm = 2'd0;
+    reg  [38:0] s1 [0:1], d1p [0:1];
+    reg  [3:0]  cst = 4'd15;                // 0-11 the steps, 12 the last result, 15 idle
+    wire        cch = (cst >= 4'd6);
+    wire [2:0]  cop = cch ? cst[2:0] - 3'd6 : cst[2:0];  // 6..11 -> 0..5
+    reg  [38:0] opb;
+    always @(*)
+        case (cop)
+            3'd0:    opb = ci2[cch];
+            3'd1:    opb = cm[1] ? {ci1[cch][37:0], 1'b0} : 39'd0;
+            3'd2:    opb = cm[0] ? ci1[cch] : 39'd0;
+            3'd3:    opb = {{18{ctx[cch][20]}}, ctx[cch]};
+            3'd4:    opb = s1[cch];
+            default: opb = d1p[cch];
+        endcase
+    wire        csub = (cop >= 3'd4);
+    wire [53:0] cdout;
+    ALU54D #(.AREG(1'b0), .BREG(1'b0), .ASIGN_REG(1'b0), .BSIGN_REG(1'b0), .ACCLOAD_REG(1'b0),
+             .OUT_REG(1'b1), .B_ADD_SUB(1'b0), .C_ADD_SUB(1'b0), .ALUD_MODE(0), .ALU_RESET_MODE("SYNC"))
+        u_comb (.A({53'd0, csub}),                          // the +1 of a subtraction
+                .B({15'd0, csub ? ~opb : opb}),             // mod 2^39 is all that is kept
+                .ASIGN(1'b0), .BSIGN(1'b0), .CASI(55'd0),
+                .ACCLOAD(cop != 3'd0), .CE(cst <= 4'd11), .RESET(1'b0), .CLK(clk),
+                .DOUT(cdout), .CASO());
+
+    reg  signed [17:0] u_l = 18'sd0, u_r = 18'sd0;
+    reg                u_ok = 1'b0;
+    integer ci;
+    initial for (ci = 0; ci < 2; ci = ci + 1) begin s1[ci] = 39'd0; d1p[ci] = 39'd0; end
+    always @(posedge clk) begin
+        u_ok <= 1'b0;
+        if (cap) begin
+            ci1[0] <= i1_l; ci2[0] <= i2_l; ci1[1] <= i1_r; ci2[1] <= i2_r;
+            ctx[0] <= (m == 2'd0) ? 21'd0 : (m == 2'd1) ? {{3{x_l[17]}}, x_l} :
+                      (m == 2'd2) ? {x3_l[19], x3_l} : {x3_l, 1'b0};
+            ctx[1] <= (m == 2'd0) ? 21'd0 : (m == 2'd1) ? {{3{x_r[17]}}, x_r} :
+                      (m == 2'd2) ? {x3_r[19], x3_r} : {x3_r, 1'b0};
+            cm  <= m;
+            cst <= 4'd0;
+        end else if (cst != 4'd15) begin
+            if (cop == 3'd4) s1[cch]  <= cdout[38:0];        // s, as d1 is made from it
+            if (cop == 3'd5) d1p[cch] <= cdout[38:0];        // d1, as y is made from it
+            if (cst == 4'd6)  u_l <= cdout[38:21];            // left's y, as right starts
+            if (cst == 4'd12) begin u_r <= cdout[38:21]; u_ok <= 1'b1; end
+            cst <= (cst == 4'd12) ? 4'd15 : cst + 4'd1;
+        end
+    end
 
     // ---- halfband FIR, 96 -> 48 kHz --------------------------------------
     // The last 64 samples of each channel ({ch, index}); distributed RAM.
@@ -149,29 +213,27 @@ module audio_filter (
 
 endmodule
 
-// Second-order CIC for one channel, sampled at 96 kHz.  x is constant for a
-// whole clock, so four quarter steps (i1 += x; i2 += i1) are
+// One channel's input and CIC integrators.  x is constant for a whole clock,
+// so four quarter steps (i1 += x; i2 += i1) are
 //     i1' = i1 + 4x,   i2' = i2 + 4 i1 + 10x,
-// and i2 after m of them (an instant inside the clock) is i2 + m i1 + T(m) x,
-// T = 0, 1, 3, 6.  Integrators wrap (39 bits: 18 in + 21 of gain); the
-// combs take the wrap back out.  u = y / 2^21, valid on u_ok, 4 clocks after cap.
+// each an ALU54D accumulating in its own register.  They wrap (54 bits; 39
+// are kept, 18 in + 21 of gain); the combs in audio_filter take the wrap back
+// out.  x and 3x go out for the capture's T(m) x.
 module audio_cic (
     input  wire              clk,
     input  wire              ce_1m,
     input  wire signed [15:0] in,
     input  wire signed [17:0] add,
-    input  wire              cap,
-    input  wire [1:0]        m,
-    output reg  signed [17:0] u = 18'sd0,
-    output reg               u_ok = 1'b0
+    output wire [38:0]       i1,
+    output wire [38:0]       i2,
+    output reg  signed [17:0] x  = 18'sd0,
+    output reg  signed [19:0] x3 = 20'sd0
 );
     // ~5 Hz high-pass: lp follows in with 15 fraction bits, by 1/32768 per ce_1m
     reg  signed [31:0] lp = 32'sd0;
     wire signed [31:0] d  = {in[15], in, 15'd0} - lp;
     wire signed [17:0] xn = (d >>> 15) + add;
 
-    reg  signed [17:0] x   = 18'sd0;
-    reg  signed [19:0] x3  = 20'sd0;
     reg  signed [21:0] x10 = 22'sd0;
     always @(posedge clk) if (ce_1m) begin
         lp  <= lp + (d >>> 15);
@@ -180,32 +242,17 @@ module audio_cic (
         x10 <= (xn <<< 3) + (xn <<< 1);
     end
 
-    reg  [38:0] i1 = 39'd0, i2 = 39'd0;
-    reg  [38:0] a = 39'd0, b = 39'd0, s = 39'd0, s1 = 39'd0, d1 = 39'd0, d1p = 39'd0;
-    reg  [2:0]  st = 3'd0;
-    wire signed [38:0] tx = (m == 2'd0) ? 39'sd0 :
-                            (m == 2'd1) ? x :
-                            (m == 2'd2) ? x3 : (x3 <<< 1);
-    wire [38:0] y = d1 - d1p;
-    always @(posedge clk) begin
-        i1 <= i1 + {{19{x[17]}}, x, 2'b00};
-        i2 <= i2 + {i1[36:0], 2'b00} + {{17{x10[21]}}, x10};
-        st <= {st[1:0], cap};
-        u_ok <= st[2];
-        if (cap) begin
-            a <= i2 + (m[1] ? {i1[37:0], 1'b0} : 39'd0);
-            b <= (m[0] ? i1 : 39'd0) + tx;
-        end
-        if (st[0]) s <= a + b;
-        if (st[1]) begin
-            d1 <= s - s1;
-            s1 <= s;
-        end
-        if (st[2]) begin
-            d1p <= d1;
-            u   <= $signed(y) >>> 21;
-        end
-    end
+    wire [53:0] i1w, i2w;
+    ALU54D #(.AREG(1'b0), .BREG(1'b0), .ASIGN_REG(1'b0), .BSIGN_REG(1'b0), .ACCLOAD_REG(1'b0),
+             .OUT_REG(1'b1), .B_ADD_SUB(1'b0), .C_ADD_SUB(1'b0), .ALUD_MODE(0), .ALU_RESET_MODE("SYNC"))
+        u_i1 (.A({{34{x[17]}}, x, 2'b00}), .B(54'd0), .ASIGN(1'b0), .BSIGN(1'b0), .CASI(55'd0),
+              .ACCLOAD(1'b1), .CE(1'b1), .RESET(1'b0), .CLK(clk), .DOUT(i1w), .CASO());
+    ALU54D #(.AREG(1'b0), .BREG(1'b0), .ASIGN_REG(1'b0), .BSIGN_REG(1'b0), .ACCLOAD_REG(1'b0),
+             .OUT_REG(1'b1), .B_ADD_SUB(1'b0), .C_ADD_SUB(1'b0), .ALUD_MODE(0), .ALU_RESET_MODE("SYNC"))
+        u_i2 (.A({i1w[51:0], 2'b00}), .B({{32{x10[21]}}, x10}), .ASIGN(1'b0), .BSIGN(1'b0), .CASI(55'd0),
+              .ACCLOAD(1'b1), .CE(1'b1), .RESET(1'b0), .CLK(clk), .DOUT(i2w), .CASO());
+    assign i1 = i1w[38:0];
+    assign i2 = i2w[38:0];
 endmodule
 
 `default_nettype wire
