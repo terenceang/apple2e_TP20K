@@ -211,7 +211,7 @@ module input_controller (
     reg        akd        = 1'b0;
     reg        akd_legacy = 1'b0;
     reg [21:0] akd_cnt    = 22'd0;
-    localparam [21:0] AKD_LEGACY_CLKS = 22'd2700000;
+    localparam [21:0] AKD_LEGACY_CLKS = `VM_PIXEL_HZ / 10;   // 100 ms
 
     // CR/LF are Return, DEL is backspace
     wire [6:0] norm_key = (urx_byte == 8'h0A || urx_byte == 8'h0D) ? 7'h0D :
@@ -229,6 +229,14 @@ module input_controller (
             akd_cnt    <= AKD_LEGACY_CLKS;
         end
     endtask
+
+    // What a byte starts: a packet (FF, FE), an escape (1B), or nothing
+    // (PKT_NORMAL: it is a key)
+    function [3:0] leader(input [7:0] b);
+        leader = (b == 8'hFF) ? PKT_GP_HDR :
+                 (b == 8'hFE) ? PKT_KEY_CODE :
+                 (b == 8'h1B) ? PKT_ESC : PKT_NORMAL;
+    endfunction
 
     // The paddle-button bits of a FE/FF packet (PB0/PB1/PB2)
     task latch_buttons(input [7:0] b);
@@ -287,17 +295,9 @@ module input_controller (
             if (urx_valid && !dbg_mode && (urx_byte != 8'h02)) begin
                 case (pkt_state)
                     PKT_NORMAL: begin
-                        if (urx_byte == 8'hFF) begin
-                            pkt_state <= PKT_GP_HDR;
-                        end else if (urx_byte == 8'hFE) begin
-                            // 0xFE is only a leader; the code is the next byte
-                            pkt_state <= PKT_KEY_CODE;
-                        end else if (urx_byte == 8'h1B) begin // ESC
-                            pkt_state <= PKT_ESC;
-                        end else begin
-                            // Standard keystroke, with strobe
-                            deliver_key(norm_key);
-                        end
+                        pkt_state <= leader(urx_byte);
+                        if (leader(urx_byte) == PKT_NORMAL)
+                            deliver_key(norm_key);      // standard keystroke, with strobe
                     end
 
                     PKT_ESC: begin
@@ -306,13 +306,10 @@ module input_controller (
                         else begin
                             deliver_key(7'h1B); // Raw ESC key
                             // ...and the byte that followed it is not lost
-                            if (urx_byte == 8'hFF)      pkt_state <= PKT_GP_HDR;
-                            else if (urx_byte == 8'hFE) pkt_state <= PKT_KEY_CODE;
-                            else if (urx_byte == 8'h1B) pkt_state <= PKT_ESC;
-                            else begin
+                            pkt_state <= leader(urx_byte);
+                            if (leader(urx_byte) == PKT_NORMAL) begin
                                 pend_valid <= 1'b1;
                                 pend_key   <= norm_key;
-                                pkt_state  <= PKT_NORMAL;
                             end
                         end
                     end

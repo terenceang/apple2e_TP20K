@@ -12,6 +12,8 @@
 // rgb is combinational in (x, y), as hdmi_tx samples it on the same cycle it
 // presents the coordinates. Full-range colours: top.v declares full-range
 // RGB in the AVI InfoFrame (hdmi_tx RGB_QUANT).
+`include "src/hdmi/hdmi_defs.vh"
+
 module colorbar_gen (
     input  wire        clk_pixel,   // 27.0 MHz pixel clock
     input  wire        reset,       // Active-high reset
@@ -21,8 +23,8 @@ module colorbar_gen (
     output reg  [23:0] rgb          // {R, G, B}
 );
 
-    localparam H_VISIBLE = 720;
-    localparam V_VISIBLE = 480;
+    localparam H_VISIBLE = `VM_H_ACTIVE;
+    localparam V_VISIBLE = `VM_V_ACTIVE;
 
     // Frame counter, used to blink the liveness box so a frozen/garbled
     // picture can be told apart from a live one.

@@ -67,8 +67,7 @@ module disk2_store (
     output reg         dsk_we,
     output reg  [15:0] dsk_wdata,
     input  wire [15:0] dsk_rdata,
-    input  wire        dsk_ack,
-    input  wire        dsk_idle
+    input  wire        dsk_ack
 );
 
     reg [1:0] present = 2'b00, writable = 2'b00;

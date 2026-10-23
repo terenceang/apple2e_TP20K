@@ -36,10 +36,11 @@
 //  ponytail: leap years by year % 4, right for 2000-2099.
 // ============================================================================
 
+`include "src/hdmi/hdmi_defs.vh"   // VM_PIXEL_HZ: the clock
 `default_nettype none
 
 module thunderclock #(
-    parameter [24:0] TICKS = 25'd27_000_000   // clocks per second
+    parameter [24:0] TICKS = `VM_PIXEL_HZ     // clocks per second
 ) (
     input  wire        clk,
     input  wire        bus_cycle,      // cpu_go: the CPU's own cycles only

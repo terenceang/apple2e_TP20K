@@ -61,7 +61,7 @@ module tb_cpusteps;
         .aux_wr_go(aux_wr_go), .aux_wr_addr(aux_wr_addr), .aux_wr_data(aux_wr_data),
         .aux_wr_busy(aux_wr_busy),
         .dsk_store_go(), .dsk_store_addr(), .dsk_store_we(), .dsk_store_wdata(),
-        .dsk_store_rdata(16'd0), .dsk_store_ack(1'b0), .dsk_store_idle(1'b1),
+        .dsk_store_rdata(16'd0), .dsk_store_ack(1'b0),
         .ssc_rx_data(8'd0), .ssc_rx_valid(1'b0), .ssc_lines(2'b00),
         .ssc_tx_req(), .ssc_tx_byte(), .ssc_tx_ack(1'b0), .ssc_st_req(), .ssc_st_byte(), .ssc_st_ack(1'b0),
         .hd_present(2'b00), .hd_go(), .hd_addr(), .hd_we(), .hd_be(), .hd_wdata(),

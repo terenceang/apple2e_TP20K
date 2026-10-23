@@ -17,6 +17,7 @@
 // division: an accumulator spreads the frame's 128 edges over its clocks,
 // 4 or 5 clocks apart (BCLK 8 or 9 clocks, ~3.07 MHz).  The PT8211 has no
 // master clock and does not mind.
+`include "src/hdmi/hdmi_defs.vh"   // VM_PIXEL_HZ: the clock
 `default_nettype none
 
 module sound_generator (
@@ -75,7 +76,7 @@ module sound_generator (
 
     // 1kHz test tone: phase accumulator advanced once per sample.
     // step = round(1000 * 2^32 / 48000)
-    localparam [31:0] STEP_1KHZ = 32'd89478485;
+    localparam [31:0] STEP_1KHZ = (64'd1000 << 32) / `VM_AUDIO_HZ;
     reg [31:0] tone_phase = 32'd0;
     wire signed [15:0] tone = tone_phase[31] ? 16'sd12000 : -16'sd12000;
     wire signed [15:0] next_l = test_tone_enable ? tone : filt_l;
@@ -95,15 +96,17 @@ module sound_generator (
     // in between over the frame's flen clocks, and the 128th is the next tick.
     localparam [5:0] BCLK_LEFT_END = 6'd31; // last BCLK of the left channel
 
+    // 27 MHz / 48 kHz = 562.5 clocks: a frame is 562, or 563 after a late tick
+    localparam [9:0] FRAME = `VM_PIXEL_HZ / `VM_AUDIO_HZ;
     reg [9:0]  acc  = 10'd0;
-    reg [9:0]  flen = 10'd562;
+    reg [9:0]  flen = FRAME;
     reg [5:0]  bit_cnt  = 6'd0; // 0..63
     reg [31:0] shift_reg = 32'd0;
 
     always @(posedge clk or posedge reset) begin
         if (reset) begin
             acc        <= 10'd0;
-            flen       <= 10'd562;
+            flen       <= FRAME;
             bit_cnt    <= 6'd0;
             i2s_bclk   <= 1'b0;
             i2s_lrck   <= 1'b0;
@@ -112,7 +115,7 @@ module sound_generator (
         end else if (tick) begin
             // the frame's last falling edge: left channel start
             acc       <= 10'd0;
-            flen      <= tick_late ? 10'd563 : 10'd562;
+            flen      <= FRAME + tick_late;
             i2s_bclk  <= 1'b0;
             i2s_lrck  <= 1'b0;
             i2s_din   <= shift_reg[31];

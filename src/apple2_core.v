@@ -66,7 +66,6 @@ module apple2_core (
     output wire [15:0] dsk_store_wdata,
     input  wire [15:0] dsk_store_rdata,
     input  wire        dsk_store_ack,
-    input  wire        dsk_store_idle,
 
     // ProDOS hard disk in slot 7 (src/prodos_hd.v); its DDR3 port goes to
     // aux_ram at the top level, shared there with the TF card (src/sd_vol.v),
@@ -105,10 +104,8 @@ module apple2_core (
     output wire [7:0]  dbg_mem_din,
     output wire        dbg_mem_ready,  // dbg_mem_din is valid
 
-    // The Disk ][ image transfer, from the debugger to the image store that
-    // lives here.  It crosses the same boundary as the memory bus above and for
-    // the same reason: the debugger is at the top level and the store is in here,
-    // and the store's SDRAM port already goes out to aux_ram's arbiter.
+    // The Disk ][ image transfer, from sd_vol (the TF card) to the image store
+    // that lives here.
     input  wire        img_up_go,
     input  wire        img_up_drive,
     input  wire [19:0] img_up_addr,
@@ -233,8 +230,8 @@ module apple2_core (
     // expansion-space arbitration and the interrupt daisy chain.  The cards
     // are listed at card_present; an empty slot's card-side inputs are tied
     // inactive at the instantiation, so its $Cn00 space behaves as on a //e
-    // with nothing there: the internal ROM when a softswitch selects it, $00 for an
-    // empty slot.  The wires are declared here rather than next to the
+    // with nothing there: the internal ROM when a softswitch selects it, the
+    // floating bus for an empty slot.  The wires are declared here rather than next to the
     // instantiation because the CPU below takes the interrupt lines from them.
     wire        slot_irq_n;
     wire        slot_nmi_n;
@@ -243,7 +240,7 @@ module apple2_core (
     wire [7:0]  slot_dout;
     wire [6:0]  devsel_n;
     wire [6:0]  iosel_n;
-    wire        mock_irq_n;     // slot 4's IRQ, which the CPU below also takes
+    wire        mock_irq_n;
 
     wire addr_is_c0 = (cpu_addr[15:8] == 8'hC0);
     assign io_addr  = cpu_addr[7:0];
@@ -263,7 +260,7 @@ module apple2_core (
         .DI(cpu_din),
         .DO(c02_dout),
         .WE(c02_we),
-        .IRQ((~slot_irq_n) | (~mock_irq_n)),   // Active-high IRQ into 65C02 (core active-high, bus active-low)
+        .IRQ(~slot_irq_n),      // the core is active-high, the bus active-low
         .NMI(~slot_nmi_n),
         .RDY(c02_go),
         .SYNC(cpu_sync),
@@ -379,13 +376,10 @@ module apple2_core (
     wire [15:0] effective_cpu_addr = (!cpu_rdy) ? dbg_mem_addr : cpu_addr;
 
     // The slot bus.  card_present (below) lists the cards; the empty slots'
-    // card-side inputs are tied to their inactive levels.
-    //
-    // The active-low ties are 7'h7F and not 7'd7: that is decimal seven,
-    // 7'b0000111, which would leave slot 4 asserting a line it has no card to
-    // answer for.  card_data is a byte per card, so 56 bits wide, not 7.
-    // Index 5 of a seven-slot vector is slot 6, which is the indexing
-    // slot_bus uses throughout.
+    // card-side inputs are tied to their inactive levels.  The active-low ties
+    // are 7'h7F and not 7'd7: that is decimal seven, 7'b0000111, which would
+    // leave slot 4 asserting a line it has no card to answer for.  Every
+    // seven-slot vector is indexed from slot 1 at bit 0, as slot_bus does.
     wire [7:0]  d2_rom_data;
     wire [7:0]  mock_rom_data;
     wire [7:0]  hd_rom_data;
@@ -397,28 +391,22 @@ module apple2_core (
     wire        ssc_irq_n;
     wire        d2_any_disk;    // a Disk ][ drive holds an image (gates the $C600 ROM)
     wire [6:0]  card_present;
-    // A byte per card, so 56 bits wide, not 7:
-    // Slot 4 (index 3) is Mockingboard C.
-    // Slot 5 (index 4) is the clock.
-    // Slot 6 (index 5) is the Disk ][.
-    // Slot 7 (index 6) is the ProDOS hard disk.
-    // Slot 1 (index 0) is the Super Serial Card.
-    wire [55:0] card_data;
-    assign card_data = ({48'd0, hd_rom_data} << (6 * 8)) |
-                       // no disk in either drive: slot 6 reads as empty (the
-                       // floating bus), so the Autostart scan passes it by and
-                       // falls into BASIC
-                       ({48'd0, d2_any_disk ? d2_rom_data : vram_data} << (5 * 8)) |
-                       ({48'd0, tc_rom_data} << (4 * 8)) |
-                       ({48'd0, mock_rom_data} << (3 * 8)) |
-                       {48'd0, ssc_rom_data};
+    // A byte per slot, 7 down to 1.  With no disk in either drive slot 6 reads
+    // as empty (the floating bus), so the Autostart scan passes it by and
+    // falls into BASIC.
+    wire [55:0] card_data = {hd_rom_data,                          // 7 ProDOS hard disk
+                             d2_any_disk ? d2_rom_data : vram_data, // 6 Disk ][
+                             tc_rom_data,                          // 5 clock
+                             mock_rom_data,                        // 4 Mockingboard
+                             16'd0,                                // 3, 2 (SoftCard: no ROM)
+                             ssc_rom_data};                        // 1 Super Serial Card
 
     // The card's registers are on the $C0Ex bus, which the read mux claims
     // after the motherboard's own $C0xx addresses and before the $00 an
     // unclaimed I/O space returns.
     wire [7:0]  d2_io_data;
-    wire        d2_io_hit = (effective_cpu_addr[15:8] == 8'hC0) &&
-                            (effective_cpu_addr[7:4] == 4'hE);
+    wire        is_io     = (effective_cpu_addr[15:8] == 8'hC0);
+    wire        d2_io_hit = is_io && (effective_cpu_addr[7:4] == 4'hE);
 
     // The Mockingboard (slot 4): its two VIAs at /IOSEL ($C400-$C4FF) and
     // /DEVSEL ($C0C0-$C0CF).  Its $C4xx bytes reach the CPU as slot 4's
@@ -428,8 +416,7 @@ module apple2_core (
     // cpu_go, and the VIA's read data feeds cpu_din, so the strobes put the
     // whole cpu_go chain in front of the read mux (clk_pixel fell 32 -> 28 MHz).
     wire        mock_iosel_n  = !(effective_cpu_addr[15:8] == 8'hC4);
-    wire        mock_devsel_n = !((effective_cpu_addr[15:8] == 8'hC0) &&
-                                  (effective_cpu_addr[7:4] == 4'hC));
+    wire        mock_devsel_n = !(is_io && (effective_cpu_addr[7:4] == 4'hC));
 
     wire [6:0]  card_irq_n = {1'b1, 1'b1, 1'b1, mock_irq_n, 1'b1, 1'b1, ssc_irq_n};
 
@@ -468,7 +455,6 @@ module apple2_core (
     // $C800 - $CFFF: Shared expansion space, the internal ROM when INTC8ROM
     // $D000 - $FFFF: Language Card (RAM or System ROM)
     wire is_ram_base = (effective_cpu_addr < 16'hC000);
-    wire is_io       = (effective_cpu_addr[15:8] == 8'hC0);
     wire is_slot_rom = (effective_cpu_addr >= 16'hC100 && effective_cpu_addr < 16'hD000);
     wire is_lc_area  = (effective_cpu_addr >= 16'hD000);
 
@@ -514,22 +500,20 @@ module apple2_core (
     // (and not to the aux RAM instead)
     // (the language-card area is never block RAM any more: see main_lc_wr)
     wire ram_we_cpu = cpu_we && !aux_sel_wr && is_ram_base;
-    wire ram_we     = cpu_go ? ram_we_cpu : 1'b0;
+    wire ram_we     = cpu_go && ram_we_cpu;
 
     wire is_lc_bank2_d = lc_bank2 && (effective_cpu_addr >= 16'hD000 && effective_cpu_addr < 16'hE000);
     wire [15:0] cpu_ram_addr = is_lc_bank2_d ? {4'hC, effective_cpu_addr[11:0]} : effective_cpu_addr;
     assign aux_rd_addr = {cpu_rdy ? main_lc_rd : 1'b1, cpu_ram_addr};
     assign aux_wr_addr = {main_lc_wr, cpu_ram_addr};
-    wire ram_addr_is_video = vram_req;
-    wire [15:0] ram_addr   = ram_addr_is_video ? vram_addr : cpu_ram_addr;
-    wire [7:0]  ram_din    = cpu_dout;
+    wire [15:0] ram_addr   = vram_req ? vram_addr : cpu_ram_addr;
     wire [7:0]  ram_dout;
 
     // 48 KB main RAM, $0000-$BFFF (24 blocks); the language card is in DDR3
     apple2_ram_48k u_ram (
         .clk(clk),
         .addr(ram_addr),
-        .din(ram_din),
+        .din(cpu_dout),
         .we(ram_we),
         .dout(ram_dout)
     );
@@ -561,7 +545,7 @@ module apple2_core (
         .dout(rom_dout)
     );
 
-    // Character ROM: 4KB/8KB
+    // Character ROM: 4 KB (the 2732)
     apple2_char_rom u_char_rom (
         .clk(clk),
         .addr(char_rom_addr),
@@ -675,7 +659,7 @@ module apple2_core (
     wire [7:0]  d2_qtr;
     wire [1:0]  d2_drv_present, d2_drv_writable;
 
-    assign card_present = 7'b1111001;   // slot 7 (bit 6): ProDOS hard disk, slot 6 (bit 5): the Disk ][, slot 5 (bit 4): clock, slot 4 (bit 3): Mockingboard, slot 1 (bit 0): Super Serial Card
+    assign card_present = 7'b1111001;   // slots 7 6 5 4 and 1 (card_data above)
 
     // ------------------------------------------------------------------
     // Super Serial Card, slot 1 (its line is the page's modem)
@@ -701,8 +685,6 @@ module apple2_core (
         .st_byte(ssc_st_byte),
         .st_ack(ssc_st_ack)
     );
-    wire [7:0]  d2_dbg_head;
-    assign debug_dsk_head = d2_dbg_head;
 
     // ------------------------------------------------------------------
     // Mockingboard "C" Sound Card, slot 4
@@ -790,13 +772,13 @@ module apple2_core (
         .rd_ok(d2_rd_ok),
         .drv_present(d2_drv_present),
         .drv_writable(d2_drv_writable),
-        .dbg_head(d2_dbg_head),
+        .dbg_head(debug_dsk_head),
         .dbg_any_disk(d2_any_disk)
     );
 
-    // The image store, whose SDRAM port leaves the core for aux_ram's arbiter
-    // at the top level.  The debugger's bulk transfer port is left off here
-    // and reaches the store through the top level too, for the same reason.
+    // The image store, whose DDR3 port leaves the core for aux_ram's arbiter
+    // at the top level; sd_vol's load and write-back ports (img_*) come in
+    // from the top level too.
     disk2_store u_disk2_store (
         .clk(clk),
         .reset(reset),
@@ -832,8 +814,7 @@ module apple2_core (
         .dsk_we(dsk_store_we),
         .dsk_wdata(dsk_store_wdata),
         .dsk_rdata(dsk_store_rdata),
-        .dsk_ack(dsk_store_ack),
-        .dsk_idle(dsk_store_idle)
+        .dsk_ack(dsk_store_ack)
     );
 
 endmodule

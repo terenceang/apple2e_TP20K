@@ -64,7 +64,6 @@ module tb_p6boot;
     wire [15:0] dsk_wdata;
     reg  [15:0] dsk_rdata = 16'd0;
     reg         dsk_ack   = 1'b0;
-    wire        dsk_idle;
 
     wire [15:0] pc;
     wire        sync;
@@ -82,7 +81,7 @@ module tb_p6boot;
         .aux_wr_go(), .aux_wr_addr(), .aux_wr_data(), .aux_wr_busy(1'b0),
         .dsk_store_go(dsk_go), .dsk_store_addr(dsk_addr), .dsk_store_we(dsk_we),
         .dsk_store_wdata(dsk_wdata), .dsk_store_rdata(dsk_rdata),
-        .dsk_store_ack(dsk_ack), .dsk_store_idle(dsk_idle),
+        .dsk_store_ack(dsk_ack),
         // slot 7: no volume and not busy, so its boot code goes on to slot 6
         .hd_present(2'b00), .hd_rdata(16'd0), .hd_ack(1'b0), .hd_rb_ok(1'b0),
         .hd_size0(16'd0), .hd_size1(16'd0), .hd_sd_busy(1'b0),
@@ -105,7 +104,6 @@ module tb_p6boot;
     reg [21:0] la;
     reg        lwe;
     reg [15:0] lwd;
-    assign dsk_idle = !pend;
     always @(posedge clk) begin
         dsk_ack <= 1'b0;
         if (dsk_go && !pend) begin pend <= 1'b1; lat <= 4'd12; la <= dsk_addr; lwe <= dsk_we; lwd <= dsk_wdata; end

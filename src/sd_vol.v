@@ -161,7 +161,7 @@ module sd_vol #(
 
     localparam [4:0] PWR = 0, DUM = 1, CMDS = 2, R1 = 3, EXTRA = 4, DTOK = 5, DATA = 6,
                      CRC = 7, IDLE = 8, WGAP = 9, WTOK = 10, WBYTE = 11, WCRC = 12,
-                     WRESP = 13, WBSY = 14, SKIP = 15, BSY = 16;
+                     WRESP = 13, SKIP = 15, BSY = 16;
     // what a read's bytes are for
     localparam [3:0] T_MBR = 0, T_VBR = 1, T_DIR = 2, T_FAT1 = 3, T_CFG = 4, T_FATW = 5,
                      T_HD = 6, T_FL = 7, T_RAW = 8;

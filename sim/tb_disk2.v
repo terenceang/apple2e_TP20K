@@ -71,7 +71,7 @@ module tb_disk2;
         .up_ro(1'b0), .up_bad(1'b0), .up_busy(), .up_done(),
         .down_go(1'b0), .down_drive(1'b0), .down_addr(20'd0), .down_data(), .down_valid(),
         .dsk_go(dsk_go), .dsk_addr(dsk_addr), .dsk_we(dsk_we), .dsk_wdata(dsk_wdata),
-        .dsk_rdata(dsk_rdata), .dsk_ack(dsk_ack), .dsk_idle());
+        .dsk_rdata(dsk_rdata), .dsk_ack(dsk_ack));
 
     // ---- DDR3: drive 0's file as words, a request at a time, random latency ----
     localparam integer WORDS = 117248;          // 234,496 bytes

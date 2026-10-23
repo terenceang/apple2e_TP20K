@@ -291,12 +291,10 @@ module serial_debugger (
     // String printer sub-engine
     reg [8:0] str_pos = 9'd0;
     reg [7:0] str_cnt = 8'd0;
-    wire str_busy = (str_cnt != 8'd0);
 
     // Hex digit printer sub-engine (prints up to 4 hex digits)
     reg [15:0] hex_val = 16'd0;
     reg [2:0]  hex_digits = 3'd0;
-    wire hex_busy = (hex_digits != 3'd0);
 
     // Which received bytes the console echo passes through. Anything else is
     // protocol: the 0xFE key packet and the 0xFF gamepad packet must not be
@@ -304,11 +302,6 @@ module serial_debugger (
     wire echoable = (rx_byte >= 8'h20 && rx_byte <= 8'h7E) ||
                     (rx_byte == 8'h0D) || (rx_byte == 8'h0A) ||
                     (rx_byte == 8'h08) || (rx_byte == 8'h07);
-
-    // The six memory-dump preset keys ("0" "1" "4" "8" "f"/"F" "v"/"V")
-    wire mem_preset = (rx_byte == "0") || (rx_byte == "1") || (rx_byte == "4") ||
-                      (rx_byte == "8") || (rx_byte == "f") || (rx_byte == "F") ||
-                      (rx_byte == "v") || (rx_byte == "V");
 
     // =========================================================================
     // 5. Hardware Debugger State Machine & Micro-Sequencer
@@ -375,6 +368,7 @@ module serial_debugger (
     reg        x_zrun = 1'b0;            // the block in flight is part of a zero run
     wire       sd_busy_s = sd_stat[14];
     wire       sd_err_s  = sd_stat[13];
+    wire       sd_no     = sd_err_s || sd_busy_s;   // no card, or still loading: refuse u and b
     wire       rx_hex    = (rx_byte >= "0" && rx_byte <= "9") ||
                            (rx_byte >= "a" && rx_byte <= "f") ||
                            (rx_byte >= "A" && rx_byte <= "F");
@@ -406,6 +400,63 @@ module serial_debugger (
         end
     endtask
 
+    // Print str_rom[pos +: cnt], then carry on in `job`
+    task say(input [8:0] pos, input [7:0] cnt, input [3:0] job);
+        begin
+            str_pos    <= pos;
+            str_cnt    <= cnt;
+            return_job <= job;
+            main_state <= M_STR;
+        end
+    endtask
+
+    // ...the prompt, then idle
+    task prompt;
+        say(STR_PROMPT_START, STR_PROMPT_LEN, M_IDLE);
+    endtask
+
+    // From inside a sequencer: a string, or the top n hex digits of v, and
+    // then back to this sequencer at step `next`
+    task sub_say(input [8:0] pos, input [7:0] cnt, input [4:0] next);
+        begin
+            say(pos, cnt, main_state);
+            seq_step <= next;
+        end
+    endtask
+    task sub_hex(input [15:0] v, input [2:0] n, input [4:0] next);
+        begin
+            hex_val    <= v;
+            hex_digits <= n;
+            return_job <= main_state;
+            main_state <= M_HEX;
+            seq_step   <= next;
+        end
+    endtask
+
+    // Back to the Apple
+    task resume;
+        begin
+            dbg_mode <= 1'b0;
+            cpu_rdy  <= 1'b1;
+            say(STR_RESUME_START, STR_RESUME_LEN, M_IDLE);
+        end
+    endtask
+
+    // 16 bytes of memory from a
+    task mem_dump(input [15:0] a);
+        begin
+            dump_addr  <= a;
+            main_state <= M_MEM;
+            seq_step   <= 5'd0;
+            mem_col    <= 4'd0;
+            mem_wait   <= 3'd0;
+        end
+    endtask
+
+    // The register dump's flags: steps 11-18 print P's bits 7-0
+    localparam [63:0] P_FLAGS = "NV-BDIZC";   // byte b (from the right) is bit b's letter
+    wire [2:0] p_bit = 5'd18 - seq_step;
+
     // One byte of a screen dump: present the address, wait for the RAM to
     // settle (same read-settle pattern as the memory dump: dbg_mem_din is
     // combinational off dbg_mem_addr), then hand the byte to the hex printer
@@ -420,11 +471,7 @@ module serial_debugger (
                 scr_addr   <= scr_addr + 16'd1;
                 scr_left   <= scr_left - 11'd1;
                 scr_col    <= scr_col + 1'b1;
-                hex_val    <= {dbg_mem_din, 8'h00};
-                hex_digits <= 3'd2;
-                return_job <= M_SCREEN;
-                main_state <= M_HEX;
-                seq_step   <= next;
+                sub_hex({dbg_mem_din, 8'h00}, 3'd2, next);
             end
         end
     endtask
@@ -530,21 +577,10 @@ module serial_debugger (
                     cpu_rdy    <= 1'b0;
                     latch_regs;
                     dump_addr  <= cpu_pc;
-                    // Print Banner
-                    str_pos    <= STR_BANNER_START;
-                    str_cnt    <= STR_BANNER_LEN;
-                    return_job <= M_REGS;
+                    say(STR_BANNER_START, STR_BANNER_LEN, M_REGS);
                     seq_step   <= 5'd0;
-                    main_state <= M_STR;
-                end else begin
-                    dbg_mode   <= 1'b0;
-                    cpu_rdy    <= 1'b1;
-                    // Print Resume
-                    str_pos    <= STR_RESUME_START;
-                    str_cnt    <= STR_RESUME_LEN;
-                    return_job <= M_IDLE;
-                    main_state <= M_STR;
-                end
+                end else
+                    resume;
             end else if (!dbg_mode && (main_state == M_IDLE) && rx_valid) begin
                 // Echo console keystrokes back so the host sees what it typed.
                 // Only characters a terminal can show: the 0xFE key packet and
@@ -569,11 +605,8 @@ module serial_debugger (
                         if (q_n == 4'd1) begin
                             sd_x_valid <= 1'b0;
                             x_ph       <= X_TAG;
-                            // no card, or still loading the volumes: say so
-                            str_pos    <= (sd_err_s || sd_busy_s) ? STR_LOST_START : STR_HDUP_START;
-                            str_cnt    <= (sd_err_s || sd_busy_s) ? STR_LOST_LEN   : STR_HDUP_LEN;
-                            return_job <= (sd_err_s || sd_busy_s) ? M_IDLE : M_SDW;
-                            main_state <= M_STR;
+                            if (sd_no) say(STR_LOST_START, STR_LOST_LEN, M_IDLE);
+                            else       say(STR_HDUP_START, STR_HDUP_LEN, M_SDW);
                         end
                     end else
                         q_n <= 4'd0;
@@ -585,11 +618,9 @@ module serial_debugger (
                         else             sd_r_cnt <= {sd_r_cnt[11:0], rx_nib};
                         if (rd_n == 4'd1) begin
                             r_fin      <= 1'b0;
-                            sd_r_go    <= !(sd_err_s || sd_busy_s);
-                            str_pos    <= (sd_err_s || sd_busy_s) ? STR_LOST_START : STR_SECS_START;
-                            str_cnt    <= (sd_err_s || sd_busy_s) ? STR_LOST_LEN   : STR_SECS_LEN;
-                            return_job <= (sd_err_s || sd_busy_s) ? M_IDLE : M_SDR;
-                            main_state <= M_STR;
+                            sd_r_go    <= !sd_no;
+                            if (sd_no) say(STR_LOST_START, STR_LOST_LEN, M_IDLE);
+                            else       say(STR_SECS_START, STR_SECS_LEN, M_SDR);
                         end
                     end else
                         rd_n <= 4'd0;
@@ -599,10 +630,7 @@ module serial_debugger (
                     if (rx_byte >= "1" && rx_byte <= "4") begin
                         sd_mnt_drv <= rx_byte[1:0] - 2'd1;
                         sd_mnt_go  <= 1'b1;
-                        str_pos    <= STR_PROMPT_START;
-                        str_cnt    <= STR_PROMPT_LEN;
-                        return_job <= M_IDLE;
-                        main_state <= M_STR;
+                        prompt;
                     end
                 end else case (rx_byte)
                     "@": adr_n <= 3'd4;
@@ -619,35 +647,22 @@ module serial_debugger (
                         step_fsm <= S_START;
                     end
 
-                    "c", "C": begin
-                        dbg_mode   <= 1'b0;
-                        cpu_rdy    <= 1'b1;
-                        str_pos    <= STR_RESUME_START;
-                        str_cnt    <= STR_RESUME_LEN;
-                        return_job <= M_IDLE;
-                        main_state <= M_STR;
-                    end
+                    "c", "C": resume;
 
-                    "1": dump_addr <= 16'h0100;
-
-                    "m", "M": begin
-                        main_state <= M_MEM;
-                        seq_step   <= 5'd0;
-                        mem_col    <= 4'd0;
-                        mem_wait   <= 3'd0;
-                    end
+                    // m pages on; the presets set the address first
+                    "m", "M":  mem_dump(dump_addr);
+                    "0":       mem_dump(16'h0000);
+                    "1":       mem_dump(16'h0100);
+                    "4":       mem_dump(16'h0400);
+                    "8":       mem_dump(16'h0800);
+                    "f", "F":  mem_dump(16'hFA60);
+                    "v", "V":  mem_dump(16'hFFF0);
 
                     "x", "X": begin
                         reset_timer <= 8'd255;
                         dbg_mode    <= 1'b1;
                         cpu_rdy     <= 1'b0;
                     end
-
-                    "0":     dump_addr <= 16'h0000;
-                    "4":     dump_addr <= 16'h0400;
-                    "8":     dump_addr <= 16'h0800;
-                    "f", "F": dump_addr <= 16'hFA60;
-                    "v", "V": dump_addr <= 16'hFFF0;
 
                     "i", "I": begin
                         main_state <= M_INFO;
@@ -664,33 +679,12 @@ module serial_debugger (
                         seq_step   <= 5'd0;
                     end
 
-                    "h", "H", "?": begin
-                        str_pos    <= STR_HELP_START;
-                        str_cnt    <= STR_HELP_LEN;
-                        return_job <= M_IDLE;
-                        main_state <= M_STR;
-                    end
+                    "h", "H", "?": say(STR_HELP_START, STR_HELP_LEN, M_IDLE);
 
-                    8'h0D, 8'h0A: begin
-                        str_pos    <= STR_PROMPT_START;
-                        str_cnt    <= STR_PROMPT_LEN;
-                        return_job <= M_IDLE;
-                        main_state <= M_STR;
-                    end
+                    8'h0D, 8'h0A: prompt;
 
                     default: ;
                 endcase
-
-                // Any of the six preset addresses above starts a dump; "m"
-                // reuses the last address. Only the address differs.
-                // (not a digit that belongs to @, y, u or b)
-                if (mem_preset && adr_n == 3'd0 &&
-                    !mnt_n && q_n == 4'd0 && rd_n == 4'd0) begin
-                    main_state <= M_MEM;
-                    seq_step   <= 5'd0;
-                    mem_col    <= 4'd0;
-                    mem_wait   <= 3'd0;
-                end
             end
 
             // Main State Machine
@@ -736,116 +730,26 @@ module serial_debugger (
                 // -------------------------------------------------------------
                 M_REGS: begin
                     case (seq_step)
-                        5'd0: begin // "PC:$"
-                            str_pos    <= STR_PC_LBL_START;
-                            str_cnt    <= STR_PC_LBL_LEN;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd1;
-                            main_state <= M_STR;
-                        end
-                        5'd1: begin // 4-digit PC
-                            hex_val    <= latched_pc;
-                            hex_digits <= 3'd4;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd2;
-                            main_state <= M_HEX;
-                        end
-                        5'd2: begin // " A:$"
-                            str_pos    <= STR_A_LBL_START;
-                            str_cnt    <= STR_A_LBL_LEN;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd3;
-                            main_state <= M_STR;
-                        end
-                        5'd3: begin // 2-digit A
-                            hex_val    <= {latched_a, 8'h00};
-                            hex_digits <= 3'd2;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd4;
-                            main_state <= M_HEX;
-                        end
-                        5'd4: begin // " X:$"
-                            str_pos    <= STR_X_LBL_START;
-                            str_cnt    <= STR_X_LBL_LEN;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd5;
-                            main_state <= M_STR;
-                        end
-                        5'd5: begin // 2-digit X
-                            hex_val    <= {latched_x, 8'h00};
-                            hex_digits <= 3'd2;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd6;
-                            main_state <= M_HEX;
-                        end
-                        5'd6: begin // " Y:$"
-                            str_pos    <= STR_Y_LBL_START;
-                            str_cnt    <= STR_Y_LBL_LEN;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd7;
-                            main_state <= M_STR;
-                        end
-                        5'd7: begin // 2-digit Y
-                            hex_val    <= {latched_y, 8'h00};
-                            hex_digits <= 3'd2;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd8;
-                            main_state <= M_HEX;
-                        end
-                        5'd8: begin // " SP:$"
-                            str_pos    <= STR_S_LBL_START;
-                            str_cnt    <= STR_S_LBL_LEN;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd9;
-                            main_state <= M_STR;
-                        end
-                        5'd9: begin // 2-digit S
-                            hex_val    <= {latched_s, 8'h00};
-                            hex_digits <= 3'd2;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd10;
-                            main_state <= M_HEX;
-                        end
-                        5'd10: begin // " P:["
-                            str_pos    <= STR_P_LBL_START;
-                            str_cnt    <= STR_P_LBL_LEN;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd11;
-                            main_state <= M_STR;
-                        end
-                        5'd11: begin // Flags: N V - B D I Z C
+                        5'd0:  sub_say(STR_PC_LBL_START, STR_PC_LBL_LEN, 5'd1);   // "PC:$"
+                        5'd1:  sub_hex(latched_pc, 3'd4, 5'd2);
+                        5'd2:  sub_say(STR_A_LBL_START, STR_A_LBL_LEN, 5'd3);     // " A:$"
+                        5'd3:  sub_hex({latched_a, 8'h00}, 3'd2, 5'd4);
+                        5'd4:  sub_say(STR_X_LBL_START, STR_X_LBL_LEN, 5'd5);     // " X:$"
+                        5'd5:  sub_hex({latched_x, 8'h00}, 3'd2, 5'd6);
+                        5'd6:  sub_say(STR_Y_LBL_START, STR_Y_LBL_LEN, 5'd7);     // " Y:$"
+                        5'd7:  sub_hex({latched_y, 8'h00}, 3'd2, 5'd8);
+                        5'd8:  sub_say(STR_S_LBL_START, STR_S_LBL_LEN, 5'd9);     // " SP:$"
+                        5'd9:  sub_hex({latched_s, 8'h00}, 3'd2, 5'd10);
+                        5'd10: sub_say(STR_P_LBL_START, STR_P_LBL_LEN, 5'd11);    // " P:["
+                        // Flags N V - B D I Z C: steps 11-18 print bits 7-0
+                        5'd11, 5'd12, 5'd13, 5'd14, 5'd15, 5'd16, 5'd17, 5'd18:
                             if (!tx_fifo_full) begin
-                                fifo_push(latched_p[7] ? "N" : "-");
-                                seq_step <= 5'd12;
+                                fifo_push(latched_p[p_bit] ? P_FLAGS[8*p_bit +: 8] : "-");
+                                seq_step <= seq_step + 5'd1;
                             end
-                        end
-                        5'd12: if (!tx_fifo_full) begin fifo_push(latched_p[6] ? "V" : "-"); seq_step <= 5'd13; end
-                        5'd13: if (!tx_fifo_full) begin fifo_push("-");                     seq_step <= 5'd14; end
-                        5'd14: if (!tx_fifo_full) begin fifo_push(latched_p[4] ? "B" : "-"); seq_step <= 5'd15; end
-                        5'd15: if (!tx_fifo_full) begin fifo_push(latched_p[3] ? "D" : "-"); seq_step <= 5'd16; end
-                        5'd16: if (!tx_fifo_full) begin fifo_push(latched_p[2] ? "I" : "-"); seq_step <= 5'd17; end
-                        5'd17: if (!tx_fifo_full) begin fifo_push(latched_p[1] ? "Z" : "-"); seq_step <= 5'd18; end
-                        5'd18: if (!tx_fifo_full) begin fifo_push(latched_p[0] ? "C" : "-"); seq_step <= 5'd19; end
-                        5'd19: begin // "] OP:$"
-                            str_pos    <= STR_OP_LBL_START;
-                            str_cnt    <= STR_OP_LBL_LEN;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd20;
-                            main_state <= M_STR;
-                        end
-                        5'd20: begin // 2-digit Opcode
-                            hex_val    <= {latched_ir, 8'h00};
-                            hex_digits <= 3'd2;
-                            return_job <= M_REGS;
-                            seq_step   <= 5'd21;
-                            main_state <= M_HEX;
-                        end
-                        5'd21: begin // Prompt "\r\n> "
-                            str_pos    <= STR_PROMPT_START;
-                            str_cnt    <= STR_PROMPT_LEN;
-                            return_job <= M_IDLE;
-                            main_state <= M_STR;
-                        end
+                        5'd19: sub_say(STR_OP_LBL_START, STR_OP_LBL_LEN, 5'd20);  // "] OP:$"
+                        5'd20: sub_hex({latched_ir, 8'h00}, 3'd2, 5'd21);
+                        5'd21: prompt;
                         default: main_state <= M_IDLE;
                     endcase
                 end
@@ -855,21 +759,9 @@ module serial_debugger (
                 // -------------------------------------------------------------
                 M_MEM: begin
                     case (seq_step)
-                        5'd0: begin // CRLF
-                            str_pos    <= STR_CRLF_START;
-                            str_cnt    <= STR_CRLF_LEN;
-                            return_job <= M_MEM;
-                            seq_step   <= 5'd1;
-                            main_state <= M_STR;
-                        end
+                        5'd0: sub_say(STR_CRLF_START, STR_CRLF_LEN, 5'd1);
                         5'd1: if (!tx_fifo_full) begin fifo_push("$"); seq_step <= 5'd2; end
-                        5'd2: begin // Dump address (4 hex digits)
-                            hex_val    <= dump_addr;
-                            hex_digits <= 3'd4;
-                            return_job <= M_MEM;
-                            seq_step   <= 5'd3;
-                            main_state <= M_HEX;
-                        end
+                        5'd2: sub_hex(dump_addr, 3'd4, 5'd3);
                         5'd3: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd4; end
                         5'd4: if (!tx_fifo_full) begin
                             fifo_push(" ");
@@ -923,13 +815,7 @@ module serial_debugger (
                             mem_col  <= mem_col + 1'b1;
                             seq_step <= 5'd6;
                         end
-                        5'd10: begin // " |"
-                            str_pos    <= STR_BAR_SP_START;
-                            str_cnt    <= STR_BAR_SP_LEN;
-                            return_job <= M_MEM;
-                            seq_step   <= 5'd11;
-                            main_state <= M_STR;
-                        end
+                        5'd10: sub_say(STR_BAR_SP_START, STR_BAR_SP_LEN, 5'd11);   // " |"
                         5'd11: begin // Print 16 ASCII characters
                             if (!tx_fifo_full) begin
                                 fifo_push((mem_row[mem_col] >= 8'h20 && mem_row[mem_col] <= 8'h7E) ? mem_row[mem_col] : 8'h2E);
@@ -940,58 +826,29 @@ module serial_debugger (
                             end
                         end
                         5'd12: if (!tx_fifo_full) begin fifo_push("|"); seq_step <= 5'd13; end
-                        5'd13: begin // Prompt "\r\n> "
-                            dump_addr  <= dump_addr + 16'd16;
-                            str_pos    <= STR_PROMPT_START;
-                            str_cnt    <= STR_PROMPT_LEN;
-                            return_job <= M_IDLE;
-                            main_state <= M_STR;
+                        5'd13: begin
+                            dump_addr <= dump_addr + 16'd16;
+                            prompt;
                         end
                         default: main_state <= M_IDLE;
                     endcase
                 end
 
                 // -------------------------------------------------------------
-                // Status Display Sequencer
+                // Status Display Sequencer: VID:T PLL:1 D:<ddr_diag>, which
+                // web/src/stream.js parses
                 // -------------------------------------------------------------
                 M_STATUS: begin
                     case (seq_step)
-                        5'd0: begin
-                            str_pos    <= STR_CRLF_START;
-                            str_cnt    <= STR_CRLF_LEN;
-                            return_job <= M_STATUS;
-                            seq_step   <= 5'd1;
-                            main_state <= M_STR;
-                        end
-                        // VID:T PLL:1 D:<ddr_diag>, which web/src/stream.js parses
-                        5'd1: begin
-                            str_pos <= STR_VID_START; str_cnt <= STR_VID_LEN;
-                            return_job <= M_STATUS; seq_step <= 5'd2; main_state <= M_STR;
-                        end
+                        5'd0: sub_say(STR_CRLF_START, STR_CRLF_LEN, 5'd1);
+                        5'd1: sub_say(STR_VID_START, STR_VID_LEN, 5'd2);
                         5'd2: if (!tx_fifo_full) begin fifo_push(text_mode ? "T" : "G"); seq_step <= 5'd3; end
-                        5'd3: begin
-                            str_pos <= STR_PLL_START; str_cnt <= STR_PLL_LEN;
-                            return_job <= M_STATUS; seq_step <= 5'd4; main_state <= M_STR;
-                        end
+                        5'd3: sub_say(STR_PLL_START, STR_PLL_LEN, 5'd4);
                         5'd4: if (!tx_fifo_full) begin fifo_push(pll_locked ? "1" : "0"); seq_step <= 5'd5; end
-                        5'd5: begin
-                            str_pos <= STR_DDR_START; str_cnt <= STR_DDR_LEN;
-                            return_job <= M_STATUS; seq_step <= 5'd15; main_state <= M_STR;
-                        end
-                        5'd15: begin
-                            hex_val <= ddr_diag[31:16]; hex_digits <= 3'd4;
-                            return_job <= M_STATUS; seq_step <= 5'd16; main_state <= M_HEX;
-                        end
-                        5'd16: begin
-                            hex_val <= ddr_diag[15:0]; hex_digits <= 3'd4;
-                            return_job <= M_STATUS; seq_step <= 5'd17; main_state <= M_HEX;
-                        end
-                        5'd17: begin
-                            str_pos    <= STR_PROMPT_START;
-                            str_cnt    <= STR_PROMPT_LEN;
-                            return_job <= M_IDLE;
-                            main_state <= M_STR;
-                        end
+                        5'd5: sub_say(STR_DDR_START, STR_DDR_LEN, 5'd6);
+                        5'd6: sub_hex(ddr_diag[31:16], 3'd4, 5'd7);
+                        5'd7: sub_hex(ddr_diag[15:0], 3'd4, 5'd8);
+                        5'd8: prompt;
                         default: main_state <= M_IDLE;
                     endcase
                 end
@@ -1001,33 +858,15 @@ module serial_debugger (
                 // -------------------------------------------------------------
                 M_INFO: begin
                     case (seq_step)
-                        5'd0: begin
-                            str_pos    <= STR_CRLF_START;
-                            str_cnt    <= STR_CRLF_LEN;
-                            return_job <= M_INFO;
-                            seq_step   <= 5'd13;
-                            main_state <= M_STR;
-                        end
-                        5'd13: if (!tx_fifo_full) begin fifo_push("H"); seq_step <= 5'd14; end
-                        5'd14: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd15; end
-                        5'd15: begin
-                            hex_val <= {dsk_head, 8'h00}; hex_digits <= 3'd2;
-                            return_job <= M_INFO; seq_step <= 5'd16; main_state <= M_HEX;
-                        end
-                        5'd16: if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd27; end
-                        5'd26: if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd27; end
-                        5'd27: if (!tx_fifo_full) begin fifo_push("S"); seq_step <= 5'd28; end
-                        5'd28: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd29; end
-                        5'd29: begin
-                            hex_val <= sd_stat; hex_digits <= 3'd4;
-                            return_job <= M_INFO; seq_step <= 5'd30; main_state <= M_HEX;
-                        end
-                        5'd30: begin
-                            str_pos    <= STR_PROMPT_START;
-                            str_cnt    <= STR_PROMPT_LEN;
-                            return_job <= M_IDLE;
-                            main_state <= M_STR;
-                        end
+                        5'd0: sub_say(STR_CRLF_START, STR_CRLF_LEN, 5'd1);
+                        5'd1: if (!tx_fifo_full) begin fifo_push("H"); seq_step <= 5'd2; end
+                        5'd2: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd3; end
+                        5'd3: sub_hex({dsk_head, 8'h00}, 3'd2, 5'd4);
+                        5'd4: if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd5; end
+                        5'd5: if (!tx_fifo_full) begin fifo_push("S"); seq_step <= 5'd6; end
+                        5'd6: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd7; end
+                        5'd7: sub_hex(sd_stat, 3'd4, 5'd8);
+                        5'd8: prompt;
                         default: main_state <= M_IDLE;
                     endcase
                 end
@@ -1054,19 +893,11 @@ module serial_debugger (
                         5'd0: begin // "\r\n$SS"
                             scr_flags <= {2'b00, pll_locked, hires_mode, mixed_mode,
                                           page2, text_mode};
-                            str_pos    <= STR_SCR_START;
-                            str_cnt    <= STR_SCR_LEN;
-                            return_job <= M_SCREEN;
-                            seq_step   <= 5'd1;
-                            main_state <= M_STR;
+                            sub_say(STR_SCR_START, STR_SCR_LEN, 5'd1);
                         end
                         5'd1: if (!tx_fifo_full) begin // flags byte
                             fifo_push(" ");
-                            hex_val    <= {scr_flags, 8'h00};
-                            hex_digits <= 3'd2;
-                            return_job <= M_SCREEN;
-                            seq_step   <= 5'd2;
-                            main_state <= M_HEX;
+                            sub_hex({scr_flags, 8'h00}, 3'd2, 5'd2);
                         end
                         5'd2: if (!tx_fifo_full) begin // start of text page
                             fifo_push(" ");
@@ -1084,11 +915,8 @@ module serial_debugger (
                             end
                         end
                         5'd4: if (scr_col == 6'd40) begin // end of a text row
-                            scr_col    <= 6'd0;
-                            str_pos    <= STR_CRLF_START;
-                            str_cnt    <= STR_CRLF_LEN;
-                            return_job <= M_SCREEN;
-                            main_state <= M_STR;
+                            scr_col <= 6'd0;
+                            say(STR_CRLF_START, STR_CRLF_LEN, M_SCREEN);
                         end else begin
                             seq_step <= 5'd3;
                         end
@@ -1097,16 +925,12 @@ module serial_debugger (
                             // from: in lo-res the graphics share the text page,
                             // and these are the four lines mixed mode hides. A
                             // hi-res screen ignores them.
-                            str_pos    <= STR_GFX_START;
-                            str_cnt    <= STR_GFX_LEN;
-                            return_job <= M_SCREEN;
-                            main_state <= M_STR;
+                            sub_say(STR_GFX_START, STR_GFX_LEN, 5'd7);
                             scr_addr   <= scrgfx_row;
                             scr_left   <= 11'd160; // 4 rows of 40 bytes
                             gfx_row    <= 2'd0;
                             scr_col    <= 6'd0;
                             scr_wait   <= 3'd0;
-                            seq_step   <= 5'd7;
                         end
                         5'd7: begin
                             if (scr_left == 11'd0) begin
@@ -1122,27 +946,14 @@ module serial_debugger (
                             end else begin
                                 gfx_row  <= gfx_row + 2'd1;
                                 scr_addr <= scrgfx_row + 16'd128; // the next row's base
-                                str_pos    <= STR_CRLF_START;
-                                str_cnt    <= STR_CRLF_LEN;
-                                return_job <= M_SCREEN;
-                                main_state <= M_STR;
+                                say(STR_CRLF_START, STR_CRLF_LEN, M_SCREEN);
                             end
                         end else begin
                             seq_step <= 5'd7;
                         end
-                        5'd9: if (!tx_fifo_full) begin // "\r\n$SEND" then prompt
-                            str_pos    <= STR_END_START;
-                            str_cnt    <= STR_END_LEN;
-                            return_job <= M_SCREEN;
-                            main_state <= M_STR;
-                            seq_step   <= 5'd10;
-                        end
-                        5'd10: begin
-                            str_pos    <= STR_PROMPT_START;
-                            str_cnt    <= STR_PROMPT_LEN;
-                            return_job <= M_IDLE;
-                            main_state <= M_STR;
-                        end
+                        5'd9: if (!tx_fifo_full) // "\r\n$SEND" then prompt
+                            sub_say(STR_END_START, STR_END_LEN, 5'd10);
+                        5'd10: prompt;
                         default: main_state <= M_IDLE;
                     endcase
                 end
@@ -1165,10 +976,8 @@ module serial_debugger (
                                     end else if (rx_byte == 8'h00) x_ph <= X_CHI;
                                     else begin
                                         // 02 ends the copy; anything else is lost
-                                        str_pos    <= (rx_byte == 8'h02) ? STR_DONE_START : STR_LOST_START;
-                                        str_cnt    <= (rx_byte == 8'h02) ? STR_DONE_LEN   : STR_LOST_LEN;
-                                        return_job <= M_IDLE;
-                                        main_state <= M_STR;
+                                        if (rx_byte == 8'h02) say(STR_DONE_START, STR_DONE_LEN, M_IDLE);
+                                        else                  say(STR_LOST_START, STR_LOST_LEN, M_IDLE);
                                     end
                                 X_CHI: begin x_zn[15:8] <= rx_byte; x_ph <= X_CLO; end
                                 default: begin x_zn[7:0] <= rx_byte; x_ph <= X_ZGO; end
@@ -1177,10 +986,8 @@ module serial_debugger (
                             if (rx_valid) begin
                                 sd_x_byte  <= rx_byte;
                                 sd_x_valid <= 1'b1;
-                                if (sd_x_valid && !sd_x_take) begin   // the last one is still waiting
-                                    str_pos <= STR_LOST_START; str_cnt <= STR_LOST_LEN;
-                                    return_job <= M_IDLE; main_state <= M_STR;
-                                end
+                                if (sd_x_valid && !sd_x_take)   // the last one is still waiting
+                                    say(STR_LOST_START, STR_LOST_LEN, M_IDLE);
                             end
                             if (sd_x_take) begin
                                 x_cnt <= x_cnt + 1'b1;
@@ -1195,10 +1002,9 @@ module serial_debugger (
                         default:   // X_WAIT: the block is on the card
                             if (x_hold == 2'd0 && !sd_busy_s) begin
                                 sd_x_lba <= sd_x_lba + 1'b1;
-                                if (sd_err_s) begin
-                                    str_pos <= STR_LOST_START; str_cnt <= STR_LOST_LEN;
-                                    return_job <= M_IDLE; main_state <= M_STR;
-                                end else if (x_zrun && x_zn != 16'd0) begin
+                                if (sd_err_s)
+                                    say(STR_LOST_START, STR_LOST_LEN, M_IDLE);
+                                else if (x_zrun && x_zn != 16'd0) begin
                                     x_zn <= x_zn - 1'b1;
                                     x_ph <= X_ZGO;
                                 end else begin
@@ -1218,10 +1024,8 @@ module serial_debugger (
                         fifo_push(sd_r_byte);
                         sd_r_take <= 1'b1;
                     end else if (r_fin && !sd_r_valid) begin
-                        str_pos    <= sd_r_ok ? STR_DONE_START : STR_LOST_START;
-                        str_cnt    <= sd_r_ok ? STR_DONE_LEN   : STR_LOST_LEN;
-                        return_job <= M_IDLE;
-                        main_state <= M_STR;
+                        if (sd_r_ok) say(STR_DONE_START, STR_DONE_LEN, M_IDLE);
+                        else         say(STR_LOST_START, STR_LOST_LEN, M_IDLE);
                     end
                 end
 

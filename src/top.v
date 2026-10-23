@@ -81,15 +81,15 @@ module top (
 
     // Power-on and Button Reset Generator (S1 key triggers reset while pressed)
     reg [19:0] rst_cnt = 20'd0;
-
+    reg        sys_reset_raw = 1'b1;   // registered: it is an async reset below,
+                                       // and a 20-bit compare can glitch
     always @(posedge clk) begin
         if (btn_reset)
             rst_cnt <= 20'd0;
         else if (rst_cnt != 20'hFFFFF)
             rst_cnt <= rst_cnt + 1'b1;
+        sys_reset_raw <= btn_reset || (rst_cnt != 20'hFFFFF);
     end
-
-    wire sys_reset_raw = (rst_cnt != 20'hFFFFF);
 
     // Reset synchronizer for the Apple system domain (clk_pixel): asynchronous
     // assertion so reset takes effect immediately, synchronous deassertion to
@@ -153,12 +153,12 @@ module top (
     // DDR3 PLL lock and aux_ram ready (DDR3 calibrated + self-tested); declared
     // here because the debugger reports them (this iverilog rejects use before declaration)
     wire        ddr_lock, aux_ready;
+    wire        clocks_up = pll_locked & ddr_lock & aux_ready;   // LED 1, and PLL:1 in `t`
     wire [31:0] ddr_diag;
 
     wire [15:0] debug_cpu_pc;
     wire [7:0]  debug_dsk_head;
     wire [15:0] debug_cpu_addr;
-    wire [7:0]  debug_cpu_dout;
     wire        debug_cpu_we;
     wire        debug_cpu_sync;
     wire [7:0]  debug_cpu_a;
@@ -224,7 +224,7 @@ module top (
         .mixed_mode(mixed_mode),
         .page2(page2),
         .hires_mode(hires_mode),
-        .pll_locked(pll_locked & ddr_lock & aux_ready),  // "PLL:1" in `t`: both PLLs and DDR3 up
+        .pll_locked(clocks_up),
         .ddr_diag(ddr_diag)
     );
 
@@ -296,7 +296,7 @@ module top (
     wire [5:0]  aux_col;
 
     // The Disk ][ store's SDRAM port, from the core's copy of the store.
-    wire        dsk_store_go, dsk_store_we, dsk_store_ack, dsk_store_idle;
+    wire        dsk_store_go, dsk_store_we, dsk_store_ack;
     wire [21:0] dsk_store_addr;
     wire [15:0] dsk_store_wdata, dsk_store_rdata;
 
@@ -347,7 +347,7 @@ module top (
         .wr_go(aux_wr_go), .wr_addr(aux_wr_addr), .wr_data(aux_wr_data), .wr_busy(aux_wr_busy),
         .dsk_go(dsk_store_go), .dsk_addr(dsk_store_addr), .dsk_we(dsk_store_we),
         .dsk_wdata(dsk_store_wdata), .dsk_rdata(dsk_store_rdata),
-        .dsk_ack(dsk_store_ack), .dsk_idle(dsk_store_idle),
+        .dsk_ack(dsk_store_ack), .dsk_idle(),
         .hd_go(hd_m_go), .hd_addr(hd_m_addr), .hd_we(hd_m_we),
         .hd_be(hd_m_be), .hd_wdata(hd_m_wdata),
         .hd_rdata(hd_rdata), .hd_ack(hd_m_ack),
@@ -419,7 +419,6 @@ module top (
         .dsk_store_go(dsk_store_go), .dsk_store_addr(dsk_store_addr),
         .dsk_store_we(dsk_store_we), .dsk_store_wdata(dsk_store_wdata),
         .dsk_store_rdata(dsk_store_rdata), .dsk_store_ack(dsk_store_ack),
-        .dsk_store_idle(dsk_store_idle),
         .ssc_rx_data(ssc_rx_data), .ssc_rx_valid(ssc_rx_valid), .ssc_lines(ssc_lines),
         .ssc_tx_req(ssc_tx_req), .ssc_tx_byte(ssc_tx_byte), .ssc_tx_ack(ssc_tx_ack),
         .ssc_st_req(ssc_st_req), .ssc_st_byte(ssc_st_byte), .ssc_st_ack(ssc_st_ack),
@@ -451,7 +450,6 @@ module top (
         .debug_cpu_pc(debug_cpu_pc),
         .debug_dsk_head(debug_dsk_head),
         .debug_cpu_addr(debug_cpu_addr),
-        .debug_cpu_dout(debug_cpu_dout),
         .debug_cpu_we(debug_cpu_we),
         .debug_cpu_sync(debug_cpu_sync),
         .debug_cpu_a(debug_cpu_a),
@@ -545,8 +543,6 @@ module top (
     // framebuffer, to verify the clocking/TMDS/serializer/audio path
     // independent of the CPU, RAM and video_generator. See
     // src/colorbar_gen.v.
-    wire test_pattern_enable = btn_test;
-
     wire [23:0] bar_rgb;
 
     colorbar_gen u_colorbar (
@@ -559,7 +555,7 @@ module top (
 
     // Black while the TF card loads: the CPU is held, so the ROM has not
     // cleared the text page yet.
-    wire [23:0] hdmi_rgb = test_pattern_enable ? bar_rgb
+    wire [23:0] hdmi_rgb = btn_test ? bar_rgb
                          : hd_loading          ? 24'h000000
                                                : {vid_red, vid_green, vid_blue};
 
@@ -621,7 +617,7 @@ module top (
         .reset(sys_reset),
         .ce_1m(ce_1m),
         .spkr_pulse(spkr_pulse),
-        .test_tone_enable(test_pattern_enable),
+        .test_tone_enable(btn_test),
         .mock_left(mock_left),
         .mock_right(mock_right),
         .i2s_bclk(i2s_bclk),
@@ -643,34 +639,11 @@ module top (
     // LED 4: Video mode (ON = Text, OFF = Graphics)
     // LED 5: Keyboard strobe active
     assign led[0] = ~flash_clk;
-    assign led[1] = ~(pll_locked & ddr_lock & aux_ready);
+    assign led[1] = ~clocks_up;
     assign led[2] = sys_reset;
     assign led[3] = ~debug_cpu_we;
     assign led[4] = ~text_mode;
     assign led[5] = ~key_strobe;
 
-endmodule
-
-// A Dock key, debounced: synchronised, and it has to read the same for 2^18
-// clocks (~10 ms) before a change counts, so a press is one pulse however it
-// bounces.  Active low (the Dock's 10k pull-ups).
-module key_press (
-    input  wire clk,
-    input  wire key_n,
-    output reg  press = 1'b0      // one clock, as the key goes down
-);
-    reg  [1:0]  sync  = 2'b11;
-    reg         level = 1'b0;     // debounced: 1 = held
-    reg  [17:0] cnt   = 18'd0;
-    always @(posedge clk) begin
-        sync  <= {sync[0], key_n};
-        press <= 1'b0;
-        if (~sync[1] == level) cnt <= 18'd0;
-        else if (&cnt) begin
-            level <= ~level;
-            cnt   <= 18'd0;
-            press <= ~level;
-        end else cnt <= cnt + 18'd1;
-    end
 endmodule
 

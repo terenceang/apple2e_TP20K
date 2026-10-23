@@ -23,6 +23,7 @@
 // after each write, likewise.  DTR and the baud go to the page whenever they
 // change (1F <st>: bit 7 set, bit 6 DTR, bits 3:0 the baud code), and the
 // page's carrier and DSR come back as the status bits (FF 07).
+`include "src/hdmi/hdmi_defs.vh"   // VM_PIXEL_HZ: the clock
 `default_nettype none
 
 module ssc (
@@ -60,23 +61,25 @@ module ssc (
     wire      rx_irq_en = dtr && !cmd[1];
     wire      tx_irq_en = dtr && (cmd[3:2] == 2'b01);
 
-    // one character (10 bits) at the programmed rate, in clocks
+    // one character (10 bits) at the programmed rate, in clocks, rounded
+`define SSC_CHAR(baud) (((10 * `VM_PIXEL_HZ) + (baud) / 2) / (baud))
     function [21:0] char_clks(input [3:0] b);
         case (b)
-            4'd0:  char_clks = 22'd2344;       // 115200 (internal clock)
-            4'd6:  char_clks = 22'd900000;     // 300
-            4'd7:  char_clks = 22'd450000;     // 600
-            4'd8:  char_clks = 22'd225000;     // 1200
-            4'd9:  char_clks = 22'd150000;     // 1800
-            4'd10: char_clks = 22'd112500;     // 2400
-            4'd11: char_clks = 22'd75000;      // 3600
-            4'd12: char_clks = 22'd56250;      // 4800
-            4'd13: char_clks = 22'd37500;      // 7200
-            4'd14: char_clks = 22'd28125;      // 9600
-            4'd15: char_clks = 22'd14063;      // 19200
-            default: char_clks = 22'd2454545;  // 50-150: as 110
+            4'd0:  char_clks = `SSC_CHAR(115200);  // internal clock
+            4'd6:  char_clks = `SSC_CHAR(300);
+            4'd7:  char_clks = `SSC_CHAR(600);
+            4'd8:  char_clks = `SSC_CHAR(1200);
+            4'd9:  char_clks = `SSC_CHAR(1800);
+            4'd10: char_clks = `SSC_CHAR(2400);
+            4'd11: char_clks = `SSC_CHAR(3600);
+            4'd12: char_clks = `SSC_CHAR(4800);
+            4'd13: char_clks = `SSC_CHAR(7200);
+            4'd14: char_clks = `SSC_CHAR(9600);
+            4'd15: char_clks = `SSC_CHAR(19200);
+            default: char_clks = `SSC_CHAR(110);   // 50-150: as 110
         endcase
     endfunction
+`undef SSC_CHAR
 
     // address decode: reads by address (the read mux needs no strobe), side
     // effects and writes on slot 1's /DEVSEL, which is bus_cycle-qualified

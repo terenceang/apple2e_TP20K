@@ -47,7 +47,7 @@ module tb_softcard;
         .aux_wr_go(aux_wr_go), .aux_wr_addr(aux_wr_addr), .aux_wr_data(aux_wr_data),
         .aux_wr_busy(aux_wr_busy),
         .dsk_store_go(), .dsk_store_addr(), .dsk_store_we(), .dsk_store_wdata(),
-        .dsk_store_rdata(16'd0), .dsk_store_ack(1'b0), .dsk_store_idle(1'b1),
+        .dsk_store_rdata(16'd0), .dsk_store_ack(1'b0),
         .hd_present(2'b00), .hd_go(), .hd_addr(), .hd_we(), .hd_be(), .hd_wdata(),
         .hd_rdata(16'd0), .hd_ack(1'b0), .hd_wb_go(), .hd_wb_drv(), .hd_wb_blk(),
         .hd_rb_go(), .hd_rb_ok(1'b0), .hd_size0(16'd0), .hd_size1(16'd0), .hd_sd_busy(1'b0),
