@@ -118,12 +118,13 @@ if (-not $Target -or $Target -in @('tb_prodos_hd', 'hdrom')) {
         if ($code -ne 0) { throw "FAILED: python $($py -join ' ')" }
     }
 }
-Run-Tb 'tb_disk2'        $disk2 -Gen '2012' -Defines $disk2Defines
-# tb_sdvol and tb_sdcopy boot from a FAT32 card built by the page's own FAT code
-if (-not $Target -or $Target -in @('tb_sdvol', 'tb_sdcopy')) {
+# tb_sdvol and tb_sdcopy boot from a FAT32 card built by the page's own FAT
+# code, and tb_disk2 and tb_p6boot read .woz files made by its converter
+if (-not $Target -or $Target -in @('tb_sdvol', 'tb_sdcopy', 'tb_disk2', 'tb_p6boot')) {
     & node (Join-Path $root 'web\scripts\simcard.mjs')
     if ($LASTEXITCODE -ne 0) { throw 'FAILED: web/scripts/simcard.mjs' }
 }
+Run-Tb 'tb_disk2'        $disk2 -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_sdvol'        @('sim/models/sdcard.v', 'src/sd_vol.v', 'src/spi_byte.v') -Gen '2012'
 Run-Tb 'tb_sdcopy'       @('sim/models/sdcard.v', 'src/sd_vol.v', 'src/spi_byte.v', 'src/serial_debugger.v') -Gen '2012'
 Run-Tb 'tb_video_hdmi'   (@('src/video_generator.v', 'src/colorbar_gen.v') + $hdmi)

@@ -10,7 +10,7 @@ This project's code was written with AI assistance.
 - **128 KB**: 48 KB main RAM and the 16 KB ROM in block RAM; the aux 64 KB and the language card in the SOM's DDR3
 - **HDMI video** at 720×480p60 (CEA-861 VIC 2), with the 560×384 Apple display centered: text (40 and 80 column, MouseText), lo-res, hi-res and double hi-res, mixed mode and page 2; colour is an NTSC-style decode of the dot stream, so fills, fringes and the palette bit look as they do on a TV
 - **Audio** from the $C030 speaker and a **Mockingboard C** in slot 4, over HDMI (48 kHz L-PCM) and through the Dock's PT8211 DAC and amplifier to the 3.5 mm jack
-- **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes, also answering as a SmartPort), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files. Floppy emulation includes 74LS123 motor spin-down timing and flux dynamics for fast, accurate DOS 3.3 and ProDOS loading
+- **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes, also answering as a SmartPort), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files. Floppies are **WOZ** files played bit by bit through a model of the controller's sequencer, so copy-protected originals, 13-sector disks and bit copiers work, and every write is kept exactly
 - **Clock** in slot 5 that ProDOS uses as a Thunderclock, so files get dated; the web page sets the time when it connects (there is no battery, so it is lost at power-off)
 - **Z-80 SoftCard** in slot 2 (Microsoft's, at its 2.045 MHz), for Apple CP/M; the Z80 takes the bus over from the 6502 as on the real card
 - **Keyboard, gamepad and debugger over USB serial** at 1 Mbps; the [browser front end](web/README.md) in `web/` has the keyboard, the text screen, the debugger and the disk drives
@@ -46,7 +46,7 @@ powershell -File sim\run.ps1 -Target tb_sdvol
 
 ## Using it
 
-1. **A FAT32 TF card is required**: every drive loads from an image file on it, and there is no other way in. Copy disk images onto it on a PC (`.dsk`/`.do`/`.po` floppies, `.hdv`/`.po` hard-disk volumes) and put it in the SOM's slot; images can also be copied onto it later from the web page.
+1. **A FAT32 TF card is required**: every drive loads from an image file on it, and there is no other way in. Put floppies on it as `.woz` (the web page converts `.dsk`/`.do`/`.po`/`.nib` on upload; with a card reader, convert them with `node web/scripts/towoz.mjs`) and hard-disk volumes as `.hdv`/`.po`, and put it in the SOM's slot; images can also be copied onto it later from the web page.
 2. Connect HDMI and the Dock's USB-C, and flash the bitstream.
 3. Open the [web front end](web/README.md) in Chrome or Edge and press Connect. The Disks pane lists the card's images; click one and pick a drive, or use LOAD → *From this computer…* to copy an image onto the card and load it in one go. The board remembers the choice in `A2CONFIG.TXT` on the card and loads it at every power-on.
 
@@ -74,11 +74,13 @@ The TF card commands the web page uses (`b u y`) are described in [`web/README.m
 
 ### The TF card
 
-An ordinary FAT32 card, readable on any PC. Images go in the root directory; `A2CONFIG.TXT` there names each drive's file by its 8.3 name (`S6D1=LODERU~1.DSK`), and the web page writes it for you. The FPGA has no file system of its own: at power-on it finds the config and the four files by name, checks each is in one piece on the card and of the right size, and streams the floppies in. Hard-disk volumes stay on the card: each block is read when ProDOS asks for it, and the last one read or written is remembered. A file that is missing, fragmented or the wrong kind leaves its drive empty, and the page says why. Slot 6 takes 143,360-byte `.dsk`/`.do`/`.po` images; slot 7 takes `.hdv`/`.po` volumes up to 32 MB (a `.dsk` is in DOS sector order, so it cannot be a ProDOS block device).
+An ordinary FAT32 card, readable on any PC. Images go in the root directory; `A2CONFIG.TXT` there names each drive's file by its 8.3 name (`S6D1=LODERU~1.WOZ`), and the web page writes it for you. The FPGA has no file system of its own: at power-on it finds the config and the four files by name, checks each is in one piece on the card and of the right size, and streams the floppies in. Hard-disk volumes stay on the card: each block is read when ProDOS asks for it, and the last one read or written is remembered. A file that is missing, fragmented or the wrong kind leaves its drive empty, and the page says why. Slot 6 takes `.woz` files (WOZ 2, up to 1 MB); slot 7 takes `.hdv`/`.po` volumes up to 32 MB.
 
-### Disk II floppy and hard-disk timing
+### Floppies: WOZ, bit by bit
 
-Disk II floppy emulation accurately models the controller's 74LS123 motor-off one-shot timer (~1.0 s spin-down delay) and flux transition dynamics on data reads. This allows Apple DOS 3.3 and RWTS to detect a spinning drive and stream sectors at full native speed (cold boot to DOS prompt in ~1.2 s, full DOS 3.3 System Master boot with `HELLO`/`INTBASIC` in ~14.5 s) without incurring repeated 1-second motor spin-up delays between sectors.
+Slot 6 reads one format, [WOZ 2](https://applesaucefdc.com/woz/reference2/), the preservation format for Apple II disks: each track is the stream of bits the drive head sees. The whole file sits in DDR3; the card plays the track under the head one bit per 4 CPU cycles (300 rpm), through a model of the MC3470 read amplifier (long runs of zeros read as noise) into the controller's shift register and data latch, so self-sync, nibble counts, odd address marks and half/quarter tracks behave as on the hardware. Writes go into the same bits, one per 4 cycles, so a format or a bit copier writes exactly what it wrote on a real drive; the written blocks of the file are copied back to the card about a second after the drive goes quiet (the file's CRC is set to 0, which WOZ readers take as "not computed").
+
+The conversion is done on the PC, by the page or `web/scripts/towoz.mjs`: `.dsk`/`.do` (DOS order) and 140K `.po` (ProDOS order) become standard 16-sector tracks, `.nib` keeps its nibbles, and WOZ 1 is re-laid as WOZ 2. **New blank floppy** on the page makes an unformatted disk for DOS `INIT` or a ProDOS format, and a `.woz` of a standard disk can be downloaded back as a `.dsk`. The drive's 74LS123 motor spin-down (~1 s) is modelled too, so DOS does not wait for spin-up between sectors.
 
 Estimated hard-disk timing per 512-byte block (from the design, not yet measured on hardware):
 
@@ -95,7 +97,7 @@ That is roughly 60 KB/s, set by the 1 MHz CPU rather than the card: about 5–10
 
 To measure your own card: use the hard disk for a while, press Ctrl+B, then `@c0f0` and `m`. The last eight bytes of that line are four 16-bit little-endian times in units of 9.48 µs: the last read, the worst read, the last write and the worst write (the card's part only; a remembered block reads as 0). `POKE 49399,0` (`$C0F7`) clears them.
 
-Copying through the board runs at the serial link's speed, about 13 s for a floppy and up to ~48 minutes for a full 32 MB volume, so big volumes are best copied with a card reader.
+Copying through the board runs at the serial link's speed, about 20 s for a floppy and up to ~48 minutes for a full 32 MB volume, so big volumes are best copied with a card reader.
 
 ### LEDs
 
@@ -110,7 +112,7 @@ Copying through the board runs at the serial link's speed, about 13 s for a flop
 
 ### CP/M (Z-80 SoftCard)
 
-Slot 2 holds a Microsoft Z-80 SoftCard. Put a 16-sector SoftCard CP/M disk image (2.20 or 2.23) on the TF card as `S6D1` and boot it with `PR#6` (with a hard-disk volume in slot 7, the Autostart ROM boots that first). CP/M finds the card itself. The Z80 runs at the real card's 2.045 MHz and shares the Apple's memory and I/O, so the 6502 waits while it runs, as on the real card. Not yet tried on hardware.
+Slot 2 holds a Microsoft Z-80 SoftCard. Put a SoftCard CP/M disk image (2.20 or 2.23) on the TF card as `S6D1` and boot it with `PR#6` (with a hard-disk volume in slot 7, the Autostart ROM boots that first). CP/M finds the card itself. The Z80 runs at the real card's 2.045 MHz and shares the Apple's memory and I/O, so the 6502 waits while it runs, as on the real card. Not yet tried on hardware.
 
 ## Web front end
 

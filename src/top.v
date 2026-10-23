@@ -95,14 +95,14 @@ module top (
 
     // The image store's byte ports (inside the core), from sd_vol only: every
     // drive's disk is a file on the TF card, loaded and written back by it.
-    wire        img_up_go, img_up_drive, img_up_last, img_up_bad, img_up_busy, img_up_done;
-    wire [17:0] img_up_addr;
+    wire        img_up_go, img_up_drive, img_up_last, img_up_ro, img_up_bad, img_up_busy, img_up_done;
+    wire [19:0] img_up_addr;
     wire [7:0]  img_up_data;
     wire        img_dn_go, img_dn_drive, img_dn_valid;
-    wire [17:0] img_dn_addr;
+    wire [19:0] img_dn_addr;
     wire [7:0]  img_dn_data;
     wire        fl_wr, fl_wr_drv;
-    wire [5:0]  fl_wr_trk;
+    wire [10:0] fl_wr_blk;
 
     // The slot 7 hard disk's DDR3 port (aux_ram hd_*), shared by the card in
     // the core and the TF card loader (src/sd_vol.v).  They never ask at once:
@@ -340,10 +340,10 @@ module top (
         .m_go(sd_m_go), .m_addr(sd_m_addr), .m_we(sd_m_we), .m_wdata(sd_m_wdata),
         .m_rdata(hd_rdata), .m_ack(hd_m_ack && hd_own_s),
         .f_up_go(img_up_go), .f_up_drive(img_up_drive), .f_up_addr(img_up_addr), .f_up_data(img_up_data),
-        .f_up_last(img_up_last), .f_up_bad(img_up_bad), .f_up_busy(img_up_busy), .f_up_done(img_up_done),
+        .f_up_last(img_up_last), .f_up_ro(img_up_ro), .f_up_bad(img_up_bad), .f_up_busy(img_up_busy), .f_up_done(img_up_done),
         .f_dn_go(img_dn_go), .f_dn_drive(img_dn_drive), .f_dn_addr(img_dn_addr),
         .f_dn_data(img_dn_data), .f_dn_valid(img_dn_valid),
-        .fl_wr(fl_wr), .fl_wr_drv(fl_wr_drv), .fl_wr_trk(fl_wr_trk),
+        .fl_wr(fl_wr), .fl_wr_drv(fl_wr_drv), .fl_wr_blk(fl_wr_blk),
         .bg_hold(dbg_mode),
         .present(sd_present), .fail(sd_fail), .fs_ok(sd_fs_ok),
         .loading(hd_loading), .busy(hd_sd_busy), .err(sd_err), .estage(sd_estage),
@@ -381,7 +381,7 @@ module top (
         .vram_req(vram_req),
         .vram_addr(vram_addr),
         .vram_data(vram_data),
-        .fl_wr(fl_wr), .fl_wr_drv(fl_wr_drv), .fl_wr_trk(fl_wr_trk),
+        .fl_wr(fl_wr), .fl_wr_drv(fl_wr_drv), .fl_wr_blk(fl_wr_blk),
         .char_rom_addr(char_rom_addr),
         .char_rom_data(char_rom_data),
         .aux_rd_want(aux_rd_want), .aux_rd_addr(aux_rd_addr),
@@ -408,6 +408,7 @@ module top (
         .img_up_addr(img_up_addr),
         .img_up_data(img_up_data),
         .img_up_last(img_up_last),
+        .img_up_ro(img_up_ro),
         .img_up_bad(img_up_bad),
         .img_up_busy(img_up_busy),
         .img_up_done(img_up_done),

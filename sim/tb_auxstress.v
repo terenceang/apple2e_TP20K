@@ -40,7 +40,7 @@ module tb_auxstress;
         .hires_mode(hires_mode), .col80(), .altchar(), .dhires(dhires), .store80(store80),
         .vbl(1'b0), .clk_set(1'b0), .clk_time(52'd0),
         .vram_req(vram_req), .vram_addr(vram_addr), .vram_data(vram_data),
-        .fl_wr(), .fl_wr_drv(), .fl_wr_trk(),
+        .fl_wr(), .fl_wr_drv(), .fl_wr_blk(),
         .char_rom_addr(12'd0), .char_rom_data(),
         .aux_rd_want(aux_rd_want), .aux_rd_addr(aux_rd_addr), .aux_rd_hit(aux_rd_hit),
         .aux_rd_data(aux_rd_data),

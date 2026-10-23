@@ -10,6 +10,7 @@ import { mkfs, memoryDevice, Fat32 } from '../src/fat32.js'
 import { Card, fitsDrive, prepareCardFile } from '../src/card.js'
 import { parseCardStatus, readSectors, writeSectors, reloadDrive } from '../src/disk.js'
 import { createCardBoard } from './board.js'
+import { dskToWoz, wozToDsk } from '../src/woz.js'
 
 const MB = 1024 * 1024
 const bytes = (n, seed = 1) => Uint8Array.from({ length: n }, (_, i) => (i * 7 + seed + (i >> 9)) & 0xff)
@@ -53,19 +54,21 @@ test('upload, list, mount, move between drives, eject and download', async () =>
   await card.upload('Total Replay.hdv', vol)
 
   let s = await card.scan()
-  assert.deepEqual(s.files.map((f) => f.name), ['Lode Runner.dsk', 'Total Replay.hdv'])
+  assert.deepEqual(s.files.map((f) => f.name), ['Lode Runner.woz', 'Total Replay.hdv'], 'a floppy goes on as .woz')
   const [lode, tr] = s.files
-  assert.ok(fitsDrive(lode, 0) && !fitsDrive(lode, 2), 'a .dsk is DOS order: slot 6 only')
+  assert.ok(fitsDrive(lode, 0) && !fitsDrive(lode, 2), 'a .woz is slot 6 only')
   assert.ok(!fitsDrive(tr, 0) && fitsDrive(tr, 2))
   const po = { name: 'ProDOS.po', short: 'PRODOS  PO ', size: 143360 }
-  assert.ok(fitsDrive(po, 0) && fitsDrive(po, 2), 'a 140K .po fits either slot')
+  assert.ok(!fitsDrive(po, 0) && fitsDrive(po, 2), 'a .po on the card is a slot 7 volume')
+  const dsk = { name: 'GAME.DSK', short: 'GAME    DSK', size: 143360 }
+  assert.ok(!fitsDrive(dsk, 0), 'slot 6 reads .woz only')
 
   await card.mount(0, lode, fast)
   await card.mount(2, tr, fast)
   assert.deepEqual(board.present, [true, false, true, false])
   s = await card.scan()
-  assert.deepEqual(s.config, { S6D1: 'LODERU~1.DSK', S6D2: null, S7D1: 'TOTALR~1.HDV', S7D2: null })
-  assert.equal(s.drives[0].name, 'Lode Runner.dsk')
+  assert.deepEqual(s.config, { S6D1: 'LODERU~1.WOZ', S6D2: null, S7D1: 'TOTALR~1.HDV', S7D2: null })
+  assert.equal(s.drives[0].name, 'Lode Runner.woz')
 
   // the floppy into S6D2: it leaves S6D1, which reloads empty
   await card.mount(1, lode, fast)
@@ -77,13 +80,13 @@ test('upload, list, mount, move between drives, eject and download', async () =>
   assert.deepEqual((await card.scan()).config.S7D1, null)
   assert.deepEqual(board.present, [false, true, false, false])
 
-  assert.deepEqual(await card.download(lode), game)
+  assert.deepEqual(wozToDsk(await card.download(lode)), game, 'the .woz decodes back to the .dsk')
   await card.remove(tr)
-  assert.deepEqual((await card.scan()).files.map((f) => f.name), ['Lode Runner.dsk'])
+  assert.deepEqual((await card.scan()).files.map((f) => f.name), ['Lode Runner.woz'])
 
   // what the board sees is a FAT32 card a PC could read: check with a fresh mount
   const fs = await new Fat32(memoryDevice(board.img)).mount()
-  assert.deepEqual(await fs.readFile(await fs.find('Lode Runner.dsk')), game)
+  assert.deepEqual(wozToDsk(await fs.readFile(await fs.find('Lode Runner.woz'))), game)
 })
 
 test('a fragmented file is refused before the board is asked', async () => {
@@ -106,8 +109,10 @@ test('a hand-edited config the page cannot read is left alone', async () => {
 })
 
 test('prepareCardFile: floppy sizes, .2mg becomes .po, other files are refused', () => {
-  assert.equal(prepareCardFile('a.dsk', new Uint8Array(143360)).name, 'a.dsk')
-  assert.throws(() => prepareCardFile('a.dsk', new Uint8Array(1000)), /floppy image/)
+  assert.equal(prepareCardFile('a.dsk', new Uint8Array(143360)).name, 'a.woz')
+  assert.deepEqual(prepareCardFile('b.po', bytes(143360)).data, dskToWoz(bytes(143360), 'po'), 'a 140K .po is a floppy')
+  assert.equal(prepareCardFile('c.nib', new Uint8Array(35 * 6656)).name, 'c.woz')
+  assert.throws(() => prepareCardFile('a.dsk', new Uint8Array(1000)), /a\.dsk: a floppy image is 143,360 bytes/)
   const two = new Uint8Array(64 + 1024)
   two.set([0x32, 0x49, 0x4d, 0x47]) // "2IMG"
   const v = new DataView(two.buffer)

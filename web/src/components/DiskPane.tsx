@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DiskProgress, CardState, CardFile } from '../useApple'
 import { fitsDrive } from '../card.js'
+import { blankWoz } from '../woz.js'
 
 // Every drive's disk is a file on the TF card: LOAD picks one (or copies one
 // from this computer onto the card first), EJECT empties the drive.  There is
@@ -12,7 +13,7 @@ interface Props {
   error: string | null
   onCardRefresh: () => Promise<void>
   onCardUpload: (file: File) => Promise<CardFile | null>
-  onCardDownload: (f: CardFile) => Promise<void>
+  onCardDownload: (f: CardFile, asDsk?: boolean) => Promise<void>
   onCardDelete: (f: CardFile) => Promise<void>
   onCardMount: (d: number, f: CardFile | null) => Promise<void>
   onClearError: () => void
@@ -22,7 +23,7 @@ interface Props {
 
 /** Drives in the board's order: slot 6 drives 1-2, slot 7 drives 1-2. */
 const LABEL = ['S6,D1', 'S6,D2', 'S7,D1', 'S7,D2']
-const ACCEPT = '.dsk,.do,.po,.hdv,.2mg'
+const ACCEPT = '.dsk,.do,.po,.nib,.woz,.hdv,.2mg'
 const kb = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`)
 const quiet = (p: Promise<unknown>) => void p.catch(() => {}) // the error banner shows it
 
@@ -253,6 +254,10 @@ export function DiskPane(p: Props) {
                   <summary title="More">⋯</summary>
                   <div className="dd-menu">
                     <button type="button" onClick={() => quiet(p.onCardDownload(f))} disabled={busy}>Download</button>
+                    {/\.woz$/i.test(f.name) && (
+                      <button type="button" onClick={() => quiet(p.onCardDownload(f, true))} disabled={busy}
+                        title="Decoded to DOS-order sectors; only a standard (unprotected) disk decodes">Download as .dsk</button>
+                    )}
                     <button type="button" onClick={() => setAsk({ kind: 'delete', file: f })} disabled={busy || on.length > 0}
                       title={on.length ? 'Eject it first' : undefined}>Delete</button>
                   </div>
@@ -261,9 +266,15 @@ export function DiskPane(p: Props) {
             )
           })}
           <button type="button" className="tile tile-add" onClick={() => fromComputer(null)} disabled={busy || !onCard}
-            title="Copy a disk image onto the card (about 13 s for a floppy; a full 32 MB volume is much faster with a card reader)">
+            title="Copy a disk image onto the card; a floppy (.dsk .do .po .nib .woz) is converted to .woz on the way (about 20 s; a full 32 MB volume is much faster with a card reader)">
             <span className="tile-icon">＋</span>
             <span className="tile-name">Add disk</span>
+          </button>
+          <button type="button" className="tile tile-add" disabled={busy || !onCard}
+            onClick={() => quiet(p.onCardUpload(new File([blankWoz() as unknown as BlobPart], `New disk ${Date.now() % 10000}.woz`)))}
+            title="A blank floppy on the card, to INIT in DOS 3.3 or format in ProDOS">
+            <span className="tile-icon">＋</span>
+            <span className="tile-name">New blank floppy</span>
           </button>
         </div>
       </div>

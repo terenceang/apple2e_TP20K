@@ -160,7 +160,7 @@ loaded). It holds every drive's image as an ordinary file on FAT32 (a PC
 formats it and can copy images on and off; cards over 32 GB must be
 reformatted FAT32, and a card in the old raw-slot layout must be reformatted).
 `A2CONFIG.TXT` in the root says what each drive loads, one line per drive by
-8.3 name (`S6D1=LODERU~1.DSK ; Lode Runner.dsk`; `src/config.js`). The board
+8.3 name (`S6D1=LODERU~1.WOZ ; Lode Runner.woz`; `src/config.js`). The board
 reads it at power-on and finds the files itself (`src/sd_vol.v`); a file must
 be in one run of clusters, which every file the page writes is. Everything
 else -- listing, copying, deleting, rewriting the config -- is the page's own
@@ -181,8 +181,17 @@ FAT32 (`src/fat32.js`, `src/card.js`) over three debugger commands:
   second for a floppy; a volume is only looked up, its blocks are read from
   the card as ProDOS asks) (`reloadDrive`).
 
-A floppy the Apple writes goes back into its `.dsk` file by itself, about a
-second after the drive goes quiet (never during a debugger session).
+Slot 6 reads `.woz` (WOZ 2) only, and `src/woz.js` converts on upload:
+`.dsk`/`.do` (DOS order) and a 140K `.po` (ProDOS order) to standard
+16-sector tracks, `.nib` to its nibbles, WOZ 1 to WOZ 2 (`toWoz`); a 140K
+`.po` is taken as a floppy, so name a 140K ProDOS volume `.hdv` for slot 7.
+**New blank floppy** uploads `blankWoz()`, and **Download as .dsk** decodes a
+standard disk back (`wozToDsk`, which refuses a track it cannot decode).
+`scripts/towoz.mjs` is the same conversion from the command line, for a card
+written with a card reader. The board writes the blocks of a `.woz` the Apple
+wrote back into the file by itself, about a second after the drive goes quiet
+(never during a debugger session), and zeroes the file's CRC (WOZ's "not
+computed").
 
 Commands are only accepted when the debugger's main state is idle, and anything
 sent sooner is dropped without a word. The banner prints **two** prompts -- one

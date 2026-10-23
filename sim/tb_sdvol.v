@@ -7,17 +7,20 @@
 //
 // From reset: the card comes up, A2CONFIG.TXT is found in a root directory
 // that runs past one cluster, and the four names it gives are looked up:
-// GAME.DSK (S6D1) loads into the store in physical sector order, FRAG.PO
-// (S6D2) is fragmented and MISSING.HDV (S7D2) is not on the card, so both
-// fail, and PRODOS~1.HDV (S7D1, 16 blocks) is found but not loaded.  Then:
+// GAME.WOZ (S6D1) loads into the store byte for byte but for its zeroed CRC,
+// FRAG.WOZ (S6D2) is fragmented and MISSING.HDV (S7D2) is not on the card, so
+// both fail, and PRODOS~1.HDV (S7D1, 16 blocks) is found but not loaded.  Then:
 // a block asked for (rb_go) is read into the DDR3, asking again does not
 // touch the card, one past the file's end or on an empty drive fails
 // (rb_ok = 0), a block written back lands in the file's sector, one past
 // the file's end is dropped, reading the block just written does not touch
-// the card, a floppy track the Apple wrote goes back to the file in DOS
-// order once the drive is quiet, the raw read hands over a file's sectors,
+// the card, the blocks of a .woz the Apple wrote (lowest to highest, then
+// block 0 once, for the CRC) go back to the file once the drive is quiet, a
+// second write sends only its own block, the raw read hands over a file's sectors,
 // a read past the card's end only answers r_ok = 0, and a reload of S6D1
-// ejects it from the store and loads it again.  A second instance with no
+// ejects it from the store and loads it again with what was written.  In
+// S6D2: a file that is not WOZ2 and a .DSK are refused, and a write-protected
+// .woz says so with its last byte.  A second instance with no
 // card must give up (err) and drop `loading`, so a missing card cannot hold
 // the CPU.
 module tb_sdvol;
@@ -42,14 +45,14 @@ module tb_sdvol;
     reg  [1:0]  mnt_drv = 2'd0;
     reg  [15:0] wb_blk = 16'd0;
     reg         fl_wr = 1'b0;
-    reg  [5:0]  fl_wr_trk = 6'd0;
+    reg  [10:0] fl_wr_blk = 11'd0;
     reg         r_go = 1'b0, r_take = 1'b0;
     reg  [31:0] r_lba = 32'd0;
     reg  [15:0] r_cnt = 16'd0;
     wire [7:0]  r_byte;
     wire        r_valid, r_done, r_ok;
-    wire        f_up_go, f_up_drive, f_up_last, f_up_bad, f_dn_go, f_dn_drive;
-    wire [17:0] f_up_addr, f_dn_addr;
+    wire        f_up_go, f_up_drive, f_up_last, f_up_ro, f_up_bad, f_dn_go, f_dn_drive;
+    wire [19:0] f_up_addr, f_dn_addr;
     wire [7:0]  f_up_data;
     reg         f_up_done = 1'b0, f_dn_valid = 1'b0;
     reg  [7:0]  f_dn_data = 8'h00;
@@ -61,10 +64,10 @@ module tb_sdvol;
         .m_go(m_go), .m_addr(m_addr), .m_we(m_we), .m_wdata(m_wdata),
         .m_rdata(m_rdata), .m_ack(m_ack),
         .f_up_go(f_up_go), .f_up_drive(f_up_drive), .f_up_addr(f_up_addr), .f_up_data(f_up_data),
-        .f_up_last(f_up_last), .f_up_bad(f_up_bad), .f_up_busy(f_up_done), .f_up_done(f_up_done),
+        .f_up_last(f_up_last), .f_up_ro(f_up_ro), .f_up_bad(f_up_bad), .f_up_busy(f_up_done), .f_up_done(f_up_done),
         .f_dn_go(f_dn_go), .f_dn_drive(f_dn_drive), .f_dn_addr(f_dn_addr),
         .f_dn_data(f_dn_data), .f_dn_valid(f_dn_valid),
-        .fl_wr(fl_wr), .fl_wr_drv(1'b0), .fl_wr_trk(fl_wr_trk), .bg_hold(1'b0),
+        .fl_wr(fl_wr), .fl_wr_drv(1'b0), .fl_wr_blk(fl_wr_blk), .bg_hold(1'b0),
         .present(present), .fail(fail), .fs_ok(fs_ok),
         .loading(loading), .busy(busy), .err(err), .estage(estage),
         .wb_go(wb_go), .wb_drv(wb_drv), .wb_blk(wb_blk),
@@ -82,10 +85,10 @@ module tb_sdvol;
         .sd_clk(), .sd_mosi(), .sd_miso(1'b1), .sd_cs_n(),
         .ddr_ready(1'b1),
         .m_go(), .m_addr(), .m_we(), .m_wdata(), .m_rdata(16'h0), .m_ack(1'b0),
-        .f_up_go(), .f_up_drive(), .f_up_addr(), .f_up_data(), .f_up_last(), .f_up_bad(),
+        .f_up_go(), .f_up_drive(), .f_up_addr(), .f_up_data(), .f_up_last(), .f_up_ro(), .f_up_bad(),
         .f_up_busy(1'b0), .f_up_done(1'b0), .f_dn_go(), .f_dn_drive(), .f_dn_addr(),
         .f_dn_data(8'd0), .f_dn_valid(1'b0),
-        .fl_wr(1'b0), .fl_wr_drv(1'b0), .fl_wr_trk(6'd0), .bg_hold(1'b0),
+        .fl_wr(1'b0), .fl_wr_drv(1'b0), .fl_wr_blk(11'd0), .bg_hold(1'b0),
         .present(), .fail(), .fs_ok(), .loading(n_loading), .busy(),
         .err(n_err), .estage(),
         .wb_go(1'b0), .wb_drv(1'b0), .wb_blk(16'd0), .rb_go(1'b0), .rb_ok(),
@@ -103,7 +106,7 @@ module tb_sdvol;
     reg [24:0] a_q;
     reg        we_q;
     reg [15:0] d_q;
-    integer fails = 0, i, b, o, s, ups = 0, bads = 0;
+    integer fails = 0, i, b, o, s, at, ups = 0, bads = 0;
     always @(posedge clk) begin
         m_ack <= 1'b0;
         if (m_go) begin
@@ -119,37 +122,27 @@ module tb_sdvol;
         end
     end
 
-    // disk2_store's byte ports: two drives of 143,360 bytes in physical order
-    reg [7:0] fl [0:2*143360-1];
-    reg [1:0] fl_present = 2'b00;
+    // disk2_store's byte ports: two drives' files, byte for byte (256 KB each here)
+    reg [7:0] fl [0:2*262144-1];
+    reg [1:0] fl_present = 2'b00, fl_ro = 2'b00;
     always @(posedge clk) begin
         if (!f_up_go) f_up_done <= 1'b0;
         else if (!f_up_done && ($random & 3) == 0) begin
             f_up_done <= 1'b1; ups = ups + 1;
-            fl[f_up_drive * 143360 + f_up_addr] <= f_up_data;
-            if (f_up_last) fl_present[f_up_drive] <= 1'b1;
+            if (f_up_addr >= 20'd262144) begin $display("FAIL: store byte %0d past the bench's 256 KB", f_up_addr); fails = fails + 1; end
+            fl[{f_up_drive, f_up_addr[17:0]}] <= f_up_data;
+            if (f_up_last) begin fl_present[f_up_drive] <= 1'b1; fl_ro[f_up_drive] <= f_up_ro; end
         end
         if (f_up_bad) begin fl_present[f_up_drive] <= 1'b0; bads = bads + 1; end
         if (!f_dn_go) f_dn_valid <= 1'b0;
         else if (!f_dn_valid && ($random & 3) == 0) begin
-            f_dn_valid <= 1'b1; f_dn_data <= fl[f_dn_drive * 143360 + f_dn_addr];
+            f_dn_valid <= 1'b1; f_dn_data <= fl[{f_dn_drive, f_dn_addr[17:0]}];
         end
     end
 
     function [7:0] pat(input integer id, input integer o);
         pat = o * 7 + id * 13 + (o >> 9);
     endfunction
-    function integer d2p(input integer s);
-        case (s)
-            0: d2p = 0;  1: d2p = 13; 2: d2p = 11; 3: d2p = 9;  4: d2p = 7;  5: d2p = 5;  6: d2p = 3;  7: d2p = 1;
-            8: d2p = 14; 9: d2p = 12; 10: d2p = 10; 11: d2p = 8; 12: d2p = 6; 13: d2p = 4; 14: d2p = 2; default: d2p = 15;
-        endcase
-    endfunction
-    // where file byte o of a DOS-order floppy sits in the store
-    function integer phys(input integer o);
-        phys = (o / 4096) * 4096 + d2p((o / 256) % 16) * 256 + (o % 256);
-    endfunction
-
     task check(input cond, input [8*64-1:0] what);
         if (!cond) begin $display("FAIL: %0s", what); fails = fails + 1; end
     endtask
@@ -172,18 +165,36 @@ module tb_sdvol;
                 fails = fails + 1;
             end
     endtask
-    task check_floppy;
+    // the store holds drive d's file as the card has it, CRC (bytes 8-11) zeroed
+    task check_floppy(input integer d);
         begin
-            for (o = 0; o < 143360; o = o + 1)
-                if (fl[phys(o)] !== pat(1, o)) begin
-                    if (fails < 10) $display("FAIL: floppy byte %0d = %02x, want %02x", o, fl[phys(o)], pat(1, o));
+            s = dut.fstart[d];
+            for (o = 0; o < dut.fsize[d]; o = o + 1)
+                if (fl[d * 262144 + o] !== ((o >= 8 && o <= 11) ? 8'h00 : card.mem[s * 512 + o])) begin
+                    if (fails < 10) $display("FAIL: floppy %0d byte %0d = %02x, want %02x", d, o, fl[d * 262144 + o], card.mem[s * 512 + o]);
                     fails = fails + 1;
                 end
         end
     endtask
+    // the config's name for drive key "s6d2" (as simcard writes it, lower case) -> an 8-byte name
+    task set_s6d2(input [8*8-1:0] nm8);
+        begin
+            s = dut.data_lba + ((dut.fclus[4] - 2) << dut.spc_log);   // A2CONFIG.TXT
+            at = -1;
+            for (o = 0; o < 500; o = o + 1)
+                if (card.mem[s * 512 + o] == "s" && card.mem[s * 512 + o + 1] == "6" &&
+                    card.mem[s * 512 + o + 3] == "2") at = o + 7;            // "s6d2 = "
+            check(at > 0, "S6D2 not found in the config");
+            for (o = 0; o < 8; o = o + 1) card.mem[s * 512 + at + o] = (nm8 >> (8 * (7 - o))) & 8'hFF;
+            @(posedge clk); mnt_go <= 1'b1; mnt_drv <= 2'd1;
+            @(posedge clk); mnt_go <= 1'b0;
+            @(posedge clk); while (!loading) @(posedge clk);
+            while (loading) @(posedge clk);
+        end
+    endtask
 
     reg [7:0] got [0:1023];
-    integer   ngot, at;
+    integer   ngot;
     initial begin
         for (i = 0; i < 8192; i = i + 1) ddr[i] = 16'hDEAD;
         #200; @(posedge clk); reset = 1'b0;
@@ -194,9 +205,11 @@ module tb_sdvol;
         check(fs_ok, "FAT32 not recognised");
         check(present === 4'b0101, "present after the load (want S6D1 and S7D1)");
         check(fail === 4'b1010, "fail after the load (want FRAG.PO and MISSING.HDV)");
-        check(fl_present === 2'b01, "store present");
+        check(fl_present === 2'b01 && fl_ro[0] === 1'b0, "store present, writable");
         check(dut.fstart[1] == 0, "a fragmented file got a start");
-        check_floppy;
+        check(card.mem[dut.fstart[0] * 512 + 8] !== 8'h00 || card.mem[dut.fstart[0] * 512 + 9] !== 8'h00,
+              "the card's own file has its CRC");
+        check_floppy(0);
         for (i = 0; i < 8192; i = i + 1)
             if (ddr[i] !== 16'hDEAD) begin
                 if (fails < 10) $display("FAIL: DDR3 word %0d written by the boot (slot 7 is read on demand)", i);
@@ -239,22 +252,33 @@ module tb_sdvol;
         wait_idle;
         rb(1'b0, 16'd2, 1'b1, 1'b0, "the block just written was read from the card");
 
-        // ---- floppy write-back: the Apple rewrote track 3 ----
-        for (o = 3 * 4096; o < 4 * 4096; o = o + 1) fl[o] = o ^ 8'hC3;   // physical order
-        @(posedge clk); fl_wr <= 1'b1; fl_wr_trk <= 6'd3;
+        // ---- floppy write-back: the Apple wrote blocks 10 and 12 ----
+        for (o = 10 * 512; o < 13 * 512; o = o + 1) fl[o] = o ^ 8'hC3;
+        @(posedge clk); fl_wr <= 1'b1; fl_wr_blk <= 11'd12;
+        @(posedge clk); fl_wr_blk <= 11'd10;
         @(posedge clk); fl_wr <= 1'b0;
         i = card.wblks;
         repeat (6000) @(posedge clk);   // past QUIET_BITS
         wait_idle;
-        check(card.wblks == i + 8, "the written track is not 8 sectors back on the card");
+        check(card.wblks == i + 4, "not blocks 10-12 and block 0 back on the card");
         s = dut.fstart[0];
-        for (o = 3 * 4096; o < 4 * 4096; o = o + 1)
-            if (card.mem[s * 512 + o] !== (phys(o) ^ 8'hC3) % 256) begin
-                if (fails < 10) $display("FAIL: track 3 byte %0d on the card = %02x", o, card.mem[s * 512 + o]);
+        for (o = 10 * 512; o < 13 * 512; o = o + 1)
+            if (card.mem[s * 512 + o] !== (o ^ 8'hC3) % 256) begin
+                if (fails < 10) $display("FAIL: written byte %0d on the card = %02x", o, card.mem[s * 512 + o]);
                 fails = fails + 1;
             end
-        check(card.mem[s * 512 + 2 * 4096] === pat(1, 2 * 4096) && card.mem[s * 512 + 4 * 4096] === pat(1, 4 * 4096),
-              "the flush touched a neighbouring track");
+        check(card.mem[s * 512 + 8] === 8'h00 && card.mem[s * 512 + 11] === 8'h00, "the file's CRC is not zeroed");
+        check(card.mem[s * 512] === "W" && card.mem[s * 512 + 12] === "I", "block 0 is not the file's own");
+        check(card.mem[s * 512 + 9 * 512 + 5] === fl[9 * 512 + 5] && card.mem[s * 512 + 13 * 512] === fl[13 * 512],
+              "a neighbouring block changed");
+        // a second write: its block alone (block 0 is done)
+        fl[20 * 512 + 7] = 8'h5A;
+        @(posedge clk); fl_wr <= 1'b1; fl_wr_blk <= 11'd20;
+        @(posedge clk); fl_wr <= 1'b0;
+        i = card.wblks;
+        repeat (6000) @(posedge clk);
+        wait_idle;
+        check(card.wblks == i + 1 && card.mem[s * 512 + 20 * 512 + 7] === 8'h5A, "the second write-back");
 
         // ---- raw read: the HD file's first two sectors ----
         ngot = 0;
@@ -318,22 +342,32 @@ module tb_sdvol;
         while (loading) @(posedge clk);
         check(bads == i + 1, "the reload did not eject the old disk");
         check(present === 4'b0101 && fail === 4'b1010, "present/fail after the reload");
-        check(fl[phys(3 * 4096)] === (phys(3 * 4096) ^ 8'hC3) % 256, "the reload did not read the written-back track");
-        check(fl[phys(0)] === pat(1, 0), "the reload did not load the disk");
+        check(fl[11 * 512 + 3] === (11 * 512 + 3 ^ 8'hC3) % 256 && fl[20 * 512 + 7] === 8'h5A,
+              "the reload did not read the written-back blocks");
+        check_floppy(0);
 
-        // ---- a .DSK named for slot 7 is refused: it is DOS order, not blocks ----
+        // ---- a .WOZ named for slot 7 is refused: it is not blocks ----
         s = dut.data_lba + ((dut.fclus[4] - 2) << dut.spc_log);   // A2CONFIG.TXT
         at = -1;
         for (o = 0; o < 500; o = o + 1)
             if (card.mem[s * 512 + o] == "S" && card.mem[s * 512 + o + 1] == "7" &&
                 card.mem[s * 512 + o + 3] == "2") at = o + 5;
         check(at > 0, "S7D2 not found in the config");
-        for (o = 0; o < 11; o = o + 1) card.mem[s * 512 + at + o] = ("GAME.DSK   " >> (8 * (10 - o))) & 8'hFF;
+        for (o = 0; o < 11; o = o + 1) card.mem[s * 512 + at + o] = ("GAME.WOZ   " >> (8 * (10 - o))) & 8'hFF;
         @(posedge clk); mnt_go <= 1'b1; mnt_drv <= 2'd3;
         @(posedge clk); mnt_go <= 1'b0;
         @(posedge clk); while (!loading) @(posedge clk);
         while (loading) @(posedge clk);
-        check(present[3] === 1'b0 && fail[3] === 1'b1, "a .DSK was loaded as a slot 7 volume");
+        check(present[3] === 1'b0 && fail[3] === 1'b1, "a .WOZ was loaded as a slot 7 volume");
+
+        // ---- slot 6: not WOZ2, not .WOZ, write protected ----
+        set_s6d2("JUNK.WOZ");
+        check(present[1] === 1'b0 && fail[1] === 1'b1 && fl_present[1] === 1'b0, "a file that is not WOZ2 was loaded");
+        set_s6d2("RAW.DSK ");
+        check(present[1] === 1'b0 && fail[1] === 1'b1, "a .DSK was loaded into slot 6");
+        set_s6d2("PROT.WOZ");
+        check(present[1] === 1'b1 && fl_present[1] === 1'b1 && fl_ro[1] === 1'b1, "PROT.WOZ: loaded, write protected");
+        check_floppy(1);
 
         // ---- no card ----
         while (n_loading) @(posedge clk);

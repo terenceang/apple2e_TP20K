@@ -55,7 +55,7 @@ module tb_sdcopy;
         .f_up_go(f_up_go), .f_up_drive(), .f_up_addr(), .f_up_data(), .f_up_last(), .f_up_bad(),
         .f_up_busy(f_up_done), .f_up_done(f_up_done), .f_dn_go(), .f_dn_drive(), .f_dn_addr(),
         .f_dn_data(8'd0), .f_dn_valid(1'b0),
-        .fl_wr(1'b0), .fl_wr_drv(1'b0), .fl_wr_trk(6'd0), .bg_hold(1'b1),
+        .fl_wr(1'b0), .fl_wr_drv(1'b0), .fl_wr_blk(11'd0), .bg_hold(1'b1),
         .present(present), .fail(fail), .fs_ok(fs_ok),
         .loading(loading), .busy(busy), .err(err), .estage(estage),
         .wb_go(1'b0), .wb_drv(1'b0), .wb_blk(16'd3), .rb_go(rb_go), .rb_ok(),

@@ -5,6 +5,7 @@ import { SerialLink, serialSupported, BAUD } from './serial-link.js'
 import { isLetter, resolve } from './keymap.js'
 import { PREF_AUTOCONNECT, getSavedBool, setSavedBool } from './prefs.js'
 import { queryCardStatus, type CardStatus } from './disk.js'
+import { wozToDsk } from './woz.js'
 import { Card } from './card.js'
 import type { DirEntry } from './fat32.js'
 
@@ -493,22 +494,24 @@ export function useApple() {
     (file: File) =>
       cardSession(async (c) => {
         const data = new Uint8Array(await file.arrayBuffer())
-        await c.upload(file.name, data, progress('Copying', file.name))
+        const made = await c.upload(file.name, data, progress('Copying', file.name))
         const s = await c.scan()
-        return s.files.find((f) => f.name.toLowerCase() === file.name.replace(/\.2mg$/i, '.po').toLowerCase()) ?? null
+        return s.files.find((f) => f.short === made.short) ?? null
       }),
     [cardSession],
   )
 
   const downloadFromCard = useCallback(
-    (f: CardFile) =>
+    (f: CardFile, asDsk = false) =>
       cardSession(async (c) => {
-        const data = await c.download(f, progress('Reading', f.name))
+        let data = await c.download(f, progress('Reading', f.name))
+        // a .woz of a standard disk, decoded back to DOS-order sectors for other emulators
+        if (asDsk) data = wozToDsk(data)
         if (typeof document !== 'undefined') {
           const url = URL.createObjectURL(new Blob([data as unknown as BlobPart], { type: 'application/octet-stream' }))
           const a = document.createElement('a')
           a.href = url
-          a.download = f.name
+          a.download = asDsk ? f.name.replace(/\.woz$/i, '.dsk') : f.name
           document.body.appendChild(a)
           a.click()
           document.body.removeChild(a)

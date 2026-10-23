@@ -15,7 +15,7 @@ Despite the 65C02's relaxed 1 MHz cycle time, implementing a full 128 KB Apple /
 
 To solve this, the design uses a **hybrid memory partitioning scheme**:
 * **Time-critical base system** (48 KB main RAM + 16 KB ROM + 4 KB Font + Disk boot ROM) is placed in **on-chip BSRAM**.
-* **Expansion memory and bulk storage** (64 KB Aux RAM + 16 KB Language Card + 4 MB Disk II floppy images) is mapped to **external DDR3 SDRAM**.
+* **Expansion memory and bulk storage** (64 KB Aux RAM + 16 KB Language Card + Disk II floppy images, up to 1 MB each) is mapped to **external DDR3 SDRAM**.
 
 ---
 
@@ -59,7 +59,7 @@ To solve this, the design uses a **hybrid memory partitioning scheme**:
    Because the 65C02 runs at ~1 MHz, its cycle duration is **977.5 ns**. The DDR3 user interface (`mclk`) runs at **99.58 MHz** (10.04 ns per cycle). This provides roughly **97 clock cycles of slack per CPU cycle**. A typical DDR3 read/write completes in 12–25 controller cycles, so DDR3 easily delivers data before the 6502 samples its data bus.
 2. **Massive Storage Capacity (128 MB):**
    * Eliminates the need for real-time SD card SPI reading during floppy access.
-   * Both Drive 1 and Drive 2 floppy disks (140 KB each) reside completely in DDR3 RAM.
+   * Both Drive 1 and Drive 2 floppy disks (their whole `.woz` files, ~230 KB each for a standard disk) reside completely in DDR3 RAM.
    * Leaves >120 MB free for future expansion (e.g., ProDOS 32 MB hard drive partitions, RamWorks multi-megabyte cards).
 3. **Warm Reset Preservation:**
    Because DDR3 retains data as long as power is applied and the memory controller periodically refreshes it, loaded disk images survive CPU resets (`x` command) and soft reboots.
@@ -100,7 +100,7 @@ Implemented in [`src/aux_ram.v`](../src/aux_ram.v):
 | :--- | :--- | :---: | :---: | :--- |
 | **Region 0 (Lower)** | `0x000000`–`0x00FFFF` | 64 KB | 64 KB | **Auxiliary RAM:** 80-column text, Double Hi-Res, aux zero page |
 | **Region 0 (Upper)** | `0x010000`–`0x01FFFF` | 64 KB | 16 KB | **Main Language Card:** RAM `$D000`–`$FFFF` + Bank 2 `$D000`–`$DFFF` |
-| **Region 1** | `0x1000000`–`0x13FFFFF` | 4 MB | 280 KB | **Disk II Storage:** Drive 1 & 2 floppy images, loaded from their `.dsk`/`.po` files on the TF card (`src/sd_vol.v`) or uploaded from the web page, written tracks flushed back to the file |
+| **Region 1** | `0x1000000`–`0x13FFFFF` | 4 MB | ~460 KB | **Disk II Storage:** Drive 1 & 2 `.woz` files byte for byte (1 MB each at most, word `{drive, byte[19:1]}`), loaded from the TF card (`src/sd_vol.v`), played bit by bit (`src/disk2/disk2_store.v`), written blocks copied back to the file |
 | **Region 3** | `0x3000000`+ | 128 B | 128 B | **Power-On Self-Test (POST):** Memory calibration pattern |
 | **Upper half** | `0x2000000`–`0x3FFFFFF` (words) | 64 MB | 64 MB | **Slot 7 ProDOS volumes:** two drives x 65,536 blocks, two bytes per 16-bit word, read from their `.hdv`/`.po` files on the TF card a block at a time as ProDOS asks and written back block by block (`src/prodos_hd.v`, `src/sd_vol.v`) |
 | **Free / Unused** | Remaining space | **~59.8 MB** | — | Unallocated DDR3 space |

@@ -12,14 +12,18 @@
 //       format: lines S6D1=NAME.EXT, 8.3 names, ";" starts a comment).
 //    3. The root again, for the four names it gives.
 //    4. Each file's FAT chain must be one run (it is streamed with a single
-//       CMD18), and its size must fit the drive: 143,360 bytes and .DSK/.DO
-//       (DOS order) or .PO for slot 6, a .HDV or .PO of whole 512-byte blocks
-//       up to 32 MB for slot 7.  A file that is missing, fragmented or the wrong size leaves
-//       its drive empty and sets its `fail` bit.
-//    5. Slot 6 files stream into disk2_store's up_* port in physical sector
-//       order (dos2phys below for DOS order; tb_sdvol checks it against its own).
-//       Slot 7 files are not loaded: each block is read when prodos_hd asks
-//       (rb_go, below).
+//       CMD18), and its size must fit the drive: a .WOZ of 1.5 KB to 1 MB for
+//       slot 6 (the page converts every other floppy format to WOZ 2,
+//       web/src/woz.js), a .HDV or .PO of whole 512-byte blocks up to 32 MB
+//       for slot 7.  A file that is missing, fragmented or the wrong size
+//       leaves its drive empty and sets its `fail` bit.
+//    5. Slot 6 files stream whole into disk2_store's up_* port, byte for
+//       byte, except the header's CRC, which is zeroed (a WOZ CRC of 0 means
+//       "not computed": the board writes tracks back without recomputing it).
+//       A file that is not WOZ2 for a 5.25" disk is refused (`fail`); INFO's
+//       write-protect byte goes to the store with the last byte.  Slot 7
+//       files are not loaded: each block is read when prodos_hd asks (rb_go,
+//       below).
 //  Nothing is buffered (block RAM is scarce, Documents/memory_architecture.md): each sector is parsed as it goes
 //  past, and the SPI clock simply waits when the far side is not ready.
 //  `loading` is high for all of it, and top.v holds the CPU on it.
@@ -37,14 +41,15 @@
 //             (x_byte/x_valid, x_take when used) or, with x_zero, zeros
 //    r_go     read r_cnt sectors from r_lba, each byte to the debugger
 //             (r_byte/r_valid, r_take); r_done, r_ok at the end
-//    floppy   a track the Apple wrote (fl_wr) goes back to its file, 8 sectors
-//             at start + track * 8, once the drive has been quiet ~1 s and the
-//             debugger is not in session (bg_hold)
+//    floppy   the blocks of a .woz the Apple wrote (fl_wr names each) go back
+//             to the file, lowest to highest written, once the drive has been
+//             quiet ~1 s and the debugger is not in session (bg_hold); the
+//             first time after a load, block 0 too, for the zeroed CRC
 //    mnt_go   reload drive mnt_drv (0-1 slot 6, 2-3 slot 7) from the config,
 //             after its floppy tracks are on the card
 //  Each request is latched, so one that arrives while another runs waits;
-//  a floppy track flush is one job per sector, so rb_go waits for at most
-//  one sector behind it.  A card that stops answering gives up after 2^20
+//  a floppy flush is one job per sector, so rb_go waits for at most one
+//  sector behind it.  A card that stops answering gives up after 2^20
 //  polls (~0.75 s at 13.5 MHz).
 //
 //  `err` latches on a card failure, `estage` = the command (0 CMD0 1 CMD8
@@ -77,20 +82,21 @@ module sd_vol #(
 
     output reg         f_up_go,        // slot 6: disk2_store's up_*/down_* ports
     output reg         f_up_drive,
-    output reg  [17:0] f_up_addr,
+    output reg  [19:0] f_up_addr,
     output reg  [7:0]  f_up_data,
     output reg         f_up_last,
+    output reg         f_up_ro,        // ...and the file is write protected
     output reg         f_up_bad,
     input  wire        f_up_busy,
     input  wire        f_up_done,
     output reg         f_dn_go,
     output reg         f_dn_drive,
-    output reg  [17:0] f_dn_addr,
+    output reg  [19:0] f_dn_addr,
     input  wire [7:0]  f_dn_data,
     input  wire        f_dn_valid,
-    input  wire        fl_wr,          // a data field is being written...
-    input  wire        fl_wr_drv,      // ...on this drive and track
-    input  wire [5:0]  fl_wr_trk,
+    input  wire        fl_wr,          // a floppy word was written...
+    input  wire        fl_wr_drv,      // ...on this drive, in this block of its file
+    input  wire [10:0] fl_wr_blk,
     input  wire        bg_hold,        // no background write-back now
 
     output reg  [3:0]  present,        // a drive holds its file (slot 6 1-2, slot 7 1-2)
@@ -152,15 +158,6 @@ module sd_vol #(
         endcase
     endfunction
 
-    // DOS 3.3 logical sector -> the store's physical position (the only copy)
-    function [3:0] dos2phys(input [3:0] s);
-        case (s)
-            4'h0: dos2phys = 4'h0; 4'h1: dos2phys = 4'hD; 4'h2: dos2phys = 4'hB; 4'h3: dos2phys = 4'h9;
-            4'h4: dos2phys = 4'h7; 4'h5: dos2phys = 4'h5; 4'h6: dos2phys = 4'h3; 4'h7: dos2phys = 4'h1;
-            4'h8: dos2phys = 4'hE; 4'h9: dos2phys = 4'hC; 4'hA: dos2phys = 4'hA; 4'hB: dos2phys = 4'h8;
-            4'hC: dos2phys = 4'h6; 4'hD: dos2phys = 4'h4; 4'hE: dos2phys = 4'h2; default: dos2phys = 4'hF;
-        endcase
-    endfunction
 
     localparam [4:0] PWR = 0, DUM = 1, CMDS = 2, R1 = 3, EXTRA = 4, DTOK = 5, DATA = 6,
                      CRC = 7, IDLE = 8, WGAP = 9, WTOK = 10, WBYTE = 11, WCRC = 12,
@@ -179,9 +176,7 @@ module sd_vol #(
     localparam [2:0] P_K0 = 0, P_K1 = 1, P_K2 = 2, P_K3 = 3, P_EQ = 4, P_N0 = 5, P_N = 6, P_SKIP = 7;
     localparam [87:0] SPACES  = {11{8'h20}};
     localparam [87:0] CFGNAME = "A2CONFIGTXT";
-    `include "src/disk2/gcr_defs.vh"   // GCR_TRACKS, shared with the card and the store
-    localparam integer TRACKS = `GCR_TRACKS;
-    localparam [31:0] FLOPPY_BYTES = TRACKS * 16 * 256;
+    localparam [31:0] WOZ_MAX = 32'h0010_0000;   // 1 MB: the store's room per drive
 
     reg [4:0]  st = PWR;
     reg [2:0]  ph = CMD0;
@@ -234,7 +229,7 @@ module sd_vol #(
     reg        walk_ok = 1'b0;
     reg [31:0] fstart [0:3];
     reg [16:0] fnsec [0:3];
-    reg [1:0]  fdos = 2'b00;            // slot 6 drive holds a DOS-order file
+    reg        hdr_ok = 1'b0;           // the floppy being loaded is WOZ2, 5.25 inch
     // the config parser
     reg [2:0]  ps = P_K0;
     reg [1:0]  pkey = 2'd0;
@@ -254,19 +249,19 @@ module sd_vol #(
     reg [3:0]  rl_req = 4'd0;           // drives to reload
     reg [1:0]  rl_d = 2'd0;             // ...the one being looked at
     reg        ej_pend = 1'b0;          // pulse f_up_bad next clock (f_up_drive is set)
-    // floppy write-back
-    reg [TRACKS-1:0] dirty0 = 0, dirty1 = 0;
+    // floppy write-back: per drive, the span of file blocks written since
+    // the last flush (ponytail: one span, so two far-apart writes also copy
+    // the blocks between; a block list if that is ever slow)
+    reg [1:0]  dv = 2'b00;              // a drive has written blocks
+    reg [10:0] dlo [0:1], dhi [0:1];
+    reg [1:0]  crc_done = 2'b00;        // block 0 (the zeroed CRC) is on the card
     reg [QUIET_BITS-1:0] quiet = 0;
     wire       quiet_up = &quiet;
-    reg        fs_drv = 1'b0;           // the scan for a dirty track
-    reg [5:0]  fs_trk = 6'd0;
-    reg        fw_active = 1'b0, fw_k = 1'b0;
-    reg [5:0]  fw_t = 6'd0;
-    reg [2:0]  fw_j = 3'd0;
-    wire [TRACKS-1:0] dsel   = fs_drv ? dirty1 : dirty0;
-    wire        fs_hit = dsel[fs_trk];
-    // a reload waits for its drive's tracks; otherwise ~1 s after the last write
-    wire        fs_go  = fs_hit && (rl_req[fs_drv] || (quiet_up && !bg_hold));
+    reg        fs_drv = 1'b0;           // the drive the flush looks at
+    reg        fw_active = 1'b0, fw_k = 1'b0, fw_crc = 1'b0;
+    reg [10:0] fw_b = 11'd0, fw_end = 11'd0;
+    // a reload waits for its drive's blocks; otherwise ~1 s after the last write
+    wire        fs_go  = dv[fs_drv] && (rl_req[fs_drv] || (quiet_up && !bg_hold));
 
     // A DDR3 that never calibrates must not hold the CPU for ever: give up
     // on loading after ~2.5 s of waiting for it.
@@ -278,7 +273,7 @@ module sd_vol #(
 
     assign loading = lk != L_IDLE;
     assign busy    = st != IDLE || lk != L_IDLE || jdone || wb_req || rb_req || x_req || r_req ||
-                     fw_active || rl_req != 4'd0;
+                     fw_active || rl_req != 4'd0 || m_busy;   // m_busy: a block's last word is still going to the DDR3
 
     // A cluster's first sector.  One shifter and adder for the three places
     // that need it, which are never in the same lookup step: the directory
@@ -300,8 +295,6 @@ module sd_vol #(
                         rxv == 8'h09 || rxv == 8'h00;
     wire [31:0] v_ent = {4'h0, rxv[3:0], ent[31:8]};  // a FAT entry, at its 4th byte
     wire [27:0] cur_cl = {c0[27:7] + blk[15:0], bcnt[8:2]};
-    wire [3:0] fl_sec = {blk[2:0], bcnt[8]};           // DOS sector within the track
-    wire [3:0] fw_sec = {fw_j, bcnt[8]};
 
     task xfer(input [7:0] b); begin txb <= b; spi_go <= 1'b1; sx <= 1'b1; end endtask
     task go_cmd(input [2:0] p, input [31:0] l);
@@ -359,11 +352,13 @@ module sd_vol #(
         if (x_go)  begin x_req <= 1'b1; tag_v <= 1'b0; end   // it may rewrite the file
         if (r_go)  r_req <= 1'b1;
         if (mnt_go) begin rl_req[mnt_drv] <= 1'b1; tag_v <= 1'b0; end
-        // a written track of a drive that holds its file; quiet counts from the last
+        // a written block of a drive that holds its file; quiet counts from the last
         if (fl_wr) begin
             quiet <= 0;
-            if (present[fl_wr_drv] && fl_wr_trk < TRACKS) begin
-                if (fl_wr_drv) dirty1[fl_wr_trk] <= 1'b1; else dirty0[fl_wr_trk] <= 1'b1;
+            if (present[fl_wr_drv]) begin
+                dv[fl_wr_drv] <= 1'b1;
+                if (!dv[fl_wr_drv] || fl_wr_blk < dlo[fl_wr_drv]) dlo[fl_wr_drv] <= fl_wr_blk;
+                if (!dv[fl_wr_drv] || fl_wr_blk > dhi[fl_wr_drv]) dhi[fl_wr_drv] <= fl_wr_blk;
             end
         end else if (!quiet_up) quiet <= quiet + 1'b1;
 
@@ -374,7 +369,7 @@ module sd_vol #(
             lk <= L_MBR; lk_wait <= 1'b0; ld_mask <= 4'b1111; k <= 2'd0; jdone <= 1'b0;
             wb_req <= 1'b0; x_req <= 1'b0; r_req <= 1'b0; rl_req <= 4'd0;
             rb_req <= 1'b0; rb_ok <= 1'b1; tag_v <= 1'b0;
-            dirty0 <= 0; dirty1 <= 0; fw_active <= 1'b0; r_valid <= 1'b0;
+            dv <= 2'b00; fw_active <= 1'b0; r_valid <= 1'b0;
             f_up_go <= 1'b0; f_dn_go <= 1'b0; fl_pend <= 1'b0;
         end else if (sx) begin
             if (spi_done) begin sx <= 1'b0; got <= 1'b1; rxv <= sh; end
@@ -507,10 +502,18 @@ module sd_vol #(
                                     m_wdata <= {rxv, lo};
                                 end
                           T_FL: begin
+                              // the file as it is, but for its CRC (bytes 8-11); the
+                              // header is checked as it passes: "WOZ2", a 5.25 inch disk
                               f_up_go <= 1'b1; fl_pend <= 1'b1; f_up_drive <= k[0];
-                              f_up_data <= rxv;
-                              f_up_addr <= {blk[8:3], fdos[k[0]] ? dos2phys(fl_sec) : fl_sec, bcnt[7:0]};
-                              f_up_last <= blk == TRACKS * 8 - 1 && bcnt == 9'd511;
+                              f_up_data <= (blk == 16'd0 && bcnt >= 9'd8 && bcnt <= 9'd11) ? 8'h00 : rxv;
+                              f_up_addr <= {blk[10:0], bcnt};
+                              f_up_last <= blk == jlast && bcnt == 9'd511 && hdr_ok;
+                              if (blk == 16'd0) begin
+                                  if (bcnt <= 9'd3)
+                                      hdr_ok <= (bcnt == 9'd0 || hdr_ok) && rxv == nbyte({"WOZ2", 56'h0}, bcnt[3:0]);
+                                  if (bcnt == 9'd21 && rxv != 8'd1) hdr_ok <= 1'b0;
+                                  if (bcnt == 9'd22) f_up_ro <= rxv == 8'd1;
+                              end
                           end
                           default: begin r_byte <= rxv; r_valid <= 1'b1; end   // T_RAW
                       endcase
@@ -555,7 +558,7 @@ module sd_vol #(
                                else if (!f_dn_go && !f_dn_valid) begin
                                    f_dn_go    <= 1'b1;
                                    f_dn_drive <= fw_k;
-                                   f_dn_addr  <= {fw_t, fdos[fw_k] ? dos2phys(fw_sec) : fw_sec, bcnt[7:0]};
+                                   f_dn_addr  <= {fw_b, bcnt};
                                end
                        endcase
                    end else begin
@@ -579,7 +582,10 @@ module sd_vol #(
                     case (jk)
                         J_RAW: begin r_done <= 1'b1; r_ok <= !jfail; end
                         J_RB: begin rb_ok <= !jfail; tag_v <= !jfail; tag <= {hd_d, hd_b}; end
-                        J_FW: if (jfail || fw_j == 3'd7) fw_active <= 1'b0; else fw_j <= fw_j + 1'b1;
+                        J_FW: if (jfail || (fw_b == fw_end && !fw_crc)) fw_active <= 1'b0;
+                              else if (fw_b == fw_end) begin   // then block 0, once a load
+                                  fw_b <= 11'd0; fw_end <= 11'd0; fw_crc <= 1'b0; crc_done[fw_k] <= 1'b1;
+                              end else fw_b <= fw_b + 1'b1;
                         J_LK: begin
                             lk_wait <= 1'b0;
                             if (jfail) lk <= L_IDLE;
@@ -616,11 +622,15 @@ module sd_vol #(
                                     if (!walk_ok) begin fail[k] <= 1'b1; lk <= L_NEXT; end
                                     else begin
                                         fstart[k] <= cl_lba;
-                                        fnsec[k]  <= fsize[k][25:9];
-                                        if (!k[1]) fdos[k[0]] <= nm[k][23:0] != "PO ";
+                                        fnsec[k]  <= fsize[k][25:9] + {16'd0, fsize[k][8:0] != 9'd0};
                                         lk <= L_DDR;
                                     end
-                                L_LOAD: begin present[k] <= 1'b1; lk <= L_NEXT; end
+                                L_LOAD: begin
+                                    // a floppy that is not WOZ2 was not given to the store
+                                    if (k[1] || hdr_ok) present[k] <= 1'b1; else fail[k] <= 1'b1;
+                                    if (!k[1]) crc_done[k[0]] <= 1'b0;
+                                    lk <= L_NEXT;
+                                end
                                 default: lk <= L_IDLE;
                             endcase
                         end
@@ -646,9 +656,8 @@ module sd_vol #(
                         L_DRV:
                             if (!ld_mask[k] || !has[k]) lk <= L_NEXT;      // not asked for, or empty
                             else if (!found[k] ||
-                                     (!k[1] && !(fsize[k] == FLOPPY_BYTES &&
-                                                 (nm[k][23:0] == "DSK" || nm[k][23:0] == "DO " ||
-                                                  nm[k][23:0] == "PO "))) ||
+                                     (!k[1] && !(fsize[k] >= 32'd1536 && fsize[k] <= WOZ_MAX &&
+                                                 nm[k][23:0] == "WOZ")) ||
                                      (k[1] && (fsize[k] == 32'd0 || fsize[k][8:0] != 9'd0 ||
                                                fsize[k] > 32'h0200_0000 ||
                                                // a .dsk/.do is DOS order: not a block device
@@ -671,7 +680,7 @@ module sd_vol #(
                             // slot 7 is read a block at a time when prodos_hd asks
                             if (k[1]) begin present[k] <= 1'b1; lk <= L_NEXT; end
                             else begin
-                                lk_wait <= 1'b1;
+                                lk_wait <= 1'b1; hdr_ok <= 1'b0;
                                 rd(fstart[k], fnsec[k][15:0] - 16'd1, T_FL, J_LK);
                             end
                         L_NEXT: if (k == 2'd3) lk <= L_IDLE; else begin k <= k + 1'b1; lk <= L_DRV; end
@@ -700,15 +709,18 @@ module sd_vol #(
                     r_req <= 1'b0;
                     rd(r_lba, r_cnt - 16'd1, T_RAW, J_RAW);
                 end else if (fw_active) begin
-                    wr(fstart[{1'b0, fw_k}] + {23'd0, fw_t, fw_j}, W_FL, J_FW);
+                    // never past the file's end (the store holds only what it loaded)
+                    if ({6'd0, fw_b} < fnsec[{1'b0, fw_k}]) wr(fstart[{1'b0, fw_k}] + {21'd0, fw_b}, W_FL, J_FW);
+                    else begin jk <= J_FW; jfail <= 1'b0; jdone <= 1'b1; end
                 end else if (fs_go) begin
-                    // ---- a written floppy track back to its file ----
-                    if (fs_drv) dirty1[fs_trk] <= 1'b0; else dirty0[fs_trk] <= 1'b0;
-                    fw_active <= 1'b1; fw_k <= fs_drv; fw_t <= fs_trk; fw_j <= 3'd0;
+                    // ---- a floppy's written blocks back to its file ----
+                    dv[fs_drv] <= 1'b0;
+                    fw_active <= 1'b1; fw_k <= fs_drv; fw_b <= dlo[fs_drv]; fw_end <= dhi[fs_drv];
+                    fw_crc <= !crc_done[fs_drv];
                 end else if (rl_req != 4'd0) begin
                     // ---- reload a drive, once its written tracks are on the card ----
                     rl_d <= rl_d + 1'b1;
-                    if (rl_req[rl_d] && !(!rl_d[1] && (rl_d[0] ? dirty1 : dirty0) != 0)) begin
+                    if (rl_req[rl_d] && !(!rl_d[1] && dv[rl_d[0]])) begin
                         rl_req[rl_d] <= 1'b0;
                         present[rl_d] <= 1'b0; fail[rl_d] <= 1'b0;
                         if (!rl_d[1]) begin f_up_drive <= rl_d[0]; ej_pend <= 1'b1; end
@@ -716,11 +728,8 @@ module sd_vol #(
                         lk <= L_MBR;
                     end
                 end
-                // the dirty-track scan steps on past anything it cannot flush yet
-                if (!fs_go) begin
-                    if (fs_trk == TRACKS - 1) begin fs_trk <= 6'd0; fs_drv <= ~fs_drv; end
-                    else fs_trk <= fs_trk + 1'b1;
-                end
+                // the flush looks at each drive in turn
+                if (!fs_go) fs_drv <= ~fs_drv;
             end
             default: ;
         endcase

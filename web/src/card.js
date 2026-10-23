@@ -9,21 +9,22 @@
 import { Fat32, from83 } from './fat32.js'
 import { CONFIG_NAME, DRIVES, parseConfig, formatConfig } from './config.js'
 import { DISK_BYTES, HD_BLOCK_BYTES, HD_MAX_BLOCKS, validateHardDiskImage, reloadDrive, cardDevice } from './disk.js'
+import { toWoz, WOZ_MAX } from './woz.js'
 
 const ext = (name) => (/\.([^.]*)$/.exec(name)?.[1] ?? '').toLowerCase()
 
 /**
  * Whether drive `d` (0-3: S6D1 S6D2 S7D1 S7D2) can use `file`, by the same
- * rules sd_vol.v applies at boot: slot 6 takes a 143,360-byte .dsk/.do/.po,
- * slot 7 a .hdv or .po of whole blocks up to 32 MB.  A .dsk/.do is in DOS
- * sector order, so as a block device its blocks would come out scrambled.
+ * rules sd_vol.v applies at boot: slot 6 takes a .woz (WOZ 2, up to 1 MB;
+ * the page converts every other floppy format to it on upload, src/woz.js),
+ * slot 7 a .hdv or .po of whole blocks up to 32 MB.
  *
  * @param {{ name: string, short: string, size: number }} file
  * @param {number} d
  */
 export function fitsDrive(file, d) {
   const e = ext(from83(file.short))
-  if (d < 2) return file.size === DISK_BYTES && ['dsk', 'do', 'po'].includes(e)
+  if (d < 2) return e === 'woz' && file.size >= 1536 && file.size <= WOZ_MAX
   return ['hdv', 'po'].includes(e) && file.size > 0 && file.size % HD_BLOCK_BYTES === 0 &&
     file.size <= HD_MAX_BLOCKS * HD_BLOCK_BYTES
 }
@@ -32,23 +33,27 @@ export function fitsDrive(file, d) {
 const isImage = (f) => !f.dir && f.name.toUpperCase() !== CONFIG_NAME && (fitsDrive(f, 0) || fitsDrive(f, 2))
 
 /**
- * What to store for an uploaded file: the bytes, and the name (a .2mg becomes
- * .po, its header stripped, so the blocks start on a sector).
+ * What to store for an uploaded file: the bytes, and the name.  A floppy
+ * (.dsk .do .nib .woz, or a 140K .po) becomes a WOZ 2 .woz; a .2mg becomes
+ * .po, its header stripped, so the blocks start on a sector.
  *
  * @param {string} name
  * @param {Uint8Array} data
  */
 export function prepareCardFile(name, data) {
   const e = ext(name)
-  if (['dsk', 'do'].includes(e) || (e === 'po' && data.length === DISK_BYTES)) {
-    if (data.length !== DISK_BYTES) throw new Error(`${name}: a floppy image is ${DISK_BYTES.toLocaleString()} bytes, this is ${data.length.toLocaleString()}.`)
-    return { name, data }
+  if (['dsk', 'do', 'nib', 'woz'].includes(e) || (e === 'po' && data.length === DISK_BYTES)) {
+    try {
+      return toWoz(name, data)
+    } catch (err) {
+      throw new Error(`${name}: ${err.message.replace(/^.*?: /, '')}`)
+    }
   }
   if (['hdv', 'po', '2mg'].includes(e)) {
     const blocks = validateHardDiskImage(data)
     return { name: e === '2mg' ? name.replace(/\.2mg$/i, '.po') : name, data: blocks }
   }
-  throw new Error(`${name}: not a disk image (.dsk .do .po .hdv .2mg).`)
+  throw new Error(`${name}: not a disk image (.dsk .do .po .nib .woz .hdv .2mg).`)
 }
 
 /** The card, mounted: its files, A2CONFIG.TXT, and the board's link for reloads. */

@@ -1,845 +1,443 @@
 `timescale 1ns / 1ps
 `default_nettype none
 
-//  tb_disk2.v -- the Disk ][ card and its image store
+//  tb_disk2.v -- the Disk ][ card and its WOZ store, at the level RWTS drives them
 //
-//  The card's interface is a byte stream and not much else, so this bench
-//  drives it the way the P6 boot ROM and RWTS do -- phase strobes, the motor,
-//  Q6/Q7L reads of the data register -- and checks the stream against an
-//  independent model of what a 5.25" track contains.  Nothing above the card
-//  knows what a sector is, so if the model and the card agree on the bytes,
-//  DOS will agree with the image.
+//  The DDR3 holds a WOZ file the page's own converter made from a DOS-order
+//  .dsk (web/scripts/simcard.mjs: build/sim_floppy.hex, and the .dsk as
+//  build/sim_floppy_dsk.hex).  The bench is the 6502: every access is one CPU
+//  cycle on the card's bus, and the read and write loops take the cycles
+//  RWTS's do (LDA abs,X / BPL is 7 cycles a pass; a written byte is loaded
+//  every 32 cycles, a sync byte every 40), so the bits, the sequencer's latch
+//  and its self-sync are what is tested.  What is checked:
 //
-//  What is checked:
+//    * the stepper: half and quarter tracks, the stop at 0, DOS's recalibrate
+//    * a whole track read from wherever the head lands: 16 address fields
+//      with volume 254, the track and sectors 0-15, and 16 data fields that
+//      decode (an independent 6-and-2 decoder, below) to the .dsk's sectors
+//      through DOS 3.3's interleave
+//    * a quarter track next to a track reads that track; an empty one is noise
+//    * write protect: the sense bit, with and without the INFO flag
+//    * a sector written with RWTS's timing reads back, the rest of the track
+//      is unchanged, only that track's DDR3 words changed, and fl_wr named
+//      that track's blocks of the file
+//    * drive 2, empty: noise, and protected
 //
-//    * the $C0Ex decode: phases step the head, the motor and drive select
-//      latch, Q7 selects write mode, and Q6L in write mode is the
-//      write-protect sense
-//    * a track, walked from the start: 48 self-sync $FFs, the $D5 $AA $96
-//      header with the right volume, track, sector and checksum, the $DE $AA
-//      $EB tail, the data address mark, a 343-byte data field that decodes
-//      back to the 256 bytes the image holds, and the inter-sector gap --
-//      for all 16 sectors, so the interleave is right too
-//    * the store: a sector read comes out of SDRAM through aux_ram's arbiter,
-//      and a written field lands back in SDRAM and is readable afterwards
-//    * the round trip: encode a sector, decode it, compare with the image
-//
-//  The image is synthetic (a per-sector pattern), so this checks the format
-//  and the arithmetic rather than a particular disk.  Nothing here depends on
-//  a real .dsk, and no Apple ROM is needed: the card is driven directly.
+//  ce_1m runs every 4 clocks here: everything in the card counts ce_1m, so the
+//  disk turns ~6.6 times faster than real time and the DDR3's latency is
+//  still small against a 16-bit word (256 clocks).
 
 module tb_disk2;
-    // The encoder under test is the card's, so the bench uses the same
-    // function for the write path -- the point of the check is that what the
-    // card writes is what the store's decoder reads back, not that the bench can
-    // encode.  The *decode* side below is an independent copy of the inverse
-    // table, spelled out, so the read path is checked against something other
-    // than the design's own table.
-    `include "src/disk2/gcr_defs.vh"
-
     reg clk = 1'b0;
-    always #18.519 clk = ~clk;          // 27 MHz
-
+    always #18.5 clk = ~clk;
     reg reset = 1'b1;
-    reg [4:0] ce_div = 5'd0;
-    wire ce_1m = (ce_div == 5'd25);    // ~1 MHz enable
+    reg [1:0] cdiv = 2'd0;
+    always @(posedge clk) cdiv <= cdiv + 2'd1;
+    wire ce_1m = (cdiv == 2'd3);
+
+    // ---- the card's bus ----
+    reg        devsel_n = 1'b1, bus_cycle = 1'b0, we = 1'b0;
+    reg [15:0] addr = 16'h0000;
+    reg [7:0]  di = 8'h00;
+    wire [7:0] io_data, rom_data;
+
+    wire        drive, bit_tick, wr_en, wr_bit, wr_mode, rd_bit, rd_ok;
+    wire [7:0]  qtr, dbg_head;
+    wire [1:0]  drv_present, drv_writable;
+    wire        dbg_any_disk, fl_wr, fl_wr_drv;
+    wire [10:0] fl_wr_blk;
+    wire        dsk_go, dsk_we;
+    wire [21:0] dsk_addr;
+    wire [15:0] dsk_wdata;
+    reg  [15:0] dsk_rdata = 16'h0000;
+    reg         dsk_ack = 1'b0;
+
+    disk2_card card (
+        .clk(clk), .reset(reset), .ce_1m(ce_1m),
+        .devsel_n(devsel_n), .iosel_n(1'b1), .bus_cycle(bus_cycle), .cpu_we(we),
+        .addr(addr), .cpu_di(di), .rom_data(rom_data), .io_data(io_data),
+        .drive(drive), .qtr(qtr), .bit_tick(bit_tick), .wr_en(wr_en), .wr_bit(wr_bit),
+        .wr_mode(wr_mode), .rd_bit(rd_bit), .rd_ok(rd_ok),
+        .drv_present(drv_present), .drv_writable(drv_writable),
+        .dbg_head(dbg_head), .dbg_any_disk(dbg_any_disk));
+
+    disk2_store store (
+        .clk(clk), .reset(reset),
+        .drive(drive), .qtr(qtr), .bit_tick(bit_tick), .wr_en(wr_en), .wr_bit(wr_bit),
+        .wr_mode(wr_mode), .rd_bit(rd_bit), .rd_ok(rd_ok),
+        .drv_present(drv_present), .drv_writable(drv_writable),
+        .fl_wr(fl_wr), .fl_wr_drv(fl_wr_drv), .fl_wr_blk(fl_wr_blk),
+        .up_go(1'b0), .up_drive(1'b0), .up_addr(20'd0), .up_data(8'd0), .up_last(1'b0),
+        .up_ro(1'b0), .up_bad(1'b0), .up_busy(), .up_done(),
+        .down_go(1'b0), .down_drive(1'b0), .down_addr(20'd0), .down_data(), .down_valid(),
+        .dsk_go(dsk_go), .dsk_addr(dsk_addr), .dsk_we(dsk_we), .dsk_wdata(dsk_wdata),
+        .dsk_rdata(dsk_rdata), .dsk_ack(dsk_ack), .dsk_idle());
+
+    // ---- DDR3: drive 0's file as words, a request at a time, random latency ----
+    localparam integer WORDS = 117248;          // 234,496 bytes
+    reg [15:0] mem  [0:2*262144-1];
+    reg [15:0] orig [0:WORDS-1];
+    reg        pend = 1'b0;
+    reg [5:0]  lat = 6'd0;
+    reg [21:0] la;
+    reg        lwe;
+    reg [15:0] lwd;
+    integer    fails = 0, checks = 0;
     always @(posedge clk) begin
-        if (ce_div == 5'd25) ce_div <= 5'd0;
-        else                ce_div <= ce_div + 1'b1;
+        dsk_ack <= 1'b0;
+        if (dsk_go) begin
+            if (pend) begin $display("FAIL: a DDR3 request while one is out"); fails = fails + 1; end
+            pend <= 1'b1; lat <= 6'd6 + ($random & 6'd15); la <= dsk_addr; lwe <= dsk_we; lwd <= dsk_wdata;
+        end else if (pend) begin
+            if (lat != 6'd0) lat <= lat - 6'd1;
+            else begin
+                pend <= 1'b0; dsk_ack <= 1'b1;
+                if (la[21:20] != 2'b00) begin $display("FAIL: DDR3 address %h outside region 1's drives", la); fails = fails + 1; end
+                if (lwe) mem[la[19:0]] <= lwd; else dsk_rdata <= mem[la[19:0]];
+            end
+        end
     end
 
-    integer fails = 0;
-    integer checks = 0;
-    task check(input string what, input bit ok);
+    // fl_wr: the blocks the store said it wrote
+    integer fl_lo = 99999, fl_hi = -1, fl_n = 0, fb;
+    always @(posedge clk) if (fl_wr) begin
+        fl_n = fl_n + 1;
+        if (fl_wr_drv !== 1'b0) begin $display("FAIL: fl_wr for drive 2"); fails = fails + 1; end
+        fb = fl_wr_blk;
+        if (fb < fl_lo) fl_lo = fb;
+        if (fb > fl_hi) fl_hi = fb;
+    end
+
+    task check(input [8*72-1:0] what, input ok);
         begin
             checks = checks + 1;
-            if (!ok) begin
-                $display("FAIL: %0s", what);
-                fails = fails + 1;
-            end
+            if (!ok) begin $display("FAIL: %0s", what); fails = fails + 1; end
         end
     endtask
 
-    // ------------------------------------------------------------------
-    // The image: a pattern where every byte of a sector is distinct and both
-    // halves of every byte vary, so a mis-ordered or half-swapped buffer shows
-    // up instead of hiding.  The obvious pattern -- the offset in the low two
-    // bits -- is too weak for that: four bytes then share their top six bits,
-    // and a buffer holding the wrong byte in three of every four positions
-    // still decodes "correctly" in the half the test looks at.  Multiplying the
-    // offset by 5 is a bijection over a byte, so all 256 are distinct, and the
-    // sector, track and drive terms keep the drives and sectors apart.
-    function [7:0] img_byte(input integer drive, input integer track,
-                             input integer sec, input integer off);
+    // ---- the 6502: one access per CPU cycle ----
+    task tick;      // a cycle with nothing on the card's bus
+        begin @(negedge clk); while (!ce_1m) @(negedge clk); @(negedge clk); end
+    endtask
+    task acc(input [3:0] a, input w, input [7:0] d, output [7:0] q);
         begin
-            img_byte = (8'(off * 5 + sec * 11 + track * 23 + (drive ? 64 : 0))) ^ 8'hA5;
+            @(negedge clk); while (!ce_1m) @(negedge clk);
+            addr = 16'hC0E0 | a; we = w; di = d; devsel_n = 1'b0; bus_cycle = 1'b1;
+            #1 q = io_data;
+            @(negedge clk); devsel_n = 1'b1; bus_cycle = 1'b0; we = 1'b0;
         end
-    endfunction
+    endtask
+    reg [7:0] junk;
+    task sw(input [3:0] a); acc(a, 1'b0, 8'h00, junk); endtask
+    task idle(input integer n); repeat (n) tick; endtask
 
-    // An in-memory shadow of both drives' images, for the store to serve and
-    // the write path to land in.  It is indexed by the controller's byte
-    // position, which is not a flat offset (see img_idx below), so it is larger
-    // than the images: 280 rows per drive of 1024 bytes, of which the
-    // controller addresses the first 512.
-    localparam integer NTRACKS = 35;
-    localparam integer SECT    = 16;
-    localparam integer SECB    = 256;
-    localparam integer DRIVEB  = NTRACKS * SECT * SECB;   // 143,360
-    localparam integer SHADOWB = ((2*DRIVEB) / 1024 + 1) * 1024;
-    reg [7:0] shadow [0:SHADOWB-1];
-
-    // Where a drive/track/sector/byte lives in the shadow.  Not simply the flat
-    // offset: the SDRAM's address splits into a row of 1024 bytes and a column
-    // of 256 words, and the controller uses all of the row's 1024 as a row
-    // address while only ever driving the first 512 bytes of it as columns, so
-    // a flat byte offset and a controller address are not the same thing and
-    // the two differ by a whole row every 512 bytes.  The store puts a drive's
-    // byte n at controller address n, so the shadow has to be laid out the way
-    // the controller would find it -- which is what byte_of() below inverts.
-    function integer img_idx(input integer drive, input integer track,
-                             input integer sec, input integer off);
-        reg [18:0] flat;
+    // RD: LDA $C08C,X / BPL RD (7 cycles a pass), then BPL not taken and a
+    // compare (4) before the caller's next read
+    task rdnib(output [7:0] b);
         begin
-            flat   = (drive ? DRIVEB : 0) + (track * SECT + sec) * SECB + off;
-            img_idx = (flat[18:9] * 1024) + (flat[8:1] * 2) + flat[0];
+            b = 8'h00;
+            while (!b[7]) begin
+                tick; tick; tick; acc(4'hC, 1'b0, 8'h00, b);
+                if (!b[7]) begin tick; tick; end
+            end
+            tick; tick; tick; tick;
         end
-    endfunction
+    endtask
 
-    integer ii, jj;
+    // ---- the stepper, as RWTS moves it: next phase on, settle, previous off ----
+    integer hb = 0;                 // where DOS believes the head is, in half tracks
+    function [1:0] ph(input integer h); ph = h[1:0]; endfunction   // half track h's phase
+    task halfstep(input integer dir);
+        begin
+            sw({1'b0, ph(hb + dir), 1'b1});
+            idle(20);
+            sw({1'b0, ph(hb), 1'b0});
+            idle(20);
+            hb = hb + dir;
+        end
+    endtask
+    task phases_off; begin sw(4'h0); sw(4'h2); sw(4'h4); sw(4'h6); end endtask
+    task seek(input integer track);
+        begin
+            while (hb < 2 * track) halfstep(1);
+            while (hb > 2 * track) halfstep(-1);
+            phases_off;
+        end
+    endtask
+    task recal;   // DOS: believe 80 half tracks out and seek to 0, against the stop
+        begin hb = 80; seek(0); end
+    endtask
+
+    // ---- 6-and-2, the bench's own: the decode table spelled out ----
+    reg [7:0] g62 [0:63];
     initial begin
-        for (ii = 0; ii < 2*DRIVEB; ii = ii + 1)
-            shadow[img_idx(ii / DRIVEB, (ii / (SECT*SECB)) % NTRACKS,
-                           (ii / SECB) % SECT, ii % SECB)] =
-                img_byte(ii / DRIVEB, (ii / (SECT*SECB)) % NTRACKS,
-                         (ii / SECB) % SECT, ii % SECB);
+        {g62[0],g62[1],g62[2],g62[3],g62[4],g62[5],g62[6],g62[7]}         = {8'h96,8'h97,8'h9A,8'h9B,8'h9D,8'h9E,8'h9F,8'hA6};
+        {g62[8],g62[9],g62[10],g62[11],g62[12],g62[13],g62[14],g62[15]}   = {8'hA7,8'hAB,8'hAC,8'hAD,8'hAE,8'hAF,8'hB2,8'hB3};
+        {g62[16],g62[17],g62[18],g62[19],g62[20],g62[21],g62[22],g62[23]} = {8'hB4,8'hB5,8'hB6,8'hB7,8'hB9,8'hBA,8'hBB,8'hBC};
+        {g62[24],g62[25],g62[26],g62[27],g62[28],g62[29],g62[30],g62[31]} = {8'hBD,8'hBE,8'hBF,8'hCB,8'hCD,8'hCE,8'hCF,8'hD3};
+        {g62[32],g62[33],g62[34],g62[35],g62[36],g62[37],g62[38],g62[39]} = {8'hD6,8'hD7,8'hD9,8'hDA,8'hDB,8'hDC,8'hDD,8'hDE};
+        {g62[40],g62[41],g62[42],g62[43],g62[44],g62[45],g62[46],g62[47]} = {8'hDF,8'hE5,8'hE6,8'hE7,8'hE9,8'hEA,8'hEB,8'hEC};
+        {g62[48],g62[49],g62[50],g62[51],g62[52],g62[53],g62[54],g62[55]} = {8'hED,8'hEE,8'hEF,8'hF2,8'hF3,8'hF4,8'hF5,8'hF6};
+        {g62[56],g62[57],g62[58],g62[59],g62[60],g62[61],g62[62],g62[63]} = {8'hF7,8'hF9,8'hFA,8'hFB,8'hFC,8'hFD,8'hFE,8'hFF};
     end
-
-    // ------------------------------------------------------------------
-    // The card, and the store behind it
-    // ------------------------------------------------------------------
-    // The bench pretends to be slot_bus and drives the two strobes itself, so
-    // the card is tested without the rest of the bus.  The decode of which
-    // addresses assert which strobe is slot_bus's job and tb_slots checks it.
-    reg  [15:0] addr = 16'hC0E0;
-    reg         bus_cycle = 1'b0;
-    reg         cpu_we = 1'b0;
-    reg  [7:0]  cpu_di = 8'h00;
-    wire [7:0]  rom_data;
-    wire [7:0]  io_data;
-    // /DEVSEL is low whenever this bench puts a $C0E0-$C0EF address on the bus.
-    wire devsel_n = !((addr[15:8] == 8'hC0) && (addr[7:4] == 4'hE));
-
-    wire        grp_req;
-    wire [8:0]  grp_off;
-    wire [5:0]  grp_val;
-    wire        grp_ack;
-    wire [3:0]  pos_sec;
-    wire [8:0]  pos_track;
-    wire        pos_drive;
-    wire        wr_seen;
-    wire [7:0]  wr_byte;
-    wire        wr_in_data;
-    wire [8:0]  wr_off;
-    wire [1:0]  drv_present;
-    wire [1:0]  drv_writable;
-    wire [6:0]  dbg_track;
-    wire [7:0]  dbg_head;
-    wire [4:0]  dbg_playsel;
-    wire [12:0] dbg_playoff;
-    wire        dbg_motor, dbg_drive, dbg_wr_mode, dbg_any_disk, dbg_need_grp;
-
-    disk2_card u_card (
-        .clk(clk), .reset(reset), .ce_1m(ce_1m),
-        .devsel_n(devsel_n), .iosel_n(1'b1),
-        .bus_cycle(bus_cycle), .cpu_we(cpu_we), .addr(addr), .cpu_di(cpu_di),
-        .rom_data(rom_data), .io_data(io_data),
-        .grp_req(grp_req), .grp_off(grp_off), .pos_sec(pos_sec),
-        .pos_track(pos_track), .pos_drive(pos_drive),
-        .grp_val(grp_val), .grp_ack(grp_ack),
-        .store_wr_seen(wr_seen), .store_wr_byte(wr_byte), .store_wr_data(wr_in_data),
-        .store_wr_off(wr_off),
-        .store_drv_present(drv_present), .store_drv_writable(drv_writable),
-        .dbg_track(dbg_track), .dbg_head(dbg_head),
-        .dbg_playsel(dbg_playsel), .dbg_playoff(dbg_playoff),
-        .dbg_motor(dbg_motor), .dbg_drive(dbg_drive),
-        .dbg_any_disk(dbg_any_disk), .dbg_need_grp(dbg_need_grp),
-        .dbg_wr_mode(dbg_wr_mode)
-    );
-
-    // The store, with its SDRAM port going to a simple stand-in for aux_ram's
-    // arbiter.  The real arbiter is exercised by tb_aux_ram, and this bench
-    // only needs the 8-clocks-per-word cadence and the byte map.
-    // The store drives its SDRAM port; these are its outputs, so they are
-    // plain wires here (no initialisers: the store owns them).
-    wire        dsk_go;
-    wire [21:0] dsk_addr;
-    wire        dsk_we;
-    wire [15:0] dsk_wdata;
-    wire [15:0] dsk_rdata;
-    wire        dsk_ack;
-    wire        dsk_idle;
-    reg  [3:0]  dsk_t = 4'd0;
-    reg         dsk_busy = 1'b0;
-    reg  [21:0] dsk_a_q = 22'd0;
-    reg         dsk_we_q = 1'b0;
-    reg  [15:0] dsk_d_q = 16'd0;
-    reg  [15:0] dsk_r_q = 16'd0;
-    reg         dsk_ack_q = 1'b0;
-
-    assign dsk_idle  = !dsk_busy;
-    assign dsk_ack   = dsk_ack_q;
-    assign dsk_rdata = dsk_r_q;
-
-    // The stand-in SDRAM: bank 1, one word per 8 clocks, exactly as
-    // aux_ram.v paces the real controller.  Its byte map is the one the store
-    // computes: addr[21:20] = bank, addr[19:9] = row, addr[8:1] = column,
-    // addr[0] = the 16-bit half, ds from the byte.
-    reg [21:0] sd_q;
-    always @(posedge clk) begin
-        dsk_ack_q <= 1'b0;
-        if (dsk_go) begin
-            dsk_busy <= 1'b1;
-            dsk_t    <= 4'd0;
-            dsk_a_q  <= dsk_addr;
-            dsk_we_q <= dsk_we;
-            dsk_d_q  <= dsk_wdata;
-        end else if (dsk_busy) begin
-            dsk_t <= dsk_t + 4'd1;
-            if (dsk_t == 4'd7) begin
-                dsk_busy  <= 1'b0;
-                dsk_ack_q <= 1'b1;
-                if (!dsk_we_q) dsk_r_q <= {shadow[byte_of(dsk_a_q, 1'b1)],
-                                           shadow[byte_of(dsk_a_q, 1'b0)]};
-            end
-        end
-    end
-
-    // The byte address a controller word address names.  The store always
-    // moves a whole word, so only the two halves vary.
-    function integer byte_of(input [21:0] a, input half);
-        reg [20:0] b;
+    function [6:0] un62(input [7:0] n);   // {not a disk byte, value}
+        integer v;
         begin
-            b = {a[19:1], half};          // row, column, and the half bit
-            // Within a bank, the byte address is the row in the high bits, the
-            // column in the middle, and the half (and ds) at the bottom.
-            byte_of = ((a[21:20] - 2'd1) * 1048576) + (a[19:9] * 1024) +
-                      (a[8:1] * 2) + half;
+            un62 = 7'h40;
+            for (v = 0; v < 64; v = v + 1) if (g62[v] == n) un62 = v;
         end
     endfunction
 
-    // The store
-    disk2_store u_store (
-        .clk(clk), .reset(reset),
-        .grp_req(grp_req), .grp_off(grp_off), .pos_sec(pos_sec),
-        .pos_track(pos_track), .pos_drive(pos_drive),
-        .grp_val(grp_val), .grp_ack(grp_ack),
-        .wr_seen(wr_seen), .wr_byte(wr_byte), .wr_in_data(wr_in_data),
-        .wr_off(wr_off),
-        .drv_present(drv_present), .drv_writable(drv_writable),
-        .up_go(1'b0), .up_drive(1'b0), .up_addr(18'd0), .up_data(8'h00),
-        .up_last(1'b0), .up_busy(), .up_done(),
-        .down_go(1'b0), .down_drive(1'b0), .down_addr(18'd0),
-        .down_data(), .down_valid(),
-        .dsk_go(dsk_go), .dsk_addr(dsk_addr), .dsk_we(dsk_we), .dsk_wdata(dsk_wdata),
-        .dsk_rdata(dsk_rdata), .dsk_ack(dsk_ack), .dsk_idle(dsk_idle)
-    );
-
-    // The shadow is written when the stand-in SDRAM takes a write.
-    always @(posedge clk) begin
-        if (dsk_ack_q && dsk_we_q) begin
-            shadow[byte_of(dsk_a_q, 1'b1)] = dsk_d_q[15:8];
-            shadow[byte_of(dsk_a_q, 1'b0)] = dsk_d_q[7:0];
-        end
-    end
-
-    // ------------------------------------------------------------------
-    // Driving the card, the way the ROM does
-    // ------------------------------------------------------------------
-    // One $C0Ex access: the address, a read or a write, one CPU cycle.  The
-    // core's cpu_go is a one-clock-wide registered pulse, so bus_cycle is high
-    // for exactly one edge here: holding it for two would step the head twice.
-    // It is dropped a nanosecond after that edge, not in the same time step, so
-    // it cannot race the card's sampling of it (in the real design cpu_go is a
-    // register, and this is the one thing the bench has to reproduce by hand).
-    task xfer(input [3:0] a, input we, input [7:0] d);
+    reg [7:0] nib [0:342];
+    reg [7:0] sec [0:255];
+    reg [5:0] val [0:342];
+    // the field in nib[] -> sec[]; 0 if a byte is not a disk byte or the checksum fails
+    function field_ok(input dummy);
+        integer i;
+        reg [6:0] u;
+        reg [5:0] prev;
         begin
-            @(posedge ce_1m);
-            addr      = 16'hC0E0 | {12'h000, a};
-            cpu_we    = we;
-            cpu_di    = d;
-            bus_cycle = 1'b1;
-            @(posedge clk);
-            #1 bus_cycle = 1'b0;
-            @(negedge clk);      // let the edge's updates land before returning
-        end
-    endtask
-
-    task read_reg(input [3:0] a, output [7:0] d);
-        begin
-            @(posedge ce_1m);
-            addr      = 16'hC0E0 | {12'h000, a};
-            cpu_we    = 1'b0;
-            bus_cycle = 1'b1;
-            #1 d = io_data;
-            @(posedge clk);
-            #1 bus_cycle = 1'b0;
-            @(negedge clk);
-        end
-    endtask
-
-    // The stepper, driven the way DOS does it: a half-track is "turn on the next
-    // phase, turn off the one before" ($C0E0+2n off, $C0E1+2n on), and a track is
-    // two of them.  bph is the phase the head is on, which is what "next" is
-    // relative to; DOS tracks it the same way.
-    reg [1:0] bph = 2'd0;
-    task half_out; reg [1:0] p; begin p = bph + 2'd1;
-        xfer({1'b0, p, 1'b1}, 1'b0, 8'h00); xfer({1'b0, bph, 1'b0}, 1'b0, 8'h00); bph = p; end endtask
-    task half_in;  reg [1:0] p; begin p = bph - 2'd1;
-        xfer({1'b0, p, 1'b1}, 1'b0, 8'h00); xfer({1'b0, bph, 1'b0}, 1'b0, 8'h00); bph = p; end endtask
-    task step_out; begin half_out; half_out; end endtask
-    task step_in;  begin half_in;  half_in;  end endtask
-
-    task recalibrate;
-        integer guard;
-        reg [7:0] was;
-        begin
-            guard = 0;
-            was   = 8'hFF;      // forces the first iteration to run
-            while (guard < 500) begin
-                step_in;
-                if (dbg_head == was) guard = 500;   // the head stopped moving
-                else was = dbg_head;
-                guard = guard + 1;
+            field_ok = 1'b1; prev = 6'd0;
+            for (i = 0; i < 343; i = i + 1) begin
+                u = un62(nib[i]);
+                if (u[6]) field_ok = 1'b0;
+                prev = prev ^ u[5:0];
+                val[i] = prev;
             end
-        end
-    endtask
-
-    // A seek, the way DOS does it: recalibrate to track 0 first, then step out.
-    task seek_toward(input integer trk);
-        integer guard;
-        begin
-            recalibrate;
-            guard = 0;
-            while (dbg_track != trk[6:0] && guard < 100) begin
-                step_out;
-                guard = guard + 1;
+            if (val[342] != 6'd0) field_ok = 1'b0;
+            for (i = 0; i < 256; i = i + 1) begin
+                u = val[i % 86] >> (2 * (i / 86));      // this byte's pair, reversed
+                sec[i] = {val[86 + i], u[0], u[1]};
             end
-        end
-    endtask
-
-    // Wait for the store's value for the position the head is on.  A real drive
-    // streams a byte every 32 us and never has to ask -- the store has 858 clocks
-    // per stream byte and wants 54 of them -- but this bench walks the track a
-    // byte per ce_1m to keep 227 ms of drive time out of the simulation, and at
-    // that rate the card is still asking when the next byte is due.  So the
-    // bench waits, which is what the drive's own rate would have done for it.
-    // bench waits, which is what the drive's own rate would have done for it.
-    task wait_grp;
-        integer guard;
-        begin
-            guard = 0;
-            // A clock first, so the card has seen the head arrive and asked.
-            @(posedge clk);
-            while (dbg_need_grp === 1'b1 && guard < 20000) begin
-                @(posedge clk);
-                guard = guard + 1;
-            end
-        end
-    endtask
-
-    // The data register: a Q6L read takes the next stream byte, which is what
-    // RWTS does to walk a track.  In write mode, a write to Q6L latches a byte
-    // and a Q7L read shifts it in.
-    // The register has bit 7 set only for a fresh byte, so poll for it as the ROM's
-    // LDA/BPL loop does; the card waits for the store by itself now, which the
-    // bench used to do for it (wait_grp) when reads stepped the head.
-    task read_byte(output [7:0] d);
-        integer g;
-        begin
-            g = 0; d = 8'h00;
-            while (d[7] !== 1'b1 && g < 4000) begin
-                read_reg(4'hC, d);      // Q6L: the data register
-                g = g + 1;
-            end
-        end
-    endtask
-
-    // The shift register holds a byte and a Q6L read transfers it, so the first
-    // read after a reset returns whatever the register was reset to ($FF, a
-    // sync byte) and each read after that returns the byte one position behind
-    // the one being synthesized.  That is how the real card behaves -- the
-    // register is a register -- so the bench primes it once after a reset
-    // rather than compensating for it in every expectation.
-    task prime_read;
-        reg [7:0] junk;
-        begin
-            read_byte(junk);
-        end
-    endtask
-
-    // A sector read, the way RWTS finds one: hunt for three $FFs, then the
-    // $D5 $AA $96 header, check the four checksum bytes, then the $D5 $AA $AD
-    // data mark, then 343 data bytes and the $DE $AA $EB tail.  The decoded 256
-    // bytes land in got[].
-    reg [7:0] got [0:255];
-    integer    hunt, kk, data_i;
-    reg [7:0]  b0, b1, b2, mark, vol, trk, sec, cks, t0, t1, t2;
-    reg [7:0]  dmark0, dmark1, dmark2, dt0, dt1, dt2;
-
-    task rd5(output [7:0] a, output [7:0] b, output [7:0] c);
-        begin
-            read_byte(a); read_byte(b); read_byte(c);
-        end
-    endtask
-
-    // The GCR inverse, here written out independently of the RTL's table so
-    // the check is not the design checking itself.  This is the standard
-    // 6-and-2 write-translate table, spelled out: 64 legal disk bytes, the ones
-    // that leave a data separator something to lock onto.
-    function [5:0] model_decode(input [7:0] v);
-        begin
-            case (v)
-                8'h96: model_decode = 6'h00; 8'h97: model_decode = 6'h01;
-                8'h9A: model_decode = 6'h02; 8'h9B: model_decode = 6'h03;
-                8'h9D: model_decode = 6'h04; 8'h9E: model_decode = 6'h05;
-                8'h9F: model_decode = 6'h06; 8'hA6: model_decode = 6'h07;
-                8'hA7: model_decode = 6'h08; 8'hAB: model_decode = 6'h09;
-                8'hAC: model_decode = 6'h0A; 8'hAD: model_decode = 6'h0B;
-                8'hAE: model_decode = 6'h0C; 8'hAF: model_decode = 6'h0D;
-                8'hB2: model_decode = 6'h0E; 8'hB3: model_decode = 6'h0F;
-                8'hB4: model_decode = 6'h10; 8'hB5: model_decode = 6'h11;
-                8'hB6: model_decode = 6'h12; 8'hB7: model_decode = 6'h13;
-                8'hB9: model_decode = 6'h14; 8'hBA: model_decode = 6'h15;
-                8'hBB: model_decode = 6'h16; 8'hBC: model_decode = 6'h17;
-                8'hBD: model_decode = 6'h18; 8'hBE: model_decode = 6'h19;
-                8'hBF: model_decode = 6'h1A; 8'hCB: model_decode = 6'h1B;
-                8'hCD: model_decode = 6'h1C; 8'hCE: model_decode = 6'h1D;
-                8'hCF: model_decode = 6'h1E; 8'hD3: model_decode = 6'h1F;
-                8'hD6: model_decode = 6'h20; 8'hD7: model_decode = 6'h21;
-                8'hD9: model_decode = 6'h22; 8'hDA: model_decode = 6'h23;
-                8'hDB: model_decode = 6'h24; 8'hDC: model_decode = 6'h25;
-                8'hDD: model_decode = 6'h26; 8'hDE: model_decode = 6'h27;
-                8'hDF: model_decode = 6'h28; 8'hE5: model_decode = 6'h29;
-                8'hE6: model_decode = 6'h2A; 8'hE7: model_decode = 6'h2B;
-                8'hE9: model_decode = 6'h2C; 8'hEA: model_decode = 6'h2D;
-                8'hEB: model_decode = 6'h2E; 8'hEC: model_decode = 6'h2F;
-                8'hED: model_decode = 6'h30; 8'hEE: model_decode = 6'h31;
-                8'hEF: model_decode = 6'h32; 8'hF2: model_decode = 6'h33;
-                8'hF3: model_decode = 6'h34; 8'hF4: model_decode = 6'h35;
-                8'hF5: model_decode = 6'h36; 8'hF6: model_decode = 6'h37;
-                8'hF7: model_decode = 6'h38; 8'hF9: model_decode = 6'h39;
-                8'hFA: model_decode = 6'h3A; 8'hFB: model_decode = 6'h3B;
-                8'hFC: model_decode = 6'h3C; 8'hFD: model_decode = 6'h3D;
-                8'hFE: model_decode = 6'h3E; 8'hFF: model_decode = 6'h3F;
-                default: model_decode = 6'h3C;
-            endcase
         end
     endfunction
 
-    // The forward table, spelled out like the inverse above and for the same
-    // reason: the bench has to be able to *write* a field without asking the
-    // design what a field looks like.
-    function [7:0] model_encode(input [5:0] v);
-        begin
-            case (v)
-                6'h00: model_encode = 8'h96; 6'h01: model_encode = 8'h97;
-                6'h02: model_encode = 8'h9A; 6'h03: model_encode = 8'h9B;
-                6'h04: model_encode = 8'h9D; 6'h05: model_encode = 8'h9E;
-                6'h06: model_encode = 8'h9F; 6'h07: model_encode = 8'hA6;
-                6'h08: model_encode = 8'hA7; 6'h09: model_encode = 8'hAB;
-                6'h0A: model_encode = 8'hAC; 6'h0B: model_encode = 8'hAD;
-                6'h0C: model_encode = 8'hAE; 6'h0D: model_encode = 8'hAF;
-                6'h0E: model_encode = 8'hB2; 6'h0F: model_encode = 8'hB3;
-                6'h10: model_encode = 8'hB4; 6'h11: model_encode = 8'hB5;
-                6'h12: model_encode = 8'hB6; 6'h13: model_encode = 8'hB7;
-                6'h14: model_encode = 8'hB9; 6'h15: model_encode = 8'hBA;
-                6'h16: model_encode = 8'hBB; 6'h17: model_encode = 8'hBC;
-                6'h18: model_encode = 8'hBD; 6'h19: model_encode = 8'hBE;
-                6'h1A: model_encode = 8'hBF; 6'h1B: model_encode = 8'hCB;
-                6'h1C: model_encode = 8'hCD; 6'h1D: model_encode = 8'hCE;
-                6'h1E: model_encode = 8'hCF; 6'h1F: model_encode = 8'hD3;
-                6'h20: model_encode = 8'hD6; 6'h21: model_encode = 8'hD7;
-                6'h22: model_encode = 8'hD9; 6'h23: model_encode = 8'hDA;
-                6'h24: model_encode = 8'hDB; 6'h25: model_encode = 8'hDC;
-                6'h26: model_encode = 8'hDD; 6'h27: model_encode = 8'hDE;
-                6'h28: model_encode = 8'hDF; 6'h29: model_encode = 8'hE5;
-                6'h2A: model_encode = 8'hE6; 6'h2B: model_encode = 8'hE7;
-                6'h2C: model_encode = 8'hE9; 6'h2D: model_encode = 8'hEA;
-                6'h2E: model_encode = 8'hEB; 6'h2F: model_encode = 8'hEC;
-                6'h30: model_encode = 8'hED; 6'h31: model_encode = 8'hEE;
-                6'h32: model_encode = 8'hEF; 6'h33: model_encode = 8'hF2;
-                6'h34: model_encode = 8'hF3; 6'h35: model_encode = 8'hF4;
-                6'h36: model_encode = 8'hF5; 6'h37: model_encode = 8'hF6;
-                6'h38: model_encode = 8'hF7; 6'h39: model_encode = 8'hF9;
-                6'h3A: model_encode = 8'hFA; 6'h3B: model_encode = 8'hFB;
-                6'h3C: model_encode = 8'hFC; 6'h3D: model_encode = 8'hFD;
-                6'h3E: model_encode = 8'hFE; 6'h3F: model_encode = 8'hFF;
-                default: model_encode = 8'hFF;
-            endcase
-        end
+    // the .dsk the WOZ was made from, and DOS 3.3's interleave (physical -> logical)
+    reg [7:0] dsk [0:143359];
+    function integer p2d(input integer p);
+        case (p)
+            0: p2d = 0;  1: p2d = 7;  2: p2d = 14; 3: p2d = 6;  4: p2d = 13; 5: p2d = 5;  6: p2d = 12; 7: p2d = 4;
+            8: p2d = 11; 9: p2d = 3;  10: p2d = 10; 11: p2d = 2; 12: p2d = 9; 13: p2d = 1; 14: p2d = 8; default: p2d = 15;
+        endcase
     endfunction
 
-    // The two bits of a group the other way up, which is how 6-and-2 packs them.
-    // The P6 ROM unpacks a group with LSR/ROL/LSR/ROL, which puts the group's
-    // bit 0 in the byte's bit 1 and the group's bit 1 in the byte's bit 0, so a
-    // disk holds each pair transposed.  This is checked against the ROM's own
-    // arithmetic in check_p6_unpack below, not just against the design.
-    function [1:0] model_swap2(input [1:0] v);
-        begin
-            model_swap2 = {v[0], v[1]};
-        end
+    // ---- read a track: every address and data field in ~2 turns ----
+    reg [15:0] seen;               // sectors whose data field decoded and matched
+    reg [7:0]  hv, ht, hs, hc;
+    integer    bad, got_trk;
+    // the expected bytes of physical sector p of track t; `override` replaces one sector
+    integer    ov_t = -1, ov_p = -1;
+    reg [7:0]  ov [0:255];
+    function [7:0] want(input integer t, input integer p, input integer i);
+        want = (t == ov_t && p == ov_p) ? ov[i] : dsk[(t * 16 + p2d(p)) * 256 + i];
     endfunction
-
-    // Build a data field for one sector of the image, the way a drive would
-    // write it: 86 aux bytes of low two bits, 256 bytes of top six, a checksum,
-    // and every six-bit value XORed with the one before it.
-    reg [7:0] wfld [0:342];
-    reg [5:0] wnib [0:341];
-    integer bi;
-    reg [5:0] wprev;
-
-    task build_field(input integer sector);
+    task read_track(input integer t, input integer nibs);
+        integer n, i, k;
+        reg [7:0] b, b2, b3;
         begin
-            for (bi = 0; bi < 86; bi = bi + 1)
-                wnib[bi] = {model_swap2(172 + bi < 256 ?
-                             shadow[img_idx(0, 0, sector, 172 + bi)][1:0] : 2'b00),
-                             model_swap2(shadow[img_idx(0, 0, sector, 86 + bi)][1:0]),
-                             model_swap2(shadow[img_idx(0, 0, sector, bi)][1:0])};
-            for (bi = 0; bi < 256; bi = bi + 1)
-                wnib[86 + bi] = shadow[img_idx(0, 0, sector, bi)][7:2];
-            // The chain a real drive writes: each position is its own group
-            // XORed with the group before it, the first is its own group, and
-            // the checksum is the last position's group again with nothing done
-            // to it.  A RWTS undoes it by XORing the disk bytes as it reads
-            // them, which telescopes to the group at each position.
-            wprev = 6'd0;
-            for (bi = 0; bi < 342; bi = bi + 1) begin
-                wfld[bi] = model_encode(wprev ^ wnib[bi]);
-                wprev     = wnib[bi];
-            end
-            wfld[342] = model_encode(wnib[341]);
-        end
-    endtask
-
-    // The 4-and-4 decode of an address field, also independent of the RTL.
-    function [7:0] model_a44(input [7:0] hi, input [7:0] lo);
-        begin
-            model_a44 = {hi[6] & lo[7], hi[5] & lo[6], hi[4] & lo[5],
-                         hi[3] & lo[4], hi[2] & lo[3], hi[1] & lo[2],
-                         hi[0] & lo[1], lo[0]};
-        end
-    endfunction
-
-    // The data field decoded the way the store decodes it, from the field's
-    // own layout: 256 disk bytes of top six bits, 86 of low two bits.
-    reg [7:0] field [0:342];
-    // Decode a data field into got[].  The layout is the one RWTS reads: 86 aux
-    // bytes carrying the low two bits of sector bytes 172+k, 86+k and k, then
-    // 256 bytes of top six bits, then the checksum.  Each six-bit value is the
-    // XOR of itself and the one before it, and the last byte repeats the 342nd.
-    // Written out here rather than shared with the RTL, so that checking the
-    // field is checking the field.
-    reg [5:0] nib6 [0:341];
-    integer nx;
-    reg [5:0] nv;
-    task decode_field;
-        begin
-            nv = 6'd0;
-            for (nx = 0; nx < 342; nx = nx + 1) begin
-                nv       = model_decode(field[nx]) ^ nv;
-                nib6[nx] = nv;
-            end
-            for (nx = 0; nx < 256; nx = nx + 1) got[nx] = 8'h00;
-            for (nx = 0; nx < 86; nx = nx + 1) begin
-                // Each group is a byte's low two bits in order, so the way back
-                // out is the way in.
-                if (172 + nx < 256)
-                    got[172 + nx][1:0] = model_swap2(nib6[nx][5:4]);
-                got[86 + nx][1:0] = model_swap2(nib6[nx][3:2]);
-                got[nx][1:0]      = model_swap2(nib6[nx][1:0]);
-            end
-            for (nx = 86; nx < 342; nx = nx + 1)
-                got[nx - 86][7:2] = nib6[nx][5:0];
-        end
-    endtask
-
-    // The 4-and-4 decode of the address field, which is what RWTS does with the
-    // eight bytes it reads after the $D5 $AA $96.
-    reg [7:0] a0, a1, a2, a3, a4, a5, a6, a7;
-    task decode_address;
-        begin
-            vol = model_a44(a0, a1);
-            trk = model_a44(a2, a3);
-            sec = model_a44(a4, a5);
-            cks = model_a44(a6, a7);
-        end
-    endtask
-
-    // Walk the track to sector `want` and leave the header and the data field
-    // in the bench's variables.  Returns 1 if the sector was found.
-    reg found;
-    task find_sector(input integer want);
-        integer guard;
-        begin
-            found  = 1'b0;
-            guard  = 0;
-            mark   = 8'h00;
-            while (!found && guard < 16 * 500) begin
-                read_byte(b0);
-                if (b0 == 8'hD5) begin
-                    read_byte(b1);
-                    read_byte(b2);
-                    if (b1 == 8'hAA && b2 == 8'h96) begin
-                        read_byte(a0); read_byte(a1);
-                        read_byte(a2); read_byte(a3);
-                        read_byte(a4); read_byte(a5);
-                        read_byte(a6); read_byte(a7);
-                        decode_address;
-                        read_byte(t0); read_byte(t1); read_byte(t2);
-                        if (sec == want[7:0]) found = 1'b1;
-                    end
-                end
-                guard = guard + 1;
-            end
-        end
-    endtask
-
-    // The bytes of one sector's data field, into field[].  The $D5 $AA $AD
-    // address mark has already been read by the hunt that got here, so this
-    // starts at the first data byte.
-    task read_field;
-        begin
-            for (kk = 0; kk < 343; kk = kk + 1) read_byte(field[kk]);
-            read_byte(dt0); read_byte(dt1); read_byte(dt2);
-        end
-    endtask
-
-    integer diff_i, diff_n, sec_i;
-    reg [7:0] rb;        // a byte read and thrown away, walking to a position
-
-    initial begin
-        #200;
-        @(posedge clk);
-        reset = 1'b0;
-        #100;
-
-        // ---- the $C0Ex decode ----
-        xfer(4'h9, 1'b0, 8'h00);          // motor on
-        check("motor on", dbg_motor === 1'b1);
-        xfer(4'h8, 1'b0, 8'h00);          // motor off
-        check("motor off", dbg_motor === 1'b0);
-        xfer(4'h9, 1'b0, 8'h00);
-
-        xfer(4'hB, 1'b0, 8'h00);          // drive 2
-        check("drive 2 selected", dbg_drive === 1'b1);
-        xfer(4'hA, 1'b0, 8'h00);          // drive 1
-        check("drive 1 selected", dbg_drive === 1'b0);
-
-        // Q7 read selects read mode, a Q7 write selects write mode.
-        read_reg(4'hF, rb);
-        check("Q7 read leaves read mode", dbg_wr_mode === 1'b0);
-        xfer(4'hF, 1'b1, 8'h00);
-        check("Q7 write selects write mode", dbg_wr_mode === 1'b1);
-        read_reg(4'hF, rb);               // back to read mode
-        check("Q7 read returns to read mode", dbg_wr_mode === 1'b0);
-
-        // With no image uploaded the drive must read as write protected, so a
-        // format goes nowhere rather than into unwritten memory.
-        read_reg(4'hC, rb);               // Q6L in read mode is the data register
-        xfer(4'hF, 1'b1, 8'h00);          // write mode
-        read_reg(4'hC, rb);
-        check("an empty drive reports write protected", rb === 8'h80);
-        read_reg(4'hF, rb);               // back to read mode
-
-        // ---- the stepper ----
-        check("the head starts at track 0", dbg_track === 7'd0);
-        // A DOS seek is two half-steps and moves one whole track.
-        step_out;
-        check("one out-step is one track", dbg_track === 7'd1);
-        step_out; step_out;
-        check("three out-steps reach track 3", dbg_track === 7'd3);
-        step_in;
-        check("one in-step is one track back", dbg_track === 7'd2);
-
-        // Recalibration walks to track 0, stops there, and stays there.
-        seek_toward(30);
-        check("seeking out reaches track 30", dbg_track === 7'd30);
-        recalibrate;
-        check("recalibration lands on track 0", dbg_track === 7'd0);
-        step_in;
-        check("stepping in at track 0 does nothing", dbg_track === 7'd0);
-        step_out;
-        check("and out again works from the stop", dbg_track === 7'd1);
-
-        // The far stop.
-        seek_toward(34);
-        check("seeking out reaches track 34", dbg_track === 7'd34);
-        step_out; step_out;
-        check("the head stops at track 34", dbg_track === 7'd34);
-        check("the head position is the track", dbg_head === 8'd34);
-        recalibrate;
-        check("recalibration from the far stop comes back", dbg_track === 7'd0);
-
-        // ---- the track itself: every sector, from the start ----
-        // The stream is walked by reads alone, with the motor off.  A real
-        // drive with the motor off holds its last byte and a read advances
-        // nothing, which the card now models, so the bench can step through
-        // the track one byte at a time and land on every field exactly.  DOS
-        // always turns the motor on and reads at the drive's own rate (a byte
-        // every 32 us, 33 ce_1m); walking a whole track that way would take
-        // 227 ms of simulated time, and what is under test here is the
-        // content of the stream, not its rate.
-        begin
-            reset = 1'b1; #40; @(posedge clk); reset = 1'b0; #40;
-            xfer(4'h9, 1'b0, 8'h00);   // motor on: the head only moves with the motor, one byte per 32 us
-            check("the stream starts at the top of the track", dbg_head === 8'd0);
-            // 48 self-sync bytes, then the header address mark.
-            for (diff_i = 0; diff_i < 48; diff_i = diff_i + 1) read_byte(rb);
-            check("48 self-sync bytes come first", rb === 8'hFF);
-            read_byte(b0); check("the header mark is D5", b0 === 8'hD5);
-            read_byte(b1); check("then AA", b1 === 8'hAA);
-            read_byte(b2); check("then 96", b2 === 8'h96);
-
-            for (sec_i = 0; sec_i < 16; sec_i = sec_i + 1) begin
-                // Position the bench at sector sec_i: sector 0's header has
-                // just been read, and the rest are one track layout apart.
-                if (sec_i > 0) begin
-                    // Finish sector 0 (or the last one read) and hunt forward
-                    // to the next sector's header mark, as RWTS does.  The
-                    // address bytes it reads are 4-and-4 encoded, and the
-                    // sector byte only means anything once decoded.
-                    find_sector(sec_i);
-                    check($sformatf("sector %0d header found on track 0", sec_i), found);
-                end else begin
-                    // The volume, track, sector and checksum bytes are next,
-                    // each as a pair.
-                    read_byte(a0); read_byte(a1);
-                    read_byte(a2); read_byte(a3);
-                    read_byte(a4); read_byte(a5);
-                    read_byte(a6); read_byte(a7);
-                    decode_address;
-                    read_byte(t0); read_byte(t1); read_byte(t2);
-                    check($sformatf("sector %0d header tail is DE AA EB", sec_i),
-                          t0 === 8'hDE && t1 === 8'hAA && t2 === 8'hEB);
-                end
-                // The same four checks either way: the address field is 4-and-4
-                // encoded, so RWTS decodes it, and a card that wrote the bytes
-                // raw would fail every one of these.
-                check($sformatf("sector %0d volume is $FE", sec_i), vol === 8'hFE);
-                check($sformatf("sector %0d track byte is 0", sec_i), trk === 8'h00);
-                check($sformatf("sector %0d sector byte is %0d", sec_i, sec_i),
-                      sec === sec_i[7:0]);
-                check($sformatf("sector %0d checksum is vol^trk^sec", sec_i),
-                      cks === (8'hFE ^ 8'h00 ^ sec_i[7:0]));
-
-                // The data address mark, the field, and its tail: hunt for
-                // D5 AA AD past the header tail's self-sync bytes.
-                hunt = 0; mark = 8'h00;
-                while (!(mark == 8'hD5) && hunt < 64) begin
-                    read_byte(b0);
-                    if (b0 == 8'hD5) begin
-                        read_byte(b1); read_byte(b2);
-                        if (b1 == 8'hAA && b2 == 8'hAD) mark = 8'hD5;
-                    end
-                    hunt = hunt + 1;
-                end
-                check($sformatf("sector %0d data address mark found", sec_i),
-                      mark === 8'hD5);
-                if (mark == 8'hD5) begin
-                    read_field;
-                    check($sformatf("sector %0d data tail is DE AA EB", sec_i),
-                          dt0 === 8'hDE && dt1 === 8'hAA && dt2 === 8'hEB);
-                    decode_field;
-                    diff_n = 0;
-                    for (diff_i = 0; diff_i < 256; diff_i = diff_i + 1) begin
-                        if (got[diff_i] !== shadow[img_idx(0, 0, sec_i, diff_i)]) begin
-                            if (diff_n == 0)
-                                $display("  sector %0d byte %0d: got %02x, image %02x",
-                                         sec_i, diff_i, got[diff_i],
-                                         shadow[img_idx(0, 0, sec_i, diff_i)]);
-                            diff_n = diff_n + 1;
+            seen = 16'h0000; bad = 0; got_trk = -1;
+            n = 0;
+            while (n < nibs && seen != 16'hFFFF) begin
+                rdnib(b); n = n + 1;
+                if (b == 8'hD5) begin
+                    rdnib(b2); rdnib(b3); n = n + 2;
+                    if (b2 == 8'hAA && b3 == 8'h96) begin
+                        rdnib(b); rdnib(b2); hv = ((b << 1) | 8'h01) & b2;
+                        rdnib(b); rdnib(b2); ht = ((b << 1) | 8'h01) & b2;
+                        rdnib(b); rdnib(b2); hs = ((b << 1) | 8'h01) & b2;
+                        rdnib(b); rdnib(b2); hc = ((b << 1) | 8'h01) & b2;
+                        n = n + 8;
+                        got_trk = ht;
+                        if (hv != 8'd254 || (hv ^ ht ^ hs) != hc || hs > 15) bad = bad + 1;
+                        // the data mark within the next ~20 bytes
+                        for (k = 0; k < 20; k = k + 1) begin
+                            rdnib(b); n = n + 1;
+                            if (b == 8'hD5) begin
+                                rdnib(b2); rdnib(b3); n = n + 2;
+                                if (b2 == 8'hAA && b3 == 8'hAD) begin
+                                    for (i = 0; i < 343; i = i + 1) rdnib(nib[i]);
+                                    n = n + 343;
+                                    if (!field_ok(1'b0)) bad = bad + 1;
+                                    else begin
+                                        for (i = 0; i < 256; i = i + 1)
+                                            if (sec[i] !== want(t, hs, i)) begin
+                                                if (bad < 4) $display("   track %0d sector %0d byte %0d = %02x, want %02x", t, hs, i, sec[i], want(t, hs, i));
+                                                bad = bad + 1; i = 256;
+                                            end
+                                        if (ht == t) seen[hs[3:0]] = 1'b1;
+                                    end
+                                    k = 20;
+                                end
+                            end
                         end
                     end
-                    check($sformatf("sector %0d decodes to the image (%0d bytes differ)",
-                                    sec_i, diff_n), diff_n == 0);
                 end
             end
         end
+    endtask
 
-        // ---- the write path ----
-        // Write a whole data field in write mode and check it comes back out
-        // of the image afterwards, which is what RWTS's verify read does.
-        // The motor is stopped at the field's first byte, so the bench stays on the byte it is writing.
+    // ---- write a sector the way RWTS's WRITE16 does ----
+    // after the address field and its DE AA: Q6H, Q7L (the protect sense),
+    // then Q7H loads FF, and each byte is loaded with Q6H and shifted with Q6L:
+    // five 40-cycle sync bytes, the data mark, 343 bytes and the tail at 32
+    task wbyte(input [7:0] b, input integer cycles, input first);
         begin
-            reset = 1'b1; #40; @(posedge clk); reset = 1'b0; #40;
-            xfer(4'h9, 1'b0, 8'h00);   // motor on: the head only moves with the motor, one byte per 32 us
-
-            // Wipe sector 0 of drive 1 in the shadow, so the write is over
-            // something known.  This stands in for the debugger's upload path,
-            // which fills the same image through the same store.
-            for (jj = 0; jj < 256; jj = jj + 1)
-                shadow[img_idx(0, 0, 0, jj)] = 8'h00;
-
-            // Walk to sector 0's data address mark.  The stream is reset to the
-            // top of the track, so sector 0's header is the first one.
-            for (diff_i = 0; diff_i < 48; diff_i = diff_i + 1) read_byte(rb);
-            read_byte(b0); read_byte(b1); read_byte(b2);
-            check("48 self-sync bytes, then the header mark", b0 === 8'hD5);
-            read_byte(a0); read_byte(a1);
-            read_byte(a2); read_byte(a3);
-            read_byte(a4); read_byte(a5);
-            read_byte(a6); read_byte(a7);
-            decode_address;
-            read_byte(t0); read_byte(t1); read_byte(t2);
-            // Six self-sync bytes, then the data mark $D5 $AA $AD, then one more
-            // read, which is the first data byte's slot.  A read hands back the
-            // byte under the head and leaves the head on it, and a write goes
-            // into the position the head is at, so the motor is stopped right
-            // here (well inside the 32 us the head stays on a byte) and the
-            // field is written from this position on, per access.
-            for (diff_i = 0; diff_i < 6; diff_i = diff_i + 1) read_byte(rb);
-            read_byte(b0); read_byte(b1); read_byte(b2);
-            read_byte(rb);
-            xfer(4'h8, 1'b0, 8'h00);      // motor off: hold the head
-            check("the data mark's D5 and AA are next", b0 === 8'hD5 && b1 === 8'hAA && b2 === 8'hAD);
-            check("the head is at the first data byte", dbg_playoff == 13'd71);
-
-            // Write mode, then a field holding sector 3's bytes, so a sector
-            // swap on the write path would show up.  The field is built by the
-            // bench's own encoder, not the design's.
-            build_field(3);
-            xfer(4'hF, 1'b1, 8'h00);      // Q7 write: write mode
-            for (kk = 0; kk < 343; kk = kk + 1) begin
-                xfer(4'hC, 1'b1, wfld[kk]);
-                read_reg(4'hD, rb);
-            end
-            read_reg(4'hF, rb);                             // back to read mode
-
-            // The store writes the sector back when the field ends; give it
-            // the time its 128 words take (about 40 us of CPU cycles).
-            repeat (600) @(posedge ce_1m);
-
-            diff_n = 0;
-            for (diff_i = 0; diff_i < 256; diff_i = diff_i + 1) begin
-                if (shadow[img_idx(0, 0, 0, diff_i)] !== shadow[img_idx(0, 0, 3, diff_i)]) begin
-                    $display("  written byte %0d: got %02x, wrote %02x", diff_i,
-                             shadow[img_idx(0, 0, 0, diff_i)],
-                             shadow[img_idx(0, 0, 3, diff_i)]);
-                    diff_n = diff_n + 1;
+            acc(first ? 4'hF : 4'hD, 1'b1, b, junk);   // STA $C08F,X / STA $C08D,X (the load)
+            tick; tick; tick; sw(4'hC);                  // ORA $C08C,X
+            idle(cycles - 5);
+        end
+    endtask
+    task write_sector(input integer t, input integer s, input wp);
+        integer i, guard;
+        reg [7:0] b, b2, b3;
+        reg [5:0] v [0:341];
+        reg [5:0] pv;
+        reg       found;
+        begin
+            // the address field of sector s
+            found = 1'b0; guard = 0;
+            while (!found && guard < 20000) begin
+                rdnib(b); guard = guard + 1;
+                if (b == 8'hD5) begin
+                    rdnib(b2); rdnib(b3);
+                    if (b2 == 8'hAA && b3 == 8'h96) begin
+                        rdnib(b); rdnib(b); rdnib(b); rdnib(b);
+                        rdnib(b); rdnib(b2); hs = ((b << 1) | 8'h01) & b2;
+                        rdnib(b); rdnib(b);
+                        rdnib(b); rdnib(b2);                    // DE AA
+                        if (hs == s) found = 1'b1;
+                    end
                 end
             end
-            check($sformatf("the written sector reached the image (%0d bytes differ)",
-                            diff_n), diff_n == 0);
+            check("found the address field to write after", found);
+            // the new sector, encoded here (aux k carries bytes k, k+86, k+172, pairs reversed)
+            for (i = 0; i < 86; i = i + 1) v[i] = 6'd0;
+            for (i = 0; i < 256; i = i + 1) begin
+                v[i % 86] = v[i % 86] | ({ov[i][0], ov[i][1]} << (2 * (i / 86)));
+                v[86 + i] = ov[i][7:2];
+            end
+            sw(4'hD); acc(4'hE, 1'b0, 8'h00, b);              // LDA $C08D,X ; LDA $C08E,X
+            check("the write-protect sense before a write", b[7] === wp);
+            wbyte(8'hFF, 40, 1'b1);
+            for (i = 0; i < 4; i = i + 1) wbyte(8'hFF, 40, 1'b0);
+            wbyte(8'hD5, 32, 1'b0); wbyte(8'hAA, 32, 1'b0); wbyte(8'hAD, 32, 1'b0);
+            pv = 6'd0;
+            for (i = 0; i < 342; i = i + 1) begin wbyte(g62[v[i] ^ pv], 32, 1'b0); pv = v[i]; end
+            wbyte(g62[pv], 32, 1'b0);
+            wbyte(8'hDE, 32, 1'b0); wbyte(8'hAA, 32, 1'b0); wbyte(8'hEB, 32, 1'b0);
+            wbyte(8'hFF, 32, 1'b0);
+            sw(4'hE); sw(4'hC);                                   // Q7L: read mode
         end
+    endtask
+
+    integer i, n, q0, changed, outside;
+    reg [7:0] b;
+    initial begin
+        $display("=== tb_disk2 ===");
+        $readmemh("build/sim_floppy.hex", mem, 0, WORDS - 1);
+        $readmemh("build/sim_floppy_dsk.hex", dsk);
+        for (i = 0; i < WORDS; i = i + 1) orig[i] = mem[i];
+        #200 @(posedge clk) reset = 1'b0;
+        store.present  = 2'b01;           // as sd_vol leaves it after loading drive 1
+        store.writable = 2'b01;
+
+        // ---- the stepper ----
+        check("the head starts at track 0", dbg_head === 8'd0);
+        seek(1);  check("one track out is quarter track 4", dbg_head === 8'd4);
+        seek(3);  check("track 3 is quarter track 12", dbg_head === 8'd12);
+        seek(2);  check("one track in", dbg_head === 8'd8);
+        sw(4'h1); sw(4'h3);               // track 2 is phase 0's: phases 0 and 1 together
+        check("two adjacent phases hold a quarter track", dbg_head === 8'd9);
+        sw(4'h2);                         // phase 1 off
+        check("one phase pulls it back onto its magnet", dbg_head === 8'd8);
+        sw(4'h0);
+        seek(30); check("track 30", dbg_head === 8'd120);
+        recal;    check("DOS's recalibrate lands on track 0", dbg_head === 8'd0);
+        halfstep(-1); halfstep(-1); phases_off; hb = 0;
+        check("stepping in at track 0 does nothing", dbg_head === 8'd0);
+
+        // ---- read track 0 and track 17 from wherever the head lands ----
+        sw(4'h9); sw(4'hA); sw(4'hE);        // motor on, drive 1, read mode
+        idle(300);
+        read_track(0, 14000);
+        check("track 0: all 16 sectors decode to the .dsk", seen == 16'hFFFF && bad == 0);
+        seek(17);
+        read_track(17, 14000);
+        check("track 17: all 16 sectors decode to the .dsk", seen == 16'hFFFF && bad == 0);
+
+        // ---- a quarter track beside track 17 reads it; one between tracks is noise ----
+        sw(4'h5); sw(4'h7); idle(20);       // track 17 is phase 2's: phases 2 and 3, 17.25
+        check("quarter track 69", dbg_head === 8'd69);
+        read_track(17, 3000);
+        check("17.25 reads track 17's fields", got_trk == 17 && bad == 0 && seen != 16'h0000);
+        sw(4'h4); idle(20);                 // phase 2 off: phase 3 alone pulls to 70 (17.5: empty)
+        check("quarter track 70", dbg_head === 8'd70);
+        n = 0;
+        for (i = 0; i < 200; i = i + 1) begin rdnib(b); if (b == 8'hD5) n = n + 1; end
+        check("17.5 has no track: the reads are noise, never stuck", rd_ok == 1'b0);
+        sw(4'h5); sw(4'h6); idle(20);       // phase 2 on, 3 off: back onto 17
+        check("back on track 17", dbg_head === 8'd68);
+        sw(4'h4);
+
+        // ---- write protect: the sense bit ----
+        sw(4'hD); acc(4'hE, 1'b0, 8'h00, b);
+        check("writable: the sense bit is clear", b[7] === 1'b0);
+        store.writable = 2'b00;
+        sw(4'hD); acc(4'hE, 1'b0, 8'h00, b);
+        check("write protected: the sense bit is set", b[7] === 1'b1);
+        store.writable = 2'b01;
+        sw(4'hC);
+
+        // ---- write sector 5 of track 17 with RWTS's timing ----
+        for (i = 0; i < 256; i = i + 1) ov[i] = (i * 29 + 7) ^ 8'hA5;
+        ov[0] = 8'h00; ov[1] = 8'hFF; ov[255] = 8'h03;
+        fl_n = 0; fl_lo = 99999; fl_hi = -1;
+        write_sector(17, 5, 1'b0);
+        ov_t = 17; ov_p = 5;
+        idle(100);
+        read_track(17, 14000);
+        check("track 17 after the write: sector 5 is the new data, the rest unchanged", seen == 16'hFFFF && bad == 0);
+        // the DDR3: only track 17's blocks changed, and fl_wr said which
+        changed = 0; outside = 0;
+        for (i = 0; i < WORDS; i = i + 1)
+            if (mem[i] !== orig[i]) begin
+                changed = changed + 1;
+                if (i / 256 < 3 + 17 * 13 || i / 256 >= 3 + 18 * 13) outside = outside + 1;
+            end
+        $display("   the write changed %0d DDR3 words; fl_wr %0d times, blocks %0d..%0d", changed, fl_n, fl_lo, fl_hi);
+        check("the write changed DDR3 words of track 17 only", changed > 100 && outside == 0);
+        check("fl_wr named track 17's blocks", fl_n > 0 && fl_lo >= 3 + 17 * 13 && fl_hi >= fl_lo && fl_hi < 3 + 18 * 13);
+        seek(16); read_track(16, 14000);
+        check("track 16 is untouched", seen == 16'hFFFF && bad == 0);
+
+        // ---- a write-protected disk takes no writes ----
+        store.writable = 2'b00;
+        for (i = 0; i < WORDS; i = i + 1) orig[i] = mem[i];
+        write_sector(16, 2, 1'b1);
+        idle(100);
+        n = 0;
+        for (i = 0; i < WORDS; i = i + 1) if (mem[i] !== orig[i]) n = n + 1;
+        check("a protected disk's DDR3 is unchanged by a write", n == 0);
+        store.writable = 2'b01;
+
+        // ---- drive 2: no disk ----
+        sw(4'hB); idle(50);
+        for (i = 0; i < 100; i = i + 1) rdnib(b);
+        check("drive 2 empty: noise, not stuck", rd_ok == 1'b0);
+        sw(4'hD); acc(4'hE, 1'b0, 8'h00, b);
+        check("drive 2 empty: write protected", b[7] === 1'b1);
+        check("a disk is in some drive", dbg_any_disk === 1'b1);
 
         if (fails == 0) $display("tb_disk2: PASS (%0d checks)", checks);
-        else             $display("tb_disk2: FAIL (%0d of %0d checks failed)", fails, checks);
+        else            $display("FAIL: tb_disk2 failed %0d of %0d checks", fails, checks);
         $finish;
     end
 
     initial begin
-        #4000000000; // 4 s: the stream runs in real time now (32 us a byte)
-        $display("tb_disk2: FAIL (timeout)");
+        #4000000000;
+        $display("FAIL: tb_disk2 timed out");
         $finish;
     end
 endmodule
+
+`default_nettype wire

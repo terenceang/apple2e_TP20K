@@ -11,6 +11,10 @@
 //  an order the ROM does not unpack -- which a bench with its own encode and
 //  decode cannot see -- $0800 is wrong even though the checksum passes.
 //
+//  The drive plays a .woz the page's converter made (web/scripts/simcard.mjs:
+//  build/dos33_woz.hex), so this is the whole chain: converter, bit player,
+//  the card's sequencer and the ROM's own read and unpack.
+//
 //  Needs the ROMs (roms/apple2e_rom.hex, roms/disk2_p6.hex) and
 //  build/dos33_physical.bin: the DOS 3.3 System Master in physical sector order
 //  (made by scripts in the session that produced it; skipped if it is missing).
@@ -81,7 +85,7 @@ module tb_p6boot;
         .dsk_store_ack(dsk_ack), .dsk_store_idle(dsk_idle),
         .cpu_rdy(1'b1), .dbg_mem_addr(16'd0), .dbg_mem_din(), .dbg_mem_ready(),
         .img_up_go(1'b0), .img_up_drive(1'b0), .img_up_addr(18'd0), .img_up_data(8'd0),
-        .img_up_last(1'b0), .img_up_bad(1'b0), .img_up_busy(), .img_up_done(),
+        .img_up_last(1'b0), .img_up_ro(1'b0), .img_up_bad(1'b0), .img_up_busy(), .img_up_done(),
         .img_dn_go(1'b0), .img_dn_drive(1'b0), .img_dn_addr(18'd0),
         .img_dn_data(), .img_dn_valid(),
         .debug_cpu_pc(pc), .debug_cpu_addr(), .debug_cpu_dout(), .debug_cpu_we(),
@@ -89,9 +93,8 @@ module tb_p6boot;
         .debug_cpu_s(), .debug_cpu_p(), .debug_cpu_ir()
     );
 
-    // ---- the store's SDRAM: 16-bit words, answers a request after a few clocks ----
-    // Bank 1 (addr[21:20] = 01); drive 0's byte n is the low half of word n/2 for
-    // even n and the high half for odd n.
+    // ---- the store's DDR3: 16-bit words, answers a request after a few clocks ----
+    // drive 0's file byte n is the low half of word n/2 for even n, the high half for odd
     reg [15:0] dskmem [0:262143];
     reg [7:0]  img    [0:143359];
     reg        pend = 1'b0;
@@ -124,7 +127,7 @@ module tb_p6boot;
         end
         n = $fread(img, fd);
         $fclose(fd);
-        for (i = 0; i < 71680; i = i + 1) dskmem[i] = {img[2*i+1], img[2*i]};
+        $readmemh("build/dos33_woz.hex", dskmem);
         // the 6502 core does not reset its registers; the stack pointer must not be X
         dut.u_cpu.AXYS[0] = 8'h00;
         dut.u_cpu.AXYS[1] = 8'h00;
@@ -132,8 +135,8 @@ module tb_p6boot;
         dut.u_cpu.AXYS[3] = 8'hFF;
         #200 @(posedge clk) reset = 1'b0;
         // the drive holds an image, as an upload would leave it
-        dut.u_disk2_store.present[0]    = 1'b1;
-        dut.u_disk2_store.writable_q[0] = 1'b1;
+        dut.u_disk2_store.present  = 2'b01;
+        dut.u_disk2_store.writable = 2'b01;
     end
 
     // Boot sector: track 0, sector 0, is the first 256 bytes of the physical image.

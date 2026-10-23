@@ -39,9 +39,9 @@ module apple2_core (
     input  wire        vram_req,
     input  wire [15:0] vram_addr,
     output reg  [7:0]  vram_data,
-    output wire        fl_wr,         // a Disk ][ data field is being written (sd_vol's write-back)
+    output wire        fl_wr,         // a Disk ][ word went back to DDR3 (sd_vol's write-back)
     output wire        fl_wr_drv,
-    output wire [5:0]  fl_wr_trk,
+    output wire [10:0] fl_wr_blk,     // ...in this 512-byte block of the drive's .woz
     input  wire [11:0] char_rom_addr,
     output wire [7:0]  char_rom_data,
 
@@ -57,7 +57,7 @@ module apple2_core (
     input  wire        aux_wr_busy,
 
     // Disk ][ controller in slot 6, and its image store in DDR3
-    // (src/disk2/disk2_card.v, src/disk2/disk2_store.v).  The store's SDRAM
+    // (src/disk2/disk2_card.v, src/disk2/disk2_store.v).  The store's DDR3
     // port is wired to aux_ram's arbiter at the top level; the card sits on the
     // slot bus below.
     output wire        dsk_store_go,
@@ -100,15 +100,16 @@ module apple2_core (
     // and the store's SDRAM port already goes out to aux_ram's arbiter.
     input  wire        img_up_go,
     input  wire        img_up_drive,
-    input  wire [17:0] img_up_addr,
+    input  wire [19:0] img_up_addr,
     input  wire [7:0]  img_up_data,
     input  wire        img_up_last,
+    input  wire        img_up_ro,
     input  wire        img_up_bad,
     output wire        img_up_busy,
     output wire        img_up_done,
     input  wire        img_dn_go,
     input  wire        img_dn_drive,
-    input  wire [17:0] img_dn_addr,
+    input  wire [19:0] img_dn_addr,
     output wire [7:0]  img_dn_data,
     output wire        img_dn_valid,
 
@@ -651,28 +652,11 @@ module apple2_core (
     // It sees the CPU's own cycles only (cpu_go), so the debugger walking the
     // bus in `m` cannot step the head or turn the motor on, which is the same
     // qualification rule the softswitch block above follows.
-    wire        d2_motor;
-    wire        d2_drive;
-    wire        d2_wr_mode;
-    wire        d2_grp_req;
-    wire [8:0]  d2_grp_off;
-    wire [5:0]  d2_grp_val;
-    wire        d2_grp_ack;
-    wire [3:0]  d2_pos_sec;     // where the head is: the tag for both a
-    wire [8:0]  d2_pos_track;   // group request and a written byte
-    wire        d2_pos_drive;
-    wire [1:0]  d2_drv_present;
-    wire [1:0]  d2_drv_writable;
-    wire        d2_wr_seen;
-    wire [7:0]  d2_wr_byte;
-    wire        d2_wr_in_data;
-    wire [8:0]  d2_wr_off;
-    assign fl_wr     = d2_wr_seen && d2_wr_in_data;
-    assign fl_wr_drv = d2_pos_drive;
-    assign fl_wr_trk = d2_pos_track[5:0];
+    wire        d2_drive, d2_bit_tick, d2_wr_en, d2_wr_bit, d2_wr_mode, d2_rd_bit, d2_rd_ok;
+    wire [7:0]  d2_qtr;
+    wire [1:0]  d2_drv_present, d2_drv_writable;
 
     assign card_present = 7'b1111000;   // slot 7 (bit 6): ProDOS hard disk, slot 6 (bit 5): the Disk ][, slot 5 (bit 4): clock, slot 4 (bit 3): Mockingboard
-    wire [6:0]  d2_dbg_track;
     wire [7:0]  d2_dbg_head;
     assign debug_dsk_head = d2_dbg_head;
 
@@ -751,25 +735,18 @@ module apple2_core (
         .cpu_di(cpu_dout),
         .rom_data(d2_rom_data),
         .io_data(d2_io_data),
-        .grp_req(d2_grp_req),
-        .grp_off(d2_grp_off),
-        .pos_sec(d2_pos_sec),
-        .pos_track(d2_pos_track),
-        .pos_drive(d2_pos_drive),
-        .grp_val(d2_grp_val),
-        .grp_ack(d2_grp_ack),
-        .store_wr_seen(d2_wr_seen),
-        .store_wr_byte(d2_wr_byte),
-        .store_wr_data(d2_wr_in_data),
-        .store_wr_off(d2_wr_off),
-        .store_drv_present(d2_drv_present),
-        .store_drv_writable(d2_drv_writable),
-        .dbg_track(d2_dbg_track),
+        .drive(d2_drive),
+        .qtr(d2_qtr),
+        .bit_tick(d2_bit_tick),
+        .wr_en(d2_wr_en),
+        .wr_bit(d2_wr_bit),
+        .wr_mode(d2_wr_mode),
+        .rd_bit(d2_rd_bit),
+        .rd_ok(d2_rd_ok),
+        .drv_present(d2_drv_present),
+        .drv_writable(d2_drv_writable),
         .dbg_head(d2_dbg_head),
-        .dbg_motor(d2_motor),
-        .dbg_drive(d2_drive),
-        .dbg_any_disk(d2_any_disk),
-        .dbg_wr_mode(d2_wr_mode)
+        .dbg_any_disk(d2_any_disk)
     );
 
     // The image store, whose SDRAM port leaves the core for aux_ram's arbiter
@@ -778,24 +755,25 @@ module apple2_core (
     disk2_store u_disk2_store (
         .clk(clk),
         .reset(reset),
-        .grp_req(d2_grp_req),
-        .grp_off(d2_grp_off),
-        .pos_sec(d2_pos_sec),
-        .pos_track(d2_pos_track),
-        .pos_drive(d2_pos_drive),
-        .grp_val(d2_grp_val),
-        .grp_ack(d2_grp_ack),
-        .wr_seen(d2_wr_seen),
-        .wr_byte(d2_wr_byte),
-        .wr_in_data(d2_wr_in_data),
-        .wr_off(d2_wr_off),
+        .drive(d2_drive),
+        .qtr(d2_qtr),
+        .bit_tick(d2_bit_tick),
+        .wr_en(d2_wr_en),
+        .wr_bit(d2_wr_bit),
+        .wr_mode(d2_wr_mode),
+        .rd_bit(d2_rd_bit),
+        .rd_ok(d2_rd_ok),
         .drv_present(d2_drv_present),
         .drv_writable(d2_drv_writable),
+        .fl_wr(fl_wr),
+        .fl_wr_drv(fl_wr_drv),
+        .fl_wr_blk(fl_wr_blk),
         .up_go(img_up_go),
         .up_drive(img_up_drive),
         .up_addr(img_up_addr),
         .up_data(img_up_data),
         .up_last(img_up_last),
+        .up_ro(img_up_ro),
         .up_bad(img_up_bad),
         .up_busy(img_up_busy),
         .up_done(img_up_done),
