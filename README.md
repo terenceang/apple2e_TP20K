@@ -9,7 +9,7 @@ This project's code was written with AI assistance.
 - **65C02 CPU** at 1.023 MHz (Arlet Ottens' core with 65C02 extensions)
 - **128 KB**: 48 KB main RAM and the 16 KB ROM in block RAM; the aux 64 KB and the language card in the SOM's DDR3
 - **HDMI video** at 720×480p60 (CEA-861 VIC 2), with the 560×384 Apple display centered: text (40 and 80 column, MouseText), lo-res, hi-res and double hi-res, mixed mode and page 2; colour is an NTSC-style decode of the dot stream, so fills, fringes and the palette bit look as they do on a TV
-- **Colour TV mode and scanlines** on the Dock's keys: S3 softens hi-res and double hi-res the way a composite set blends fringes and bleeds colour at edges, and S4 steps scanlines off, 25%, 50% and 75%
+- **Colour TV mode and scanlines** on the Dock's DIP switches: DIP 1 softens hi-res and double hi-res the way a composite set blends fringes and bleeds colour at edges, and DIP 2 & 3 set scanlines (off, 25%, 50%, 75%), persisting across resets and power cycles
 - **Audio** from the $C030 speaker and a **Mockingboard C** in slot 4 (two 6522s, two AY-3-8910s), filtered once to 48 kHz (no aliasing from high AY tones) and sent over HDMI (L-PCM) and through the Dock's PT8211 DAC and amplifier to the 3.5 mm jack
 - **Disk II** in slot 6 (two drives) and a **ProDOS hard disk** in slot 7 (two 32 MB volumes, also answering as a SmartPort), all kept as **image files on an ordinary FAT32 TF card**; what each drive holds survives power-off, and floppy and hard-disk writes go back into the files. Floppies are **WOZ** files played bit by bit through a model of the controller's sequencer, so copy-protected originals, 13-sector disks and bit copiers work, and every write is kept exactly
 - **Clock** in slot 5 that ProDOS uses as a Thunderclock, so files get dated; the web page sets the time when it connects (there is no battery, so it is lost at power-off)
@@ -37,7 +37,7 @@ make flash      # write to the configuration flash (persistent)
 make clean
 ```
 
-`make` only wraps `scripts/build.ps1` and `scripts/prog.ps1`, which can be run directly. The build generates its Gowin Tcl from `fpga.yaml` (add new source files there), also writes `apple2e_TP20K.gprj` so the Gowin IDE opens the same project, and fails if the timing report shows negative setup slack. Programming uses the Dock's USB-JTAG; keep DIP switch 1 on.
+`make` only wraps `scripts/build.ps1` and `scripts/prog.ps1`, which can be run directly. The build generates its Gowin Tcl from `fpga.yaml` (add new source files there), also writes `apple2e_TP20K.gprj` so the Gowin IDE opens the same project, and fails if the timing report shows excessive negative setup slack or any hold/removal timing violations. Programming uses the Dock's USB-JTAG; keep DIP switch 1 on.
 
 ```sh
 powershell -File sim\run.ps1            # every testbench (tb_top needs the ROMs)
@@ -54,7 +54,7 @@ powershell -File sim\run.ps1 -Target tb_sdvol
 
 A plain serial terminal at **1000000 8N1** works too: what you type goes to the Apple, and what it prints through COUT comes back.
 
-**Keys on the Dock:** S1 resets the Apple (the TF card's images reload); hold S2 for HDMI colour bars and a 1 kHz tone, which checks the HDMI link independently of the Apple core. S3 switches hi-res and double hi-res to a **colour TV** look (the same NTSC decode over two colour cycles, so fringes blend and colours bleed at edges like a composite set); S4 steps **scanlines** off, 25%, 50%, 75% (the second line of each doubled Apple line darkened). Both start off at power-up. HDMI audio needs a display that accepts it (not a DVI-only input).
+**Controls on the Dock:** Button S0 (Key 1) resets the Apple (the TF card's images reload); hold S1 (Key 2) for HDMI colour bars and a 1 kHz tone, which checks the HDMI link independently of the Apple core. **DIP 1** switches hi-res and double hi-res to a persistent **colour TV** look (the same NTSC decode over two colour cycles, so fringes blend and colours bleed at edges like a composite set); **DIP 2 & 3** configure **scanlines** persistently (00=off, 01=25%, 10=50%, 11=75% darkening on the second copy of each doubled Apple line). HDMI audio needs a display that accepts it (not a DVI-only input).
 
 ### Debugger
 
@@ -133,7 +133,7 @@ python3 -m http.server -d web/dist 8000   # http://localhost:8000
 
 ## Video and HDMI
 
-The 560×384 Apple raster (40 columns × 14 pixel clocks, 192 lines doubled) is centered in the 720×480 frame at x = 80..639, y = 48..431; lines from 432 on are vertical blanking ($C019). `hdmi_tx` owns the raster and asks for each pixel combinationally, and `video_generator.v` registers its colour output, so `top.v` feeds it the next pixel (`h_cnt = pixel_x + 1`). Hi-res colour comes from decoding the 560-sample dot stream the way an NTSC set does: each pixel looks at a 4-sample window, luma is the lit count and chroma comes from the sample phases, so a `0101` pattern fills solid and colour edges fringe. Colour TV mode (key S3) widens that to two colour cycles weighted 1 2 3 4 4 3 2 1, so edges blend while solid colours stay the same (the picture sits ~4 pixels right in that mode); scanlines (key S4) darken the second copy of each doubled Apple line. The AVI InfoFrame declares full-range RGB (`RGB_QUANT = 2'b10`) so a TV does not crush the Apple's blacks. Audio is filtered to 48 kHz once (`audio_filter.v`: an exact CIC to 96 kHz, then a 47-tap halfband FIR on one DSP multiplier, so AY tones above 24 kHz do not alias), and the same samples go to the DAC and into HDMI data islands (ACR N = 6144, CTS = 27000).
+The 560×384 Apple raster (40 columns × 14 pixel clocks, 192 lines doubled) is centered in the 720×480 frame at x = 80..639, y = 48..431; lines from 432 on are vertical blanking ($C019). `hdmi_tx` owns the raster and asks for each pixel combinationally, and `video_generator.v` registers its colour output, so `top.v` feeds it the next pixel (`h_cnt = pixel_x + 1`). Hi-res colour comes from decoding the 560-sample dot stream the way an NTSC set does: each pixel looks at a 4-sample window, luma is the lit count and chroma comes from the sample phases, so a `0101` pattern fills solid and colour edges fringe. Colour TV mode (DIP 1) widens that to two colour cycles weighted 1 2 3 4 4 3 2 1, so edges blend while solid colours stay the same (the picture sits ~4 pixels right in that mode); scanlines (DIP 2 & 3) darken the second copy of each doubled Apple line. The AVI InfoFrame declares full-range RGB (`RGB_QUANT = 2'b10`) so a TV does not crush the Apple's blacks. Audio is filtered to 48 kHz once (`audio_filter.v`: an exact CIC to 96 kHz, then a 47-tap halfband FIR on one DSP multiplier, so AY tones above 24 kHz do not alias), and the same samples go to the DAC and into HDMI data islands (ACR N = 6144, CTS = 27000).
 
 ## Project layout
 

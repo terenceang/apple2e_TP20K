@@ -1,5 +1,5 @@
-// Tang Primer 20K (SOM 3961 + Dock 3713) pin constraints for the Apple //e
-// Target: GW2A-LV18PG256C8/I7.  Balls from Documents/pinout.md.
+// Tang Primer 20K (SOM 3961 + Dock 3713/3714+) pin constraints for the Apple //e
+// Target: GW2A-LV18PG256C8/I7. Balls from Documents/pinout.md.
 // Build options this needs (scripts/build.ps1 sets them): use_sspi_as_gpio
 // (T10, N9), use_done_as_gpio (C13), use_ready_as_gpio (A13).
 
@@ -7,16 +7,25 @@
 IO_LOC "clk" H11;
 IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-// Keys, active low (10k pull-ups). S1 shares T10 with the FPGA_RST supervisor;
-// S2 is on the 1.5 V bank.
+// Pushbuttons, active low (10k pull-ups).
+// S0 (T10) shares ball with the FPGA_RST supervisor (Apple reset).
+// S1 (T3) is on the 1.5 V bank (HDMI colour bar test pattern).
+// Note: S4 on silkscreen (RCFG) is B10 (RECONFIG_N).
 IO_LOC "key_s1_n" T10;
 IO_PORT "key_s1_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC "key_s2_n" T3;
 IO_PORT "key_s2_n" IO_TYPE=LVCMOS15 PULL_MODE=UP;
-IO_LOC "key_s3_n" T2;
-IO_PORT "key_s3_n" IO_TYPE=LVCMOS15 PULL_MODE=UP;
-IO_LOC "key_s4_n" D7;
-IO_PORT "key_s4_n" IO_TYPE=LVCMOS15 PULL_MODE=UP;
+
+// Persistent configuration via DIP switches (Rev 3714+ silkscreen):
+// DIP1: C7 (Color TV mode, 1 = ON, 0 = OFF)
+// DIP2: E9 (Scanlines bit 1)
+// DIP3: E8 (Scanlines bit 0)
+IO_LOC "sw_color_tv" C7;
+IO_PORT "sw_color_tv" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;
+IO_LOC "sw_scanline[0]" E8;
+IO_PORT "sw_scanline[0]" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;
+IO_LOC "sw_scanline[1]" E9;
+IO_PORT "sw_scanline[1]" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;
 
 // LEDs, active low
 IO_LOC "led[0]" C13;

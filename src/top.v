@@ -5,10 +5,10 @@
 
 module top (
     input  wire       clk,        // 27.0 MHz SOM oscillator (H11)
-    input  wire       key_s1_n,   // Dock key S1 (T10, active low; also FPGA_RST): Apple reset
-    input  wire       key_s2_n,   // Dock key S2 (T3, active low, 1.5 V bank): HDMI test pattern
-    input  wire       key_s3_n,   // Dock key S3 (T2, active low, 1.5 V bank): colour TV mode on/off
-    input  wire       key_s4_n,   // Dock key S4 (D7, active low, 1.5 V bank): scanlines off/25/50/75%
+    input  wire       key_s1_n,   // Dock button S0 (T10, active low; also FPGA_RST): Apple reset
+    input  wire       key_s2_n,   // Dock button S1 (T3, active low, 1.5 V bank): HDMI test pattern
+    input  wire       sw_color_tv,// DIP1 (C7, 1.5 V bank): Colour TV mode (1 = ON, 0 = OFF)
+    input  wire [1:0] sw_scanline,// DIP2 (E9), DIP3 (E8, 1.5 V bank): scanlines (00=off, 01=25%, 10=50%, 11=75%)
 
     // Dock LEDs 0-5 (C13 A13 N16 N14 L14 L16, active low)
     output wire [5:0] led,
@@ -53,23 +53,6 @@ module top (
     output wire [1:0]  DDR3_DM
 );
 
-    // Both keys are active low (10k pull-ups).
-    wire btn_test = ~key_s2_n;    // hold: HDMI colour bars + 1 kHz tone
-    wire btn_reset = ~key_s1_n;    // press: Apple reset
-
-
-    // Power-on and Button Reset Generator (S1 key triggers reset while pressed)
-    reg [19:0] rst_cnt = 20'd0;
-
-    always @(posedge clk) begin
-        if (btn_reset)
-            rst_cnt <= 20'd0;
-        else if (rst_cnt != 20'hFFFFF)
-            rst_cnt <= rst_cnt + 1'b1;
-    end
-
-    wire sys_reset = (rst_cnt != 20'hFFFFF);
-
     // Clock Generator
     wire clk_tmds;
     wire clk_pixel;
@@ -84,6 +67,41 @@ module top (
         .pll_locked(pll_locked),
         .ce_1m(ce_1m)
     );
+
+    // Both keys are active low (10k pull-ups), synchronised into their
+    // respective clock domains.
+    reg [1:0] s1_sync = 2'b11;
+    always @(posedge clk) s1_sync <= {s1_sync[0], key_s1_n};
+    wire btn_reset = ~s1_sync[1];    // press: Apple reset
+
+    reg [1:0] s2_sync = 2'b11;
+    always @(posedge clk_pixel) s2_sync <= {s2_sync[0], key_s2_n};
+    wire btn_test = ~s2_sync[1];     // hold: HDMI colour bars + 1 kHz tone
+
+
+    // Power-on and Button Reset Generator (S1 key triggers reset while pressed)
+    reg [19:0] rst_cnt = 20'd0;
+
+    always @(posedge clk) begin
+        if (btn_reset)
+            rst_cnt <= 20'd0;
+        else if (rst_cnt != 20'hFFFFF)
+            rst_cnt <= rst_cnt + 1'b1;
+    end
+
+    wire sys_reset_raw = (rst_cnt != 20'hFFFFF);
+
+    // Reset synchronizer for the Apple system domain (clk_pixel): asynchronous
+    // assertion so reset takes effect immediately, synchronous deassertion to
+    // eliminate reset removal violations across clk_pixel registers.
+    reg [1:0] sys_rst_sync = 2'b11;
+    always @(posedge clk_pixel or posedge sys_reset_raw) begin
+        if (sys_reset_raw)
+            sys_rst_sync <= 2'b11;
+        else
+            sys_rst_sync <= {sys_rst_sync[0], 1'b0};
+    end
+    wire sys_reset = sys_rst_sync[1];
 
     // Serial Debugger & Apple //e Console Mirror
     wire [7:0]  rx_byte;
@@ -466,18 +484,19 @@ module top (
     wire [7:0] vid_green;
     wire [7:0] vid_blue;
 
-    // S3 toggles colour TV mode (video_generator's softer hi-res decode); S4
-    // steps the scanlines: off, 25%, 50%, 75% darker on the second line of
-    // each doubled Apple line, then off again.
-    wire s3_press, s4_press;
-    key_press u_key_s3 (.clk(clk_pixel), .key_n(key_s3_n), .press(s3_press));
-    key_press u_key_s4 (.clk(clk_pixel), .key_n(key_s4_n), .press(s4_press));
-    reg       color_tv = 1'b0;
-    reg [1:0] scanlines = 2'd0;
+    // Persistent configuration via DIP switches:
+    //   DIP1 (C7): Color TV mode (1 = softer hi-res decode, 0 = sharp RGB)
+    //   DIP2 (E9), DIP3 (E8): Scanlines (00 = off, 01 = 25%, 10 = 50%, 11 = 75%)
+    reg [1:0] color_tv_sync  = 2'b00;
+    reg [1:0] scanline0_sync = 2'b00;
+    reg [1:0] scanline1_sync = 2'b00;
     always @(posedge clk_pixel) begin
-        if (s3_press) color_tv  <= ~color_tv;
-        if (s4_press) scanlines <= scanlines + 2'd1;
+        color_tv_sync  <= {color_tv_sync[0],  sw_color_tv};
+        scanline0_sync <= {scanline0_sync[0], sw_scanline[0]};
+        scanline1_sync <= {scanline1_sync[0], sw_scanline[1]};
     end
+    wire       color_tv  = color_tv_sync[1];
+    wire [1:0] scanlines = {scanline1_sync[1], scanline0_sync[1]};
 
     // Flashing text, as the //e makes it from its video counter: the state
     // changes every 16 frames, ~1.9 Hz a full cycle (one clock of the frame,

@@ -157,5 +157,8 @@ if ($text -match 'Total Negative Slack Summary(.{0,600})') {
 } else {
     throw "no 'Total Negative Slack Summary' in the timing report; cannot check timing"
 }
+if ($text -match 'Numbers of Hold Violated Endpoints\s+([1-9]\d*)') {
+    throw "FAILED: $($Matches[1]) hold/removal timing violations; see impl\pnr\top.tr"
+}
 Get-Content (Join-Path $root 'impl\pnr\top.rpt.txt') | Select-String -Pattern 'Logic\s|Register\s|BSRAM\s|PLL\s|LUT' | Select-Object -First 8 | ForEach-Object { Write-Host $_.Line }
 Write-Host "bitstream: build\bitstream\$name.fs"

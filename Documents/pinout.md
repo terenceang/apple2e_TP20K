@@ -14,7 +14,7 @@ set_option -use_ready_as_gpio 1   ;# A13 (LED1)
 set_option -use_done_as_gpio 1    ;# C13 (LED0)
 ```
 
-B10 (SW1/RECONFIG_N), R9 (LCD_CLK/FASTRD_N) and P9 (MIC_LED_CLK) build without extra options.
+B10 (S4 / RECONFIG_N), R9 (LCD_CLK/FASTRD_N) and P9 (MIC_LED_CLK) build without extra options.
 
 ## Bank voltages
 
@@ -22,8 +22,8 @@ B10 (SW1/RECONFIG_N), R9 (LCD_CLK/FASTRD_N) and P9 (MIC_LED_CLK) build without e
 |---|---|---|---|
 | 0, 1 | 3.3 V (R5 0R; optional F_VCCO0&1 from SODIMM) | `LVCMOS33` | HDMI, Ethernet, camera, USB PHY, audio, LEDs 2–5 |
 | 2 | 3.3 V | `LVCMOS33` | UART, JTAG, SD card, USB PHY |
-| 3 | 3.3 V | `LVCMOS33` | LCD, mic/PMOD, config pins, LED0/1, key 1, SW1 |
-| 4 | **1.5 V** (DDR3) | `LVCMOS15` | DDR3, keys 2–5, SW2–5 |
+| 3 | 3.3 V | `LVCMOS33` | LCD, mic/PMOD, config pins, LED0/1, S0/key 1, S4/RCFG |
+| 4 | **1.5 V** (DDR3) | `LVCMOS15` | DDR3, buttons S1–S3, DIP switches 1–5 (Rev 3714+) |
 | 5, 6 | 1.5 V (DDR3) | — | DDR3 only |
 | 7 | 3.3 V (R9 0R; optional F_VCCO7) | `LVCMOS33` | LCD G/B, Ethernet, touch panel |
 
@@ -50,31 +50,41 @@ Net names ending `_1V5` are on bank 4. Never drive them as LVCMOS33.
 Silkscreen reference designators are LED4–LED9 (Orange_LED0 = LED4 … Orange_LED5 = LED9).
 Not FPGA-controlled: LED1/LED2 (BL702 status), LED3 (USB PHY power), LED10 (5 V power).
 
-## Push buttons S1–S5 (active LOW — 10 k pull-up, press = GND)
+## Push buttons & DIP switches (Revision differences: Rev 3713 vs Rev 3714+)
 
-| Signal | Ball | Bank | Pull-up to | IO_TYPE |
-|---|---|---|---|---|
-| Key 1 (S1) | **T10** | 3 | 3.3 V | LVCMOS33 — also FPGA_RST |
-| Key 2 (S2) | **T3** | 4 | 1.5 V | LVCMOS15 |
-| Key 3 (S3) | **T2** | 4 | 1.5 V | LVCMOS15 |
-| Key 4 (S4) | **D7** | 4 | 1.5 V | LVCMOS15 |
-| Key 5 (S5) | **C7** | 4 | 1.5 V | LVCMOS15 |
+Sipeed revised the Dock pinout between **Rev 3713** (early schematic) and **Rev 3714+** (production silkscreen):
+- **Rev 3713**: SW1 was on `B10` (`RECONFIG_N`), and Key 5 was `C7`.
+- **Rev 3714+**: To prevent users from accidentally locking `RECONFIG_N` with DIP 1, `B10` and `C7` were swapped:
+  - Button **S4 (silkscreened `RCFG`)** is wired to **`B10`** (`RECONFIG_N`).
+  - DIP Switch **DIP 1** is wired to **`C7`** (`LVCMOS15`).
+  - DIP Switch **DIP 2** is wired to **`E9`** (`LVCMOS15`).
+  - DIP Switch **DIP 3** is wired to **`E8`** (`LVCMOS15`).
 
-Each key has an RC (100 nF) and ESD diode; still debounce in logic.
+### Push buttons (active LOW — 10 k pull-up, press = GND)
 
-## DIP switch SW3 positions 1–5 (active HIGH — ON = high, OFF = pulled down)
+| Silkscreen | Rev 3713 | Rev 3714+ Ball | Bank | Voltage | Function |
+|---|---|---|---|---|---|
+| **S0** | S1 | **T10** | 3 | 3.3 V | Apple reset (also `FPGA_RST`) |
+| **S1** | S2 | **T3** | 4 | 1.5 V | HDMI colour-bar test pattern |
+| **S2** | S3 | **T2** | 4 | 1.5 V | Spare user button |
+| **S3** | S4 | **D7** | 4 | 1.5 V | Spare user button |
+| **S4 / RCFG** | S5 (`C7`) | **B10** | 3 | 3.3 V | Dedicated `RECONFIG_N` reload button |
 
-| Signal | Ball | Bank | ON level | IO_TYPE |
-|---|---|---|---|---|
-| SW1 | **B10** | 3 | 3.3 V | LVCMOS33 |
-| SW2 | **E9** | 4 | 1.5 V | LVCMOS15 |
-| SW3 | **E8** | 4 | 1.5 V | LVCMOS15 |
-| SW4 | **T4** | 4 | 1.5 V | LVCMOS15 |
-| SW5 | **T5** | 4 | 1.5 V | LVCMOS15 |
+### DIP switch positions 1–5 (active HIGH — ON = high 1.5 V, OFF = pulled down by 13k to GND)
 
-> ⚠ **B10 is RECONFIG_N.** SW1 OFF pulls it low through 510R (over the SOM's 4.7 k pull-up).
-> RECONFIG_N low blocks configuration — keep **SW1 ON** when powering up / loading.
-> (`set_option -use_reconfign_as_gpio 1` exists; the build accepts B10 as an input without it.)
+| Silkscreen | Rev 3713 | Rev 3714+ Ball | Bank | Voltage | Project Assignment |
+|---|---|---|---|---|---|
+| **DIP 1** | `B10` (RECFG) | **C7** | 4 | 1.5 V | **Colour TV mode** (`sw_color_tv`, 1 = ON, 0 = OFF) |
+| **DIP 2** | `E9` | **E9** | 4 | 1.5 V | **Scanline mode [1]** (`sw_scanline[1]`) |
+| **DIP 3** | `E8` | **E8** | 4 | 1.5 V | **Scanline mode [0]** (`sw_scanline[0]`) |
+| **DIP 4** | `T4` | **T4** | 4 | 1.5 V | Spare DIP switch |
+| **DIP 5** | `T5` | **T5** | 4 | 1.5 V | Spare DIP switch |
+
+Scanline modes on DIP 2 & 3:
+- `00`: Scanlines off
+- `01`: 25% scanlines
+- `10`: 50% scanlines
+- `11`: 75% scanlines
 
 ## UART (via BL702 USB-C debugger, appears as a COM port)
 
@@ -271,28 +281,30 @@ take ball assignments from Sipeed's DDR3 example `.cst` rather than this table.
 | F10 | USB_RESET, RTL_PHY_RST | Resets both PHYs together |
 | T10 | Key S1, FPGA_RST supervisor, SSPI | Low during power-up; fine as a reset input; needs `use_sspi_as_gpio` |
 | C10, T9, N9, M8 | SSPI config pins | Need `use_sspi_as_gpio` |
-| B10 | SW1, RECONFIG_N | Keep SW1 ON at boot |
+| B10 | S4 / RECONFIG_N (Rev 3714+) / SW1 (Rev 3713) | On Rev 3714+ S4 button reconfigures FPGA; on Rev 3713 keep SW1 ON at boot |
 | A13, C13 | LED1/LED0, READY/DONE | Need `use_ready_as_gpio` / `use_done_as_gpio` |
 | R9 | RGB_LCD_CLK, FASTRD_N | OK after config |
 | J5/J6 | RGB LCD | PMOD or LCD, not both |
 | J12 | DVP D0–D7 | PMOD or camera, not both |
 | J14 | Mic array, WS2812 | PMOD or mic; T9 also drives the onboard WS2812 |
 
-## .cst snippet (common I/O)
+## .cst snippet (common I/O - Rev 3714+)
 
 ```
-IO_LOC "clk" H11;      IO_PORT "clk" IO_TYPE=LVCMOS33;
-IO_LOC "rst_n" T10;    IO_PORT "rst_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
-IO_LOC "led[0]" C13;   IO_PORT "led[0]" IO_TYPE=LVCMOS33;
-IO_LOC "led[1]" A13;   IO_PORT "led[1]" IO_TYPE=LVCMOS33;
-IO_LOC "led[2]" N16;   IO_PORT "led[2]" IO_TYPE=LVCMOS33;
-IO_LOC "led[3]" N14;   IO_PORT "led[3]" IO_TYPE=LVCMOS33;
-IO_LOC "led[4]" L14;   IO_PORT "led[4]" IO_TYPE=LVCMOS33;
-IO_LOC "led[5]" L16;   IO_PORT "led[5]" IO_TYPE=LVCMOS33;
-IO_LOC "key[0]" T3;    IO_PORT "key[0]" IO_TYPE=LVCMOS15;
-IO_LOC "key[1]" T2;    IO_PORT "key[1]" IO_TYPE=LVCMOS15;
-IO_LOC "key[2]" D7;    IO_PORT "key[2]" IO_TYPE=LVCMOS15;
-IO_LOC "key[3]" C7;    IO_PORT "key[3]" IO_TYPE=LVCMOS15;
-IO_LOC "uart_tx" M11;  IO_PORT "uart_tx" IO_TYPE=LVCMOS33;
-IO_LOC "uart_rx" T13;  IO_PORT "uart_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+IO_LOC "clk" H11;             IO_PORT "clk" IO_TYPE=LVCMOS33;
+IO_LOC "rst_n" T10;           IO_PORT "rst_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+IO_LOC "led[0]" C13;          IO_PORT "led[0]" IO_TYPE=LVCMOS33;
+IO_LOC "led[1]" A13;          IO_PORT "led[1]" IO_TYPE=LVCMOS33;
+IO_LOC "led[2]" N16;          IO_PORT "led[2]" IO_TYPE=LVCMOS33;
+IO_LOC "led[3]" N14;          IO_PORT "led[3]" IO_TYPE=LVCMOS33;
+IO_LOC "led[4]" L14;          IO_PORT "led[4]" IO_TYPE=LVCMOS33;
+IO_LOC "led[5]" L16;          IO_PORT "led[5]" IO_TYPE=LVCMOS33;
+IO_LOC "key[0]" T3;           IO_PORT "key[0]" IO_TYPE=LVCMOS15 PULL_MODE=UP;   // S1
+IO_LOC "key[1]" T2;           IO_PORT "key[1]" IO_TYPE=LVCMOS15 PULL_MODE=UP;   // S2
+IO_LOC "key[2]" D7;           IO_PORT "key[2]" IO_TYPE=LVCMOS15 PULL_MODE=UP;   // S3
+IO_LOC "sw_color_tv" C7;      IO_PORT "sw_color_tv" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;     // DIP1
+IO_LOC "sw_scanline[0]" E8;   IO_PORT "sw_scanline[0]" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;  // DIP3
+IO_LOC "sw_scanline[1]" E9;   IO_PORT "sw_scanline[1]" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;  // DIP2
+IO_LOC "uart_tx" M11;         IO_PORT "uart_tx" IO_TYPE=LVCMOS33;
+IO_LOC "uart_rx" T13;         IO_PORT "uart_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 ```
