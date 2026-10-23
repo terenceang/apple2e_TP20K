@@ -7,6 +7,8 @@ module top (
     input  wire       clk,        // 27.0 MHz SOM oscillator (H11)
     input  wire       key_s1_n,   // Dock key S1 (T10, active low; also FPGA_RST): Apple reset
     input  wire       key_s2_n,   // Dock key S2 (T3, active low, 1.5 V bank): HDMI test pattern
+    input  wire       key_s3_n,   // Dock key S3 (T2, active low, 1.5 V bank): colour TV mode on/off
+    input  wire       key_s4_n,   // Dock key S4 (D7, active low, 1.5 V bank): scanlines off/25/50/75%
 
     // Dock LEDs 0-5 (C13 A13 N16 N14 L14 L16, active low)
     output wire [5:0] led,
@@ -54,6 +56,7 @@ module top (
     // Both keys are active low (10k pull-ups).
     wire btn_test = ~key_s2_n;    // hold: HDMI colour bars + 1 kHz tone
     wire btn_reset = ~key_s1_n;    // press: Apple reset
+
 
     // Power-on and Button Reset Generator (S1 key triggers reset while pressed)
     reg [19:0] rst_cnt = 20'd0;
@@ -453,6 +456,19 @@ module top (
     wire [7:0] vid_green;
     wire [7:0] vid_blue;
 
+    // S3 toggles colour TV mode (video_generator's softer hi-res decode); S4
+    // steps the scanlines: off, 25%, 50%, 75% darker on the second line of
+    // each doubled Apple line, then off again.
+    wire s3_press, s4_press;
+    key_press u_key_s3 (.clk(clk_pixel), .key_n(key_s3_n), .press(s3_press));
+    key_press u_key_s4 (.clk(clk_pixel), .key_n(key_s4_n), .press(s4_press));
+    reg       color_tv = 1'b0;
+    reg [1:0] scanlines = 2'd0;
+    always @(posedge clk_pixel) begin
+        if (s3_press) color_tv  <= ~color_tv;
+        if (s4_press) scanlines <= scanlines + 2'd1;
+    end
+
     video_generator u_video (
         .clk_pixel(clk_pixel),
         .reset(sys_reset),
@@ -467,6 +483,8 @@ module top (
         .altchar(altchar),
         .dhires(dhires),
         .store80(store80),
+        .color_tv(color_tv),
+        .scanlines(scanlines),
         .aux_data(aux_line_data),
         .aux_col(aux_col),
         .aux_fill_addr(aux_fill_addr),
@@ -592,3 +610,27 @@ module top (
     assign led[5] = ~key_strobe;
 
 endmodule
+
+// A Dock key, debounced: synchronised, and it has to read the same for 2^18
+// clocks (~10 ms) before a change counts, so a press is one pulse however it
+// bounces.  Active low (the Dock's 10k pull-ups).
+module key_press (
+    input  wire clk,
+    input  wire key_n,
+    output reg  press = 1'b0      // one clock, as the key goes down
+);
+    reg  [1:0]  sync  = 2'b11;
+    reg         level = 1'b0;     // debounced: 1 = held
+    reg  [17:0] cnt   = 18'd0;
+    always @(posedge clk) begin
+        sync  <= {sync[0], key_n};
+        press <= 1'b0;
+        if (~sync[1] == level) cnt <= 18'd0;
+        else if (&cnt) begin
+            level <= ~level;
+            cnt   <= 18'd0;
+            press <= ~level;
+        end else cnt <= cnt + 18'd1;
+    end
+endmodule
+

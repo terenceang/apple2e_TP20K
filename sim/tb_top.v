@@ -41,7 +41,7 @@ module tb_top;
     wire [15:0] ddr_dq;
     wire [1:0]  ddr_dqs, ddr_dqs_n;
 
-    top dut (.clk(clk), .key_s1_n(1'b1), .key_s2_n(1'b1), .led(led),
+    top dut (.clk(clk), .key_s1_n(1'b1), .key_s2_n(1'b1), .key_s3_n(1'b1), .key_s4_n(1'b1), .led(led),
              .uart_rx(1'b1), .uart_tx(uart_tx),
              .sd_clk(), .sd_mosi(), .sd_miso(1'b1), .sd_cs_n(),   // no TF card
              .tmds_clk_p(tmds_clk_p), .tmds_clk_n(tmds_clk_n),

@@ -83,7 +83,7 @@ module tb_auxstress;
         .h_cnt(px + 10'd1), .v_cnt(py),
         .text_mode(text_mode), .mixed_mode(mixed_mode), .page2(page2),
         .hires_mode(hires_mode), .col80(dut.col80), .altchar(1'b0),
-        .dhires(dhires), .store80(store80),
+        .dhires(dhires), .store80(store80), .color_tv(1'b0), .scanlines(2'd0),
         .aux_data(aux_line_data), .aux_col(aux_col),
         .aux_fill_addr(aux_fill_addr), .aux_fill_start(aux_fill_start),
         .vram_req(vram_req), .vram_addr(vram_addr), .vram_data(vram_data),

@@ -35,6 +35,8 @@ module tb_video_hdmi;
     reg bars  = 1'b0;                       // 0: Apple video, 1: colour bars
     reg text_mode = 1'b1, mixed_mode = 1'b0, page2 = 1'b0, hires_mode = 1'b0;
     reg hgr_phase = 1'b0;                   // expect Hi-Res (page 2, mixed) instead of text
+    reg tv = 1'b0;                          // colour TV mode
+    reg [1:0] scanl = 2'd0;                 // scanlines: 0 off .. 3 75%
     reg col80 = 1'b0, store80 = 1'b0, dhires = 1'b0, altchar = 1'b0;
     reg dh_phase   = 1'b0;                  // expect double hi-res page 1
     reg wide_phase = 1'b0;                  // expect 80-column text (aux char first)
@@ -58,7 +60,7 @@ module tb_video_hdmi;
         .clk_pixel(clk), .reset(!rst_n), .flash_clk(1'b0),
         .h_cnt(pixel_x + 10'd1), .v_cnt(pixel_y),
         .text_mode(text_mode), .mixed_mode(mixed_mode), .page2(page2), .hires_mode(hires_mode),
-        .col80(col80), .altchar(altchar), .dhires(dhires), .store80(store80), .aux_data(aux_data),
+        .col80(col80), .altchar(altchar), .dhires(dhires), .store80(store80), .color_tv(tv), .scanlines(scanl), .aux_data(aux_data),
         .vram_req(vram_req), .vram_addr(vram_addr), .vram_data(vram_data),
         .char_rom_addr(char_rom_addr), .char_rom_data(char_rom_data),
         .red(vid_r), .green(vid_g), .blue(vid_b), .vbl(vbl)
@@ -302,6 +304,14 @@ module tb_video_hdmi;
     wire       vgb = (s0 == REF_VGB_02) && (s1 == REF_GB_1) && (s2 == REF_VGB_02);
 
     integer x = -1, y = -1, gb_run = 0, frame = -1;
+    integer k_tv, tv_diff = 0;
+    reg [23:0] tvpix [0:3];
+    reg [23:0] scanpix;
+    function near(input [23:0] a, input [23:0] b);   // each channel within 12
+        near = (a[23:16] + 8'd12 >= b[23:16] && b[23:16] + 8'd12 >= a[23:16]) &&
+               (a[15:8]  + 8'd12 >= b[15:8]  && b[15:8]  + 8'd12 >= a[15:8]) &&
+               (a[7:0]   + 8'd12 >= b[7:0]   && b[7:0]   + 8'd12 >= a[7:0]);
+    endfunction
     integer errors = 0, checked = 0;
     reg     in_vs = 1'b0, saw_vs = 1'b0;
     reg [23:0] got, want;
@@ -324,6 +334,13 @@ module tb_video_hdmi;
                                  bars ? "bars" : "apple", frame, x, y, got, want);
                     errors = errors + 1;
                 end
+            end
+            // colour TV mode: the middle of the solid lines, and how many pixels changed
+            if (tv && frame >= 6) begin
+                for (k_tv = 0; k_tv < 4; k_tv = k_tv + 1)
+                    if (x == 80 + 14 * 10 + 4 && y == 48 + 2 * (3 + k_tv)) tvpix[k_tv] = got;
+                if (x == 80 + 14 * 10 + 4 && y == 48 + 2 * 6 + 1) scanpix = got;   // the white line's second copy
+                if (frame == 6 && y >= 48 && y < 432 && got !== expect_hgr(x, y)) tv_diff = tv_diff + 1;
             end
             x = (x == 719) ? -1 : x + 1;
         end
@@ -568,6 +585,24 @@ module tb_video_hdmi;
             $display("FAIL: bit-7 HGR line is %06h", expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 4));
             errors = errors + 1;
         end
+        // Colour TV mode (key S3): the same screen through the softer decode.
+        // Solid colours stay put (within the constants' rounding), edges change.
+        skip = 1'b1; tv = 1'b1; scanl = 2'd2;
+        wait (frame == 7);
+        $display("scanlines 50%%: the white line's second copy is %06h", scanpix);
+        if (scanpix !== 24'h7F7F7F) begin
+            $display("FAIL: a 50%% scanline over white should be 7F7F7F");
+            errors = errors + 1;
+        end
+        $display("colour TV: green %06h violet %06h white %06h bit-7 %06h; %0d pixels differ from the sharp decode",
+                 tvpix[0], tvpix[2], tvpix[3], tvpix[1], tv_diff);
+        if (!near(tvpix[0], 24'h30BD1B) || !near(tvpix[2], 24'hD043E5) || tvpix[3] !== 24'hFFFFFF ||
+            !(near(tvpix[1], 24'hD06B1B) || near(tvpix[1], 24'h3095E5)) || tv_diff < 1000) begin
+            $display("FAIL: colour TV mode's solid colours or its change to the picture");
+            errors = errors + 1;
+        end
+        tv = 1'b0; scanl = 2'd0;
+        wait (frame == 8);
         // 80-column text, page 1: aux and main hold different characters.
         // store80 with page2 set must still show page 1.
         bars_checked = checked;
@@ -576,9 +611,9 @@ module tb_video_hdmi;
         skip = 1'b1; hgr_phase = 1'b0; wide_phase = 1'b1;
         text_mode = 1'b1; mixed_mode = 1'b0; hires_mode = 1'b0;
         page2 = 1'b1; store80 = 1'b1; col80 = 1'b1;
-        wait (frame == 6);
+        wait (frame == 9);
         skip = 1'b0;
-        wait (frame == 7);
+        wait (frame == 10);
         if (checked - bars_checked < 720 * 480 - 4 || checked - bars_checked > 720 * 480 + 4) begin
             $display("FAIL: checked %0d 80-col pixels, expected about %0d",
                      checked - bars_checked, 720 * 480);
@@ -596,9 +631,9 @@ module tb_video_hdmi;
         skip = 1'b1; wide_phase = 1'b0; dh_phase = 1'b1;
         text_mode = 1'b0; mixed_mode = 1'b0; hires_mode = 1'b1;
         page2 = 1'b0; store80 = 1'b0; col80 = 1'b1; dhires = 1'b1;
-        wait (frame == 8);
+        wait (frame == 11);
         skip = 1'b0;
-        wait (frame == 9);
+        wait (frame == 12);
         if (checked - bars_checked < 720 * 480 - 4 || checked - bars_checked > 720 * 480 + 4) begin
             $display("FAIL: checked %0d double hi-res pixels, expected about %0d",
                      checked - bars_checked, 720 * 480);
@@ -610,9 +645,9 @@ module tb_video_hdmi;
         skip = 1'b1; dh_phase = 1'b0; wide_phase = 1'b0;
         text_mode = 1'b1; hires_mode = 1'b0; col80 = 1'b0; dhires = 1'b0; page2 = 1'b0;
         altchar = 1'b1; txt_base = 16'h0400;
-        wait (frame == 10);
+        wait (frame == 13);
         skip = 1'b0;
-        wait (frame == 11);
+        wait (frame == 14);
         if (checked - bars_checked < 720 * 480 - 4 || checked - bars_checked > 720 * 480 + 4) begin
             $display("FAIL: checked %0d ALTCHARSET pixels, expected about %0d",
                      checked - bars_checked, 720 * 480);

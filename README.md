@@ -52,7 +52,7 @@ powershell -File sim\run.ps1 -Target tb_sdvol
 
 A plain serial terminal at **1000000 8N1** works too: what you type goes to the Apple, and what it prints through COUT comes back.
 
-**Keys on the Dock:** S1 resets the Apple (the TF card's images reload); hold S2 for HDMI colour bars and a 1 kHz tone, which checks the HDMI link independently of the Apple core. HDMI audio needs a display that accepts it (not a DVI-only input).
+**Keys on the Dock:** S1 resets the Apple (the TF card's images reload); hold S2 for HDMI colour bars and a 1 kHz tone, which checks the HDMI link independently of the Apple core. S3 switches hi-res and double hi-res to a **colour TV** look (the same NTSC decode over two colour cycles, so fringes blend and colours bleed at edges like a composite set); S4 steps **scanlines** off, 25%, 50%, 75% (the second line of each doubled Apple line darkened). Both start off at power-up. HDMI audio needs a display that accepts it (not a DVI-only input).
 
 ### Debugger
 

@@ -13,6 +13,10 @@ IO_LOC "key_s1_n" T10;
 IO_PORT "key_s1_n" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 IO_LOC "key_s2_n" T3;
 IO_PORT "key_s2_n" IO_TYPE=LVCMOS15 PULL_MODE=UP;
+IO_LOC "key_s3_n" T2;
+IO_PORT "key_s3_n" IO_TYPE=LVCMOS15 PULL_MODE=UP;
+IO_LOC "key_s4_n" D7;
+IO_PORT "key_s4_n" IO_TYPE=LVCMOS15 PULL_MODE=UP;
 
 // LEDs, active low
 IO_LOC "led[0]" C13;

@@ -28,6 +28,8 @@ module video_generator (
     input  wire        dhires,       // 1: double hi-res (with col80 and HIRES): aux byte then main, 560 dots
     input  wire        altchar,      // 1: alternate character set (MouseText, no flashing)
     input  wire        store80,      // 1: 80STORE, PAGE2 no longer selects the display page
+    input  wire        color_tv,     // 1: hi-res as a composite colour TV shows it (softer; key S3)
+    input  wire [1:0]  scanlines,    // darken each Apple line's second copy: 0 off, 1 25%, 2 50%, 3 75% (key S4)
 
     // Video RAM interface (reads from main 64KB RAM)
     output wire        vram_req,
@@ -266,6 +268,44 @@ module video_generator (
         clamp8 = (v < 0) ? 8'd0 : (v > 255) ? 8'd255 : v[7:0];
     endfunction
 
+    // Colour TV mode: the same decode over two subcarrier cycles, s[n-8..n-1],
+    // weighted 1 2 3 4 4 3 2 1, the way a set's chroma and luma filters smear a
+    // composite signal: fringes blend into their neighbours and colours bleed
+    // across edges, and a steady pattern comes out as before (each phase gets
+    // a total weight of 5, so the constants are today's over 5).  The window is
+    // all registered samples, so nothing is added to the path in front of the
+    // output register; the picture sits ~4 pixels further right in this mode.
+    reg  [7:0] tv_hist;  // s[n-1] in bit 0 .. s[n-8] in bit 7; zero outside the screen
+    always @(posedge clk_pixel or posedge reset) begin
+        if (reset) tv_hist <= 8'd0;
+        else       tv_hist <= in_apple_x ? {tv_hist[6:0], hgr_on} : 8'd0;
+    end
+    // Taps k and k+4 are the same subcarrier phase, so each residue r = 0..3
+    // is one 3-bit term, w_r s[r] + w_(r+4) s[r+4] (weights 1+4, 2+3, 3+2,
+    // 4+1); the pixel's phase only decides which residue is +I, +Q, -I, -Q.
+    // Tap k = s[n-1-k] is at phase hgr_ph - 1 - k.
+    wire [2:0] tv_h0 = (tv_hist[0] ? 3'd1 : 3'd0) + (tv_hist[4] ? 3'd4 : 3'd0);
+    wire [2:0] tv_h1 = (tv_hist[1] ? 3'd2 : 3'd0) + (tv_hist[5] ? 3'd3 : 3'd0);
+    wire [2:0] tv_h2 = (tv_hist[2] ? 3'd3 : 3'd0) + (tv_hist[6] ? 3'd2 : 3'd0);
+    wire [2:0] tv_h3 = (tv_hist[3] ? 3'd4 : 3'd0) + (tv_hist[7] ? 3'd1 : 3'd0);
+    // the residue at phase p is r = (hgr_ph - 1 - p) mod 4
+    function [2:0] tv_at(input [1:0] r);
+        tv_at = (r == 2'd0) ? tv_h0 : (r == 2'd1) ? tv_h1 : (r == 2'd2) ? tv_h2 : tv_h3;
+    endfunction
+    wire [2:0] tv_p0 = tv_at(hgr_ph - 2'd1), tv_p1 = tv_at(hgr_ph - 2'd2),
+               tv_p2 = tv_at(hgr_ph - 2'd3), tv_p3 = tv_at(hgr_ph);
+    wire [4:0] tv_y  = tv_h0 + tv_h1 + tv_h2 + tv_h3;                 // 0..20
+    wire signed [4:0] tv_ci = $signed({2'b00, tv_p0}) - $signed({2'b00, tv_p2});   // -5..5
+    wire signed [4:0] tv_cq = $signed({2'b00, tv_p1}) - $signed({2'b00, tv_p3});
+    // today's constants over 5 (each phase's taps weigh 5 in all)
+    wire signed [10:0] tv_rs = 13 * $signed({1'b0, tv_y}) + 16 * tv_ci;
+    wire signed [10:0] tv_gs = 13 * $signed({1'b0, tv_y}) - 8 * tv_ci - 4 * tv_cq;
+    wire signed [10:0] tv_bs = 13 * $signed({1'b0, tv_y}) + 20 * tv_cq;
+    function [7:0] sat8(input signed [10:0] v);
+        sat8 = v[10] ? 8'd0 : (v > 11'sd255) ? 8'd255 : v[7:0];
+    endfunction
+    wire [7:0] tv_r = sat8(tv_rs), tv_g = sat8(tv_gs), tv_b = sat8(tv_bs);
+
     reg [7:0] hgr_r, hgr_g, hgr_b;
     integer   hgr_y, hgr_ci, hgr_cq;
     always @(*) begin
@@ -306,34 +346,47 @@ module video_generator (
     end
 
     // Output color assignment
+    reg [7:0] pix_r, pix_g, pix_b;
+    always @(*) begin
+        if (!in_apple_screen) begin
+            // Border & blanking: black
+            pix_r = 8'h00; pix_g = 8'h00; pix_b = 8'h00;
+        end else if (is_text_line) begin
+            // Authentic Apple II Green Phosphor (or crisp monochrome)
+            pix_r = pixel_on ? 8'h20 : 8'h02;
+            pix_g = pixel_on ? 8'hE8 : 8'h06;
+            pix_b = pixel_on ? 8'h20 : 8'h02;
+        end else if (hires_mode) begin
+            pix_r = color_tv ? tv_r : hgr_r;
+            pix_g = color_tv ? tv_g : hgr_g;
+            pix_b = color_tv ? tv_b : hgr_b;
+        end else begin
+            // Lo-Res graphics color
+            pix_r = lores_r; pix_g = lores_g; pix_b = lores_b;
+        end
+    end
+
+    // Scanlines: each Apple line is two output lines (from y = 48, so the
+    // second is an odd v_cnt); that one is darkened by 25, 50 or 75%.
+    function [7:0] dim(input [7:0] v, input [1:0] lvl);
+        case (lvl)
+            2'd1:    dim = (v >> 1) + (v >> 2);   // 75% bright
+            2'd2:    dim = v >> 1;
+            2'd3:    dim = v >> 2;
+            default: dim = v;
+        endcase
+    endfunction
+    wire [1:0] dim_lvl = v_cnt[0] ? scanlines : 2'd0;
+
     always @(posedge clk_pixel or posedge reset) begin
         if (reset) begin
             red   <= 8'h00;
             green <= 8'h00;
             blue  <= 8'h00;
         end else begin
-            if (in_apple_screen) begin
-                if (is_text_line) begin
-                    // Authentic Apple II Green Phosphor (or crisp monochrome)
-                    red   <= pixel_on ? 8'h20 : 8'h02;
-                    green <= pixel_on ? 8'hE8 : 8'h06;
-                    blue  <= pixel_on ? 8'h20 : 8'h02;
-                end else if (hires_mode) begin
-                    red   <= hgr_r;
-                    green <= hgr_g;
-                    blue  <= hgr_b;
-                end else begin
-                    // Lo-Res graphics color
-                    red   <= lores_r;
-                    green <= lores_g;
-                    blue  <= lores_b;
-                end
-            end else begin
-                // Border & blanking: black
-                red   <= 8'h00;
-                green <= 8'h00;
-                blue  <= 8'h00;
-            end
+            red   <= dim(pix_r, dim_lvl);
+            green <= dim(pix_g, dim_lvl);
+            blue  <= dim(pix_b, dim_lvl);
         end
     end
 

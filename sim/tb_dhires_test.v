@@ -72,7 +72,7 @@ module tb_dhires_test;
         .col80(col80),
         .altchar(altchar),
         .dhires(dhires),
-        .store80(store80),
+        .store80(store80), .color_tv(1'b0), .scanlines(2'd0),
         .aux_data(aux_line_data),
         .aux_col(aux_col),
         .aux_fill_addr(aux_fill_addr),
