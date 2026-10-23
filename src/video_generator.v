@@ -288,12 +288,16 @@ module video_generator (
     wire [2:0] tv_h1 = (tv_hist[1] ? 3'd2 : 3'd0) + (tv_hist[5] ? 3'd3 : 3'd0);
     wire [2:0] tv_h2 = (tv_hist[2] ? 3'd3 : 3'd0) + (tv_hist[6] ? 3'd2 : 3'd0);
     wire [2:0] tv_h3 = (tv_hist[3] ? 3'd4 : 3'd0) + (tv_hist[7] ? 3'd1 : 3'd0);
-    // the residue at phase p is r = (hgr_ph - 1 - p) mod 4
-    function [2:0] tv_at(input [1:0] r);
-        tv_at = (r == 2'd0) ? tv_h0 : (r == 2'd1) ? tv_h1 : (r == 2'd2) ? tv_h2 : tv_h3;
+    // the residue at phase p is r = (hgr_ph - 1 - p) mod 4.  The terms are an
+    // argument, not read from the module inside the function: a simulator
+    // re-evaluates a continuous assign on its arguments only, and Icarus kept
+    // the last clock's terms, which turned every colour 90 degrees.
+    wire [11:0] tv_hs = {tv_h3, tv_h2, tv_h1, tv_h0};
+    function [2:0] tv_at(input [11:0] h, input [1:0] r);
+        tv_at = (r == 2'd0) ? h[2:0] : (r == 2'd1) ? h[5:3] : (r == 2'd2) ? h[8:6] : h[11:9];
     endfunction
-    wire [2:0] tv_p0 = tv_at(hgr_ph - 2'd1), tv_p1 = tv_at(hgr_ph - 2'd2),
-               tv_p2 = tv_at(hgr_ph - 2'd3), tv_p3 = tv_at(hgr_ph);
+    wire [2:0] tv_p0 = tv_at(tv_hs, hgr_ph - 2'd1), tv_p1 = tv_at(tv_hs, hgr_ph - 2'd2),
+               tv_p2 = tv_at(tv_hs, hgr_ph - 2'd3), tv_p3 = tv_at(tv_hs, hgr_ph);
     wire [4:0] tv_y  = tv_h0 + tv_h1 + tv_h2 + tv_h3;                 // 0..20
     wire signed [4:0] tv_ci = $signed({2'b00, tv_p0}) - $signed({2'b00, tv_p2});   // -5..5
     wire signed [4:0] tv_cq = $signed({2'b00, tv_p1}) - $signed({2'b00, tv_p3});

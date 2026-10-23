@@ -85,6 +85,9 @@ $tcl += @(
     "set_option -use_sspi_as_gpio 1",     # T10 key S1, M8 TF card MISO
     "set_option -use_done_as_gpio 1",     # C13 LED0
     "set_option -use_ready_as_gpio 1",    # A13 LED1
+    "set_option -place_option 2",         # timing-prioritised placement (default 0: compile speed)
+    "set_option -route_option 1",         # slower, better routing
+    "set_option -replicate_resources 1",  # split high-fanout nets
     "run all"
 )
 [System.IO.File]::WriteAllText((Join-Path $root 'build\gowin\build.tcl'), ($tcl -join "`n") + "`n",
