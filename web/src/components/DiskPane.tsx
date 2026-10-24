@@ -87,7 +87,20 @@ export function DiskPane(p: Props) {
           <span className={led(d)} title="IN USE" />
         </div>
         <div className="dd-slot">
-          {h && <span className={'dd-label' + (h.failed ? ' failed' : '')} title={h.name}>{h.name}</span>}
+          {h && (
+            <span className={'dd-label' + (h.failed ? ' failed' : '')} title={h.name}>
+              <span className="dd-label-text">{h.name}</span>
+              <button
+                type="button"
+                className="dd-eject-btn"
+                onClick={(e) => { e.stopPropagation(); eject(d) }}
+                title={`Eject ${h.name}`}
+                aria-label={`Eject ${h.name}`}
+              >
+                &times;
+              </button>
+            </span>
+          )}
         </div>
         <div className="dd-buttons">
           <button type="button" className="dd-select" onClick={() => load(d)} disabled={busy || !onCard}>LOAD</button>
@@ -114,7 +127,20 @@ export function DiskPane(p: Props) {
           <span className={led(d)} title="IN USE" />
           <span className="hd-name">PRODOS {LABEL[d]}</span>
         </div>
-        <div className={'hd-volume' + (h?.failed ? ' failed' : '')} title={h?.name}>{h ? h.name : 'empty'}</div>
+        <div className={'hd-volume' + (h?.failed ? ' failed' : '')} title={h?.name}>
+          <span className="hd-volume-text">{h ? h.name : 'empty'}</span>
+          {h && (
+            <button
+              type="button"
+              className="dd-eject-btn"
+              onClick={(e) => { e.stopPropagation(); eject(d) }}
+              title={`Eject ${h.name}`}
+              aria-label={`Eject ${h.name}`}
+            >
+              &times;
+            </button>
+          )}
+        </div>
         <div className="dd-buttons">
           <button type="button" className="dd-select" onClick={() => load(d)} disabled={busy || !onCard}>LOAD</button>
           <button type="button" className="dd-select" onClick={() => eject(d)} disabled={busy || !h}>EJECT</button>
@@ -194,9 +220,18 @@ export function DiskPane(p: Props) {
   const status = card?.status
   return (
     <section className="pane disk-pane" aria-label="Disks">
-      <header className="pane-header">
-        <span className="pane-title">💾 Disks</span>
-        <button type="button" className="pane-close" onClick={p.onClose} aria-label="Close disks" title="Close">×</button>
+      <header>
+        <h2>Disks</h2>
+        <span className="hint">Slot 6 Floppy &amp; Slot 7 SmartPort</span>
+        <button
+          type="button"
+          className="pane-close-btn"
+          onClick={p.onClose}
+          aria-label="Close disks"
+          title="Close disks"
+        >
+          &times;
+        </button>
       </header>
 
       {p.error && (
@@ -237,45 +272,71 @@ export function DiskPane(p: Props) {
             {!status ? 'not read yet' : status.fsOk ? `${card!.files.length} image${card!.files.length === 1 ? '' : 's'}`
               : 'no FAT32 card'}
           </span>
-          <button type="button" className="btn-disk-action secondary" onClick={() => quiet(p.onCardRefresh())} disabled={busy}>↻</button>
+          <div className="shelf-actions">
+            <button
+              type="button"
+              className="shelf-btn-icon"
+              onClick={() => fromComputer(null)}
+              disabled={busy || !onCard}
+              title="Add disk image from computer (.dsk, .po, .nib, .woz, .hdv, .2mg)"
+              aria-label="Add disk"
+            >
+              <span className="icon">＋</span> Add disk
+            </button>
+            <button
+              type="button"
+              className="shelf-btn-icon"
+              disabled={busy || !onCard}
+              onClick={() => quiet(p.onCardUpload(new File([blankWoz() as unknown as BlobPart], `New disk ${Date.now() % 10000}.woz`)))}
+              title="Create new blank floppy (.woz) on TF card"
+              aria-label="New blank floppy"
+            >
+              <span className="icon">＋</span> New blank
+            </button>
+            <button
+              type="button"
+              className="shelf-btn-icon refresh"
+              onClick={() => quiet(p.onCardRefresh())}
+              disabled={busy}
+              title="Refresh card file list"
+              aria-label="Refresh files"
+            >
+              ↻
+            </button>
+          </div>
         </div>
         <div className="shelf-tiles">
-          {card?.files.map((f) => {
-            const on = mountedOn(f)
-            return (
-              <div key={f.short} className={'tile' + (on.length ? ' mounted' : '')}>
-                <button type="button" className="tile-main" onClick={() => setAsk({ kind: 'file', file: f })} disabled={busy}
-                  title={`Load ${f.name}`}>
-                  <span className="tile-icon" aria-hidden>{fitsDrive(f, 0) ? '💾' : '🗄️'}</span>
-                  <span className="tile-name">{f.name}</span>
-                  <span className="disk-meta">{kb(f.size)}{on.length ? ` · in ${on.map((d) => LABEL[d]).join(', ')}` : ''}</span>
-                </button>
-                <details className="dd-more tile-more">
-                  <summary title="More">⋯</summary>
-                  <div className="dd-menu">
-                    <button type="button" onClick={() => quiet(p.onCardDownload(f))} disabled={busy}>Download</button>
-                    {/\.woz$/i.test(f.name) && (
-                      <button type="button" onClick={() => quiet(p.onCardDownload(f, true))} disabled={busy}
-                        title="Decoded to DOS-order sectors; only a standard (unprotected) disk decodes">Download as .dsk</button>
-                    )}
-                    <button type="button" onClick={() => setAsk({ kind: 'delete', file: f })} disabled={busy || on.length > 0}
-                      title={on.length ? 'Eject it first' : undefined}>Delete</button>
-                  </div>
-                </details>
-              </div>
-            )
-          })}
-          <button type="button" className="tile tile-add" onClick={() => fromComputer(null)} disabled={busy || !onCard}
-            title="Copy a disk image onto the card; a floppy (.dsk .do .po .nib .woz) is converted to .woz on the way (about 20 s; a full 32 MB volume is much faster with a card reader)">
-            <span className="tile-icon">＋</span>
-            <span className="tile-name">Add disk</span>
-          </button>
-          <button type="button" className="tile tile-add" disabled={busy || !onCard}
-            onClick={() => quiet(p.onCardUpload(new File([blankWoz() as unknown as BlobPart], `New disk ${Date.now() % 10000}.woz`)))}
-            title="A blank floppy on the card, to INIT in DOS 3.3 or format in ProDOS">
-            <span className="tile-icon">＋</span>
-            <span className="tile-name">New blank floppy</span>
-          </button>
+          {card?.files && card.files.length > 0 ? (
+            card.files.map((f) => {
+              const on = mountedOn(f)
+              return (
+                <div key={f.short} className={'tile' + (on.length ? ' mounted' : '')}>
+                  <button type="button" className="tile-main" onClick={() => setAsk({ kind: 'file', file: f })} disabled={busy}
+                    title={`Load ${f.name}`}>
+                    <span className="tile-icon" aria-hidden>{fitsDrive(f, 0) ? '💾' : '🗄️'}</span>
+                    <span className="tile-name">{f.name}</span>
+                    <span className="disk-meta">{kb(f.size)}{on.length ? ` · in ${on.map((d) => LABEL[d]).join(', ')}` : ''}</span>
+                  </button>
+                  <details className="dd-more tile-more">
+                    <summary title="More">⋯</summary>
+                    <div className="dd-menu">
+                      <button type="button" onClick={() => quiet(p.onCardDownload(f))} disabled={busy}>Download</button>
+                      {/\.woz$/i.test(f.name) && (
+                        <button type="button" onClick={() => quiet(p.onCardDownload(f, true))} disabled={busy}
+                          title="Decoded to DOS-order sectors; only a standard (unprotected) disk decodes">Download as .dsk</button>
+                      )}
+                      <button type="button" onClick={() => setAsk({ kind: 'delete', file: f })} disabled={busy || on.length > 0}
+                        title={on.length ? 'Eject it first' : undefined}>Delete</button>
+                    </div>
+                  </details>
+                </div>
+              )
+            })
+          ) : (
+            <div className="shelf-empty">
+              <span>{onCard ? 'No disk images found on card. Click "＋ Add disk" above to upload.' : 'Insert FAT32 card to view images.'}</span>
+            </div>
+          )}
         </div>
       </div>
 

@@ -42,8 +42,14 @@ export function Console({ lines, onClear, onClose }: Props) {
           Clear
         </button>
         {onClose && (
-          <button type="button" onClick={onClose} title="Hide Console">
-            Hide
+          <button
+            type="button"
+            className="pane-close-btn"
+            onClick={onClose}
+            title="Hide Console"
+            aria-label="Close Console"
+          >
+            &times;
           </button>
         )}
       </header>

@@ -35,7 +35,15 @@ export function ModemPane({ status, log, gateway, onGateway, onHangup, onClose }
           Hang up
         </button>
         {onClose && (
-          <button type="button" onClick={onClose} aria-label="Close modem" title="Close">×</button>
+          <button
+            type="button"
+            className="pane-close-btn"
+            onClick={onClose}
+            aria-label="Close modem"
+            title="Close modem"
+          >
+            &times;
+          </button>
         )}
       </header>
       <div className="modem-status">{status}</div>

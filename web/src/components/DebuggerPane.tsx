@@ -38,8 +38,14 @@ export function DebuggerPane({
           {mode === 'debugger' ? 'Resume' : 'Enter'}
         </button>
         {onClose && (
-          <button type="button" onClick={onClose} title="Hide Debugger">
-            Hide
+          <button
+            type="button"
+            className="pane-close-btn"
+            onClick={onClose}
+            title="Hide Debugger"
+            aria-label="Close Debugger"
+          >
+            &times;
           </button>
         )}
       </header>

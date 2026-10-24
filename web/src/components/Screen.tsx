@@ -134,6 +134,25 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
     [screen],
   )
   const text = useMemo(() => (screen ? screenToText(screen.page) : []), [screen])
+  const [copied, setCopied] = useState(false)
+
+  const onSaveScreenshot = useCallback(() => {
+    const cv = canvas.current
+    if (!cv) return
+    const a = document.createElement('a')
+    a.download = `apple2e-screen-${Date.now()}.png`
+    a.href = cv.toDataURL('image/png')
+    a.click()
+  }, [])
+
+  const onCopyText = useCallback(() => {
+    if (!text || text.length === 0) return
+    const raw = text.join('\n')
+    navigator.clipboard?.writeText(raw).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {})
+  }, [text])
 
   const curPal = PALETTES[palette] || PALETTES.green
 
@@ -212,6 +231,26 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
         >
           {busy ? 'Capturing...' : 'Freeze & capture'}
         </button>
+        {screen && (
+          <>
+            <button
+              type="button"
+              className="btn-screen-action"
+              onClick={onSaveScreenshot}
+              title="Save current screen capture as PNG image"
+            >
+              📷 PNG
+            </button>
+            <button
+              type="button"
+              className="btn-screen-action"
+              onClick={onCopyText}
+              title="Copy screen text characters to clipboard"
+            >
+              {copied ? '✓ Copied' : '📋 Copy Text'}
+            </button>
+          </>
+        )}
         <button
           type="button"
           className={'btn-options-toggle' + (showOptions ? ' active' : '')}
@@ -278,6 +317,11 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
                 {opt.label}
               </button>
             ))}
+            {autoRefresh > 0 && (
+              <span className="opt-note warn" title="CPU is briefly frozen during each framebuffer capture">
+                ⚠️ Pauses CPU every {autoRefresh}s
+              </span>
+            )}
           </div>
         </div>
       )}

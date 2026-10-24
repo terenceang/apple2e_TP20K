@@ -332,17 +332,46 @@ button.toggle-btn.active {
   background: transparent;
   border: none;
   color: var(--dim);
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1;
-  padding: 0 4px;
+  padding: 0 5px;
   cursor: pointer;
   border-radius: 3px;
   transition: color 0.15s ease, background 0.15s ease;
+  margin-left: auto;
 }
 
 .pane-close-btn:hover {
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.btn-screen-action {
+  font-family: var(--sans);
+  font-size: 11px;
+  background: #1c1a16;
+  border: 1px solid #3c382f;
+  color: var(--ink);
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-screen-action:hover:not(:disabled) {
+  border-color: #5c5244;
+  background: #2a2721;
+}
+
+.opt-note {
+  font-size: 11px;
+  margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.opt-note.warn {
+  color: var(--warn);
 }
 
 .btn-capture {
@@ -1248,14 +1277,22 @@ button.opt-pill.selected {
   right: 8%;
   top: 3px;
   bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   background: #efe9d6;
   color: #3a352c;
   font: 9px/11px var(--mono);
   padding: 0 4px;
   border-radius: 1px 1px 0 0;
+}
+
+.dd-label-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  flex: 1;
 }
 
 .dd-select {
@@ -1405,9 +1442,37 @@ button.opt-pill.selected {
   box-shadow: inset 0 2px 4px #000;
   color: var(--phosphor);
   font: 11px/14px var(--mono);
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   overflow: hidden;
+}
+
+.hd-volume-text {
+  overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
+  flex: 1;
+}
+
+.dd-eject-btn {
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  margin-left: 4px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 0.15s ease;
+}
+
+.dd-eject-btn:hover {
+  opacity: 1;
+  color: var(--err);
+  background: rgba(239, 68, 68, 0.15);
 }
 
 .shelf { padding: 0 12px 12px; }
@@ -1418,6 +1483,54 @@ button.opt-pill.selected {
   margin-bottom: 8px;
 }
 .shelf-head .io-card-title { margin: 0; color: var(--legend-dim); }
+
+.shelf-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.shelf-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: #25211c;
+  border: 1px solid #443c32;
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 11px;
+  font-family: var(--sans);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.shelf-btn-icon:hover:not(:disabled) {
+  background: #363028;
+  border-color: #5c5244;
+  color: #fff;
+}
+
+.shelf-btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.shelf-btn-icon.refresh {
+  padding: 3px 6px;
+}
+
+.shelf-empty {
+  grid-column: 1 / -1;
+  padding: 16px;
+  text-align: center;
+  color: var(--dim);
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.15);
+  border: 1px dashed #3a332a;
+  border-radius: 6px;
+}
 .shelf-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
