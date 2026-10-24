@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { AppleStream, screenToText } from '../stream.js'
 import { dotRow, HAS_GLYPHS, GLYPH_W, GLYPH_H, hasGlyphs, parseCharRom, setUserCharRom } from '../charset.js'
-import { LORES_PALETTE, SCR_COLS, SCR_TEXT_ROWS, SCR_GFX_ROWS, SCR_GFX_ROW_BYTES } from '../protocol.js'
+import { LORES_PALETTE, SCR_COLS, SCR_TEXT_ROWS, SCR_GFX_ROWS, SCR_GFX_ROW_BYTES, hgrScanlineOffset, SCR_GFX_BYTES } from '../protocol.js'
 import {
   PREF_SCREEN_PALETTE,
   PREF_SCREEN_SCANLINES,
@@ -155,22 +155,29 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
     const onRgb = rgb(curPal.on)
     const offRgb = rgb(curPal.off)
 
-    // The bottom four lines are lo-res graphics in mixed mode, which is where
-    // the //e ROM normally leaves them. video_generator.v decides it the same
-    // way: is_text_line = text_mode || (mixed_mode && text_row >= 20).
+    // 1. If in Hi-Res mode, draw the 280x192 graphics scanlines
+    if (screen.hires && screen.hgr && screen.hgr.length >= 8192) {
+      drawHires(ctx, screen, onRgb, offRgb)
+    }
+
+    // 2. Draw text or lo-res rows
     const bottom = SCR_TEXT_ROWS - SCR_GFX_ROWS
     const isTextLine = (row: number) => screen.text || (screen.mixed && row >= bottom)
 
     for (let row = 0; row < SCR_TEXT_ROWS; row++) {
-      if (!isTextLine(row)) {
-        drawLores(ctx, row, screen)
+      // If this row was already rendered as Hi-Res graphics, skip it
+      if (screen.hires && (!screen.mixed || row < bottom)) {
         continue
       }
+
+      if (!isTextLine(row)) {
+        drawLores(ctx, row, screen, cells)
+        continue
+      }
+
+      // Draw text row (if character ROM is loaded)
       for (let col = 0; col < SCR_COLS; col++) {
         const cell = cells[row][col]
-        // Inverse and flashing come out of the glyph itself: dotRow addresses
-        // the ROM as video_generator.v does, bits 7/6 and the flash clock
-        // included, so the colours are never swapped here.
         const on = onRgb
         const off = offRgb
         for (let r = 0; r < GLYPH_H; r++) {
@@ -190,7 +197,7 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
     <section className="pane screen-pane">
       <header>
         <h2>Screen</h2>
-        <span className="hint">40 &times; 24, the text page</span>
+        <span className="hint">Live Framebuffer Capture</span>
         <span className="spacer" />
         <button
           type="button"
@@ -272,7 +279,7 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
       )}
 
       <div className={'screen-container' + (scanlines ? ' with-scanlines' : '')}>
-        {canDrawPixels ? (
+        {(canDrawPixels || screen?.hires || (!screen?.text && !screen?.hires)) ? (
           <canvas ref={canvas} className="screen" />
         ) : (
           <p className="warn">
@@ -333,19 +340,51 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
   )
 }
 
+/** Hi-Res graphics renderer: 280x192 monochrome phosphor dots. */
+function drawHires(
+  ctx: CanvasRenderingContext2D,
+  screen: ScreenFrame,
+  onRgb: string,
+  offRgb: string
+) {
+  if (!screen.hgr || screen.hgr.length < 8192) return
+  const numScanlines = screen.mixed ? 160 : 192
+  for (let y = 0; y < numScanlines; y++) {
+    const offset = hgrScanlineOffset(y)
+    const canvasY = y * SCALE
+    for (let col = 0; col < 40; col++) {
+      const byte = screen.hgr[offset + col] ?? 0
+      const baseX = col * 7 * SCALE
+      for (let bit = 0; bit < 7; bit++) {
+        const lit = (byte >> bit) & 1
+        ctx.fillStyle = lit ? onRgb : offRgb
+        ctx.fillRect(baseX + bit * SCALE, canvasY, SCALE, SCALE)
+      }
+    }
+  }
+}
+
 /** Lo-res: 40 blocks across, four scanlines from the high nibble and four from
- *  the low one, which is what video_generator.v does with glyph_row[2]. One
- *  dumped byte per block, the way the $GF frame carries it. */
-function drawLores(ctx: CanvasRenderingContext2D, row: number, screen: ScreenFrame) {
-  const gfxRow = row - (SCR_TEXT_ROWS - SCR_GFX_ROWS)
-  if (gfxRow < 0 || gfxRow >= SCR_GFX_ROWS) return
-  for (let block = 0; block < SCR_GFX_ROW_BYTES; block++) {
-    const byte = screen.gfx[gfxRow * SCR_GFX_ROW_BYTES + block] ?? 0
+ *  the low one, which is what video_generator.v does with glyph_row[2]. */
+function drawLores(
+  ctx: CanvasRenderingContext2D,
+  row: number,
+  screen: ScreenFrame,
+  cells: Array<Array<{ code: number }>>
+) {
+  for (let col = 0; col < SCR_COLS; col++) {
+    let byte = 0
+    if (screen.mixed && row >= (SCR_TEXT_ROWS - SCR_GFX_ROWS) && screen.gfx && screen.gfx.length >= SCR_GFX_BYTES) {
+      const gfxRow = row - (SCR_TEXT_ROWS - SCR_GFX_ROWS)
+      byte = screen.gfx[gfxRow * SCR_GFX_ROW_BYTES + col] ?? 0
+    } else {
+      byte = cells[row]?.[col]?.code ?? 0
+    }
+    const x = col * LORES_BLOCK_W * SCALE
     const y = row * GLYPH_H * SCALE
-    // BOLT OPTIMIZATION: Use precomputed LORES_PALETTE_RGB strings instead of calling rgb() in loop.
     ctx.fillStyle = LORES_PALETTE_RGB[(byte >> 4) & 0x0f]
-    ctx.fillRect(block * LORES_BLOCK_W * SCALE, y, LORES_BLOCK_W * SCALE, 4 * SCALE)
+    ctx.fillRect(x, y, LORES_BLOCK_W * SCALE, 4 * SCALE)
     ctx.fillStyle = LORES_PALETTE_RGB[byte & 0x0f]
-    ctx.fillRect(block * LORES_BLOCK_W * SCALE, y + 4 * SCALE, LORES_BLOCK_W * SCALE, 4 * SCALE)
+    ctx.fillRect(x, y + 4 * SCALE, LORES_BLOCK_W * SCALE, 4 * SCALE)
   }
 }

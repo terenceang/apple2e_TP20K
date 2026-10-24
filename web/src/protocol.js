@@ -186,6 +186,20 @@ export const SCR_GFX_ROW_BYTES = 40
  */
 export const SCR_TEXT_BYTES = 1024
 export const SCR_GFX_BYTES = SCR_GFX_ROWS * SCR_GFX_ROW_BYTES
+export const SCR_HGR_BYTES = 8192
+export const SCR_HGR_SCANLINES = 192
+
+/**
+ * Byte offset of a scanline in the Apple II Hi-Res interleaved framebuffer.
+ * base + glyphRow * 0x400 + (row & 7) * 128 + groupOffset
+ */
+export function hgrScanlineOffset(y) {
+  const textRow = Math.floor(y / 8)
+  const glyphRow = y % 8
+  const rgo = Math.floor(textRow / 8) * 40
+  const rowOffset = (textRow & 7) * 128 + rgo
+  return glyphRow * 0x400 + rowOffset
+}
 
 /**
  * Byte offset of a text cell within the contiguous page dump.

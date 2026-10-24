@@ -20,6 +20,7 @@ import {
   SCR_COLS,
   SCR_TEXT_BYTES,
   SCR_GFX_BYTES,
+  SCR_HGR_BYTES,
   SCR_FLAG,
   textPageIndex,
   BANNER_TEXT,
@@ -47,6 +48,7 @@ export const STATUS_RE = /^VID:([TG]) PLL:([01])(?: D:[0-9A-F]{8})?$/
  */
 const HEX_RUN = SCR_TEXT_BYTES * 2
 const GFX_RUN = SCR_GFX_BYTES * 2
+const HGR_RUN = SCR_HGR_BYTES * 2
 
 export class AppleStream {
   constructor() {
@@ -261,6 +263,17 @@ export class AppleStream {
     this.frame.gfxPage = gfx
   }
 
+  frameHgr() {
+    if (!this.frame) return
+    const hex = this.frame.hgr.slice(0, HGR_RUN)
+    const hgr = new Uint8Array(SCR_HGR_BYTES)
+    const count = Math.min(Math.floor(hex.length / 2), SCR_HGR_BYTES)
+    for (let i = 0; i < count; i++) {
+      hgr[i] = parseInt(hex.substr(i * 2, 2), 16) || 0
+    }
+    this.frame.hgrPage = hgr
+  }
+
   finishFrame() {
     const f = this.frame
     this.frame = null
@@ -276,6 +289,7 @@ export class AppleStream {
       pll: Boolean(flags & SCR_FLAG.PLL),
       page: f.page,
       gfx: f.gfxPage ?? new Uint8Array(0),
+      hgr: f.hgrPage ?? new Uint8Array(0),
     })
   }
 

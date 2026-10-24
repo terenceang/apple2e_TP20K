@@ -78,6 +78,7 @@ type AppleEvent =
       pll: boolean
       page: Uint8Array
       gfx: Uint8Array
+      hgr?: Uint8Array
     }
 
 export type Mode = 'console' | 'debugger'
@@ -111,6 +112,7 @@ export interface Screen {
   pll: boolean
   page: Uint8Array
   gfx: Uint8Array
+  hgr: Uint8Array
   at: number
 }
 
@@ -261,6 +263,7 @@ export function useApple() {
               pll: e.pll,
               page: e.page,
               gfx: e.gfx,
+              hgr: e.hgr ?? new Uint8Array(0),
               at: Date.now(),
             })
             setBusy(false)
