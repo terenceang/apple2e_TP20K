@@ -162,6 +162,7 @@ module top (
     wire        debug_cpu_we;
     wire        debug_cpu_sync;
     wire        debug_z80_on;
+    wire        debug_wp_hit;
     wire [7:0]  debug_cpu_a;
     wire [7:0]  debug_cpu_x;
     wire [7:0]  debug_cpu_y;
@@ -222,6 +223,7 @@ module top (
         .cpu_addr(debug_cpu_addr),
         .cpu_sync(debug_cpu_sync),
         .z80_on(debug_z80_on),
+        .wp_hit(debug_wp_hit),
         .text_mode(text_mode),
         .mixed_mode(mixed_mode),
         .page2(page2),
@@ -455,6 +457,7 @@ module top (
         .debug_cpu_we(debug_cpu_we),
         .debug_cpu_sync(debug_cpu_sync),
         .debug_z80_on(debug_z80_on),
+        .debug_wp_hit(debug_wp_hit),
         .debug_cpu_a(debug_cpu_a),
         .debug_cpu_x(debug_cpu_x),
         .debug_cpu_y(debug_cpu_y),

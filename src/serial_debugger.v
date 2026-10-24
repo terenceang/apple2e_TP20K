@@ -73,6 +73,7 @@ module serial_debugger (
     input  wire [15:0] cpu_addr,
     input  wire        cpu_sync,
     input  wire        z80_on,       // the SoftCard's Z80 has the bus: s cannot step the 6502
+    input  wire        wp_hit,       // the k watchpoint's write (apple2_core debug_wp_hit)
 
     // The TF card (src/sd_vol.v)
     output reg         sd_mnt_go,
@@ -354,6 +355,7 @@ module serial_debugger (
     reg [15:0] dump_addr = 16'hFA60;
     reg [2:0]  adr_n     = 3'd0;         // hex digits still owed after '@'
     reg        mnt_n     = 1'b0;         // the drive digit is owed after 'y'
+    reg        wp_arm    = 1'b0;         // k: stop on the next wp_hit, once
     reg [3:0]  q_n       = 4'd0;         // hex digits still owed after 'u'
     reg [3:0]  rd_n      = 4'd0;         // ...and after 'b' (8 of LBA, 4 of count)
     reg        r_fin     = 1'b0;         // the b read has ended (its last byte may still be out)
@@ -486,6 +488,7 @@ module serial_debugger (
             cpu_reset_req  <= 1'b0;
             reset_timer    <= 8'd0;
             dbg_mode       <= 1'b0;
+            wp_arm         <= 1'b0;
             latched_pc     <= 16'hFA62;
             latched_a      <= 8'h00;
             latched_x      <= 8'h00;
@@ -571,8 +574,18 @@ module serial_debugger (
                 end
             endcase
 
-            // Mode switching via Ctrl+B (ASCII 0x02)
-            if (rx_valid && (rx_byte == 8'h02) && (main_state != M_SDW)) begin
+            // Mode switching via Ctrl+B (ASCII 0x02), or by the armed k
+            // watchpoint, which enters exactly as Ctrl+B does (a byte arriving
+            // in that one clock is dropped)
+            if (wp_arm && wp_hit && !dbg_mode) begin
+                wp_arm     <= 1'b0;
+                dbg_mode   <= 1'b1;
+                cpu_rdy    <= 1'b0;
+                latch_regs;
+                dump_addr  <= cpu_pc;
+                say(STR_BANNER_START, STR_BANNER_LEN, M_REGS);
+                seq_step   <= 5'd0;
+            end else if (rx_valid && (rx_byte == 8'h02) && (main_state != M_SDW)) begin
                 if (!dbg_mode) begin
                     dbg_mode   <= 1'b1;
                     cpu_rdy    <= 1'b0;
@@ -636,6 +649,10 @@ module serial_debugger (
                 end else case (rx_byte)
                     "@": adr_n <= 3'd4;
                     "y": mnt_n <= 1'b1;
+                    "k", "K": begin   // arm the $0100-$0105 write watchpoint
+                        wp_arm <= 1'b1;
+                        prompt;
+                    end
                     "u": q_n   <= 4'd8;
                     "b": rd_n  <= 4'd12;
                     "r", "R": begin

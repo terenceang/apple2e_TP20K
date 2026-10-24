@@ -128,6 +128,7 @@ module apple2_core (
     output wire        debug_cpu_we,
     output wire        debug_cpu_sync,
     output wire        debug_z80_on,     // the SoftCard's Z80 has the bus
+    output reg         debug_wp_hit = 1'b0,  // a write the debugger's k watches for
     output wire [7:0]  debug_cpu_a,
     output wire [7:0]  debug_cpu_x,
     output wire [7:0]  debug_cpu_y,
@@ -508,6 +509,13 @@ module apple2_core (
     // (the language-card area is never block RAM any more: see main_lc_wr)
     wire ram_we_cpu = cpu_we && !aux_sel_wr && is_ram_base;
     wire ram_we     = cpu_go && ram_we_cpu;
+
+    // The debugger's k watchpoint: the 6502 writing main RAM $0100-$0105 from
+    // code below $D000 (Total Replay keeps its re-entry stub there and copies
+    // it from the language card).  Registered: it only stops the CPU.
+    always @(posedge clk)
+        debug_wp_hit <= ram_we && !z80_on && cpu_addr[15:3] == 13'h0020 &&
+                        cpu_addr[2:0] < 3'd6 && debug_cpu_pc < 16'hD000;
 
     wire is_lc_bank2_d = lc_bank2 && (effective_cpu_addr >= 16'hD000 && effective_cpu_addr < 16'hE000);
     wire [15:0] cpu_ram_addr = is_lc_bank2_d ? {4'hC, effective_cpu_addr[11:0]} : effective_cpu_addr;
