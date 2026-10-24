@@ -64,7 +64,15 @@ module input_controller (
     // Slot 1 Super Serial Card (src/ssc.v): bytes and lines from the page's modem
     output reg  [7:0]  ssc_rx_data = 8'd0,
     output reg         ssc_rx_valid = 1'b0,
-    output reg  [1:0]  ssc_lines = 2'b00  // {DSR, DCD}, 1 = asserted
+    output reg  [1:0]  ssc_lines = 2'b00, // {DSR, DCD}, 1 = asserted
+
+    // Direct USB Keyboard inputs (from ulpi_keyboard_host)
+    input  wire        usb_key_valid,
+    input  wire [6:0]  usb_key_code,
+    input  wire        usb_key_akd,
+    input  wire        usb_btn_oa,
+    input  wire        usb_btn_ca,
+    input  wire        usb_btn_reset
 );
 
     // 1 Mbps baud receiver at 27 MHz; the divisor is src/uart_defs.vh
@@ -265,6 +273,14 @@ module input_controller (
         end else begin
             clk_set <= 1'b0;
             ssc_rx_valid <= 1'b0;
+            // Direct USB physical keyboard input (from onboard USB-C J8)
+            if (usb_key_valid && !dbg_mode) begin
+                kbd_data   <= {1'b1, usb_key_code};
+                akd        <= 1'b1;
+                akd_legacy <= 1'b1;
+                akd_cnt    <= AKD_LEGACY_CLKS;
+            end
+
             // Clear keyboard strobe on $C010 access
             if ((io_read || io_write) && (io_addr == 8'h10)) begin
                 kbd_data[7] <= 1'b0;
@@ -416,7 +432,7 @@ module input_controller (
     end
 
     assign key_strobe = kbd_data[7];
-    assign kbd_reset  = key_reset;
+    assign kbd_reset  = key_reset | usb_btn_reset;
     assign rx_byte    = urx_byte;
     assign rx_valid   = urx_valid;
 
@@ -431,16 +447,16 @@ module input_controller (
     // $C070-$C07F only trigger the paddles (io_read above); a read there is
     // the floating bus, as on a //e
     assign io_hit = (io_addr[7:4] == 4'h0) || (io_addr == 8'h10) ||
-                    (io_addr[7:4] == 4'h6);
+                    (io_addr[7:4] == 4'h6) || (io_addr[7:4] == 4'h7);
 
     reg in_bit;
     always @(*) begin
         case (io_addr[3:0])
-            4'h1:    in_bit = pb0;                         // $C061 PB0
-            4'h2:    in_bit = pb1;                         // $C062 PB1
+            4'h1:    in_bit = pb0 | usb_btn_oa;            // $C061 PB0 (Open-Apple)
+            4'h2:    in_bit = pb1 | usb_btn_ca;            // $C062 PB1 (Closed-Apple)
             4'h3:    in_bit = pb2;                         // $C063 PB2
-            4'h4:    in_bit = (pdl0_cnt != 12'd0);          // $C064 PDL0
-            4'h5:    in_bit = (pdl1_cnt != 12'd0);          // $C065 PDL1
+            4'h4:    in_bit = (pdl0_cnt != 12'd0);         // $C064 PDL0
+            4'h5:    in_bit = (pdl1_cnt != 12'd0);         // $C065 PDL1
             default: in_bit = 1'b0;
         endcase
     end

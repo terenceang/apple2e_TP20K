@@ -30,6 +30,7 @@ sources:
   - src/video_generator.v
   - src/colorbar_gen.v
   - src/input_controller.v
+  - src/usb_host/ulpi_keyboard_host.v
   - src/sound_generator.v
   - src/audio_filter.v
   - src/serial_debugger.v

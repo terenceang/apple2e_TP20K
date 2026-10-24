@@ -79,7 +79,13 @@ module tb_input;
         .clk_time  (clk_time),
         .ssc_rx_data (ssc_rx_data),
         .ssc_rx_valid(ssc_rx_valid),
-        .ssc_lines   (ssc_lines)
+        .ssc_lines   (ssc_lines),
+        .usb_key_valid(1'b0),
+        .usb_key_code(7'h00),
+        .usb_key_akd (1'b0),
+        .usb_btn_oa  (1'b0),
+        .usb_btn_ca  (1'b0),
+        .usb_btn_reset(1'b0)
     );
 
     integer failures = 0;

@@ -13,7 +13,9 @@ create_generated_clock -name clk_pixel -source [get_pins {u_clk_gen/pll_inst/CLK
 create_clock -name ddr_memory_clk -period 2.511 [get_nets {ddr_memory_clk}]
 create_clock -name mclk -period 10.042 [get_nets {u_aux/mclk}]
 
-set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk_tmds clk_pixel}] -group [get_clocks {ddr_memory_clk}] -group [get_clocks {mclk}]
+create_clock -name clk_ulpi -period 16.667 [get_ports {usb_clkout}]
+
+set_clock_groups -asynchronous -group [get_clocks {clk}] -group [get_clocks {clk_tmds clk_pixel}] -group [get_clocks {ddr_memory_clk}] -group [get_clocks {mclk}] -group [get_clocks {clk_ulpi}]
 
 // OSER10 serializers: RESET is an asynchronous initialization signal released
 // 128 pixel clocks after PLL lock, well before video active data begins.

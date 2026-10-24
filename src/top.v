@@ -35,6 +35,14 @@ module top (
     output wire       i2s_din,    // P15 HP_DIN
     output wire       pa_en,      // R16 PA_EN
 
+    // USB ULPI PHY (Microchip USB3317 on Dock J8)
+    input  wire       usb_clkout,   // T15 (60 MHz from USB3317)
+    output wire       usb_reset_n,  // F10
+    input  wire       usb_dir,      // K12
+    input  wire       usb_nxt,      // K13
+    output wire       usb_stp,      // K11
+    inout  wire [7:0] usb_data,     // ULPI data bus
+
     // DDR3 on the SOM (H5TQ1G63EFR, 128 MB x16): the aux 64 KB and the Disk ][ images
     inout  wire [15:0] DDR3_DQ,
     inout  wire [1:0]  DDR3_DQS,
@@ -232,6 +240,40 @@ module top (
         .ddr_diag(ddr_diag)
     );
 
+    // USB ULPI Keyboard Host (Dock USB-C J8)
+    wire [7:0] usb_data_i = usb_data;
+    wire [7:0] usb_data_o;
+    wire       usb_data_oe;
+    assign usb_data = usb_data_oe ? usb_data_o : 8'bzzzz_zzzz;
+
+    wire       usb_key_valid;
+    wire [6:0] usb_key_code;
+    wire       usb_key_akd;
+    wire       usb_btn_oa;
+    wire       usb_btn_ca;
+    wire       usb_btn_reset;
+
+    ulpi_keyboard_host u_usb_kbd (
+        .clk_60m(usb_clkout),
+        .reset(sys_reset),
+        .clk_pixel(clk_pixel),
+
+        .ulpi_dir(usb_dir),
+        .ulpi_nxt(usb_nxt),
+        .ulpi_stp(usb_stp),
+        .ulpi_reset_n(usb_reset_n),
+        .ulpi_data_i(usb_data_i),
+        .ulpi_data_o(usb_data_o),
+        .ulpi_data_oe(usb_data_oe),
+
+        .key_valid(usb_key_valid),
+        .key_code(usb_key_code),
+        .key_akd(usb_key_akd),
+        .btn_oa(usb_btn_oa),
+        .btn_ca(usb_btn_ca),
+        .btn_reset(usb_btn_reset)
+    );
+
     // Input Controller (UART RX, Keyboard & Gamepad)
     wire [7:0] io_addr;
     wire       io_read;
@@ -249,6 +291,12 @@ module top (
         .ce_1m(ce_1m),
         .uart_rx(uart_rx),
         .dbg_mode(dbg_mode),
+        .usb_key_valid(usb_key_valid),
+        .usb_key_code(usb_key_code),
+        .usb_key_akd(usb_key_akd),
+        .usb_btn_oa(usb_btn_oa),
+        .usb_btn_ca(usb_btn_ca),
+        .usb_btn_reset(usb_btn_reset),
         .rx_byte(rx_byte),
         .rx_valid(rx_valid),
         .io_addr(io_addr),

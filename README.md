@@ -49,9 +49,9 @@ The design runs as a self-contained system with digital video and audio over HDM
 * **Slot 1 — Super Serial Card (SSC)**:
   * Full 6551 ACIA-compatible serial interface connected to the host USB link; supports virtual Hayes modem emulation via the web interface.
 
-### Web Interface & Control
-* **Web Serial Console**: Connect directly via Chrome or Edge at 1,000,000 baud 8N1 — no background daemons, drivers, or software installs required.
-* **Virtual Keyboard & Gamepad**: Accurate Apple //e keyboard mapping, paddle button controls, and analog joystick emulation.
+### Keyboard & Input
+* **Direct USB Keyboard (Dock USB-C J8)**: Plug any standard USB keyboard directly into the second USB-C port (`J8`). The built-in hardware ULPI USB host controller interfaces with the onboard Microchip USB3317 PHY, auto-enumerates HID boot keyboards, translates scancodes directly to Apple //e ASCII characters, maps modifier keys (Left Alt / Windows key = Open-Apple, Right Alt = Closed-Apple), and routes `Ctrl` + `Alt` + `Del` directly to the Apple //e Reset line.
+* **Web Serial Console & Virtual Input**: Connect directly via Chrome or Edge at 1,000,000 baud 8N1 — provides virtual keyboard, paddle button controls, and analog joystick emulation with no background daemons, drivers, or software installs required.
 * **Disk Manager**: Live mounting, blank disk creation, and on-the-fly conversion of `.dsk`, `.do`, `.po`, and `.nib` images to `.woz`.
 * **Hardware Debugger**: Built-in serial debugger allows freezing the CPU at any instant to inspect registers, single-step instructions, examine RAM, and dump the text display.
 
