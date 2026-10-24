@@ -199,6 +199,7 @@ kbd {
   z-index: 10;
 }
 
+.spacer,
 .flashbar .spacer {
   flex: 1;
 }
@@ -1358,6 +1359,10 @@ button.opt-pill.selected {
 }
 .dd-select:hover:not(:disabled) { filter: brightness(1.25); }
 .dd-select:disabled { opacity: 0.5; cursor: not-allowed; }
+.dd-select.dd-replace {
+  color: var(--accent);
+  border-color: #5c4e33;
+}
 
 /* --- Flashbar Progress ---------------------------------------------------- */
 

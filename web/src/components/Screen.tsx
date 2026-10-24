@@ -132,7 +132,8 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
     [screen],
   )
   const text = useMemo(() => (screen ? screenToText(screen.page) : []), [screen])
-  const [copied, setCopied] = useState(false)
+  const [copiedText, setCopiedText] = useState(false)
+  const [copiedImage, setCopiedImage] = useState(false)
 
   const onSaveScreenshot = useCallback(() => {
     const cv = canvas.current
@@ -143,12 +144,35 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
     a.click()
   }, [])
 
+  const onCopyImage = useCallback(() => {
+    const cv = canvas.current
+    if (!cv) return
+    try {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        cv.toBlob((blob) => {
+          if (!blob) return
+          navigator.clipboard
+            .write([new ClipboardItem({ 'image/png': blob })])
+            .then(() => {
+              setCopiedImage(true)
+              setTimeout(() => setCopiedImage(false), 2000)
+            })
+            .catch((err) => {
+              console.error('Failed to copy image to clipboard:', err)
+            })
+        }, 'image/png')
+      }
+    } catch (err) {
+      console.error('Failed to copy image:', err)
+    }
+  }, [])
+
   const onCopyText = useCallback(() => {
     if (!text || text.length === 0) return
     const raw = text.join('\n')
     navigator.clipboard?.writeText(raw).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      setCopiedText(true)
+      setTimeout(() => setCopiedText(false), 2000)
     }).catch(() => {})
   }, [text])
 
@@ -242,10 +266,18 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
             <button
               type="button"
               className="btn-screen-action"
+              onClick={onCopyImage}
+              title="Copy screen capture image to clipboard"
+            >
+              {copiedImage ? '✓ Copied' : '🖼️ Copy Image'}
+            </button>
+            <button
+              type="button"
+              className="btn-screen-action"
               onClick={onCopyText}
               title="Copy screen text characters to clipboard"
             >
-              {copied ? '✓ Copied' : '📋 Copy Text'}
+              {copiedText ? '✓ Copied' : '📋 Copy Text'}
             </button>
           </>
         )}

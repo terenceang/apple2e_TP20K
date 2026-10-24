@@ -29,6 +29,7 @@ const quiet = (p: Promise<unknown>) => void p.catch(() => {}) // the error banne
 
 type Ask =
   | { kind: 'drive'; d: number; file?: CardFile }   // pick a file for drive d, then confirm it
+  | { kind: 'confirm_replace'; d: number; file: CardFile; currentName: string }
   | { kind: 'file'; file: CardFile }               // pick a drive for this file
   | { kind: 'delete'; file: CardFile }
 
@@ -59,6 +60,7 @@ export function DiskPane(p: Props) {
     [0, 1, 2, 3].filter((d) => card?.status.present[d] && card?.drives[d]?.short === f.short)
 
   const load = (d: number) => setAsk({ kind: 'drive', d })
+  const replace = (d: number) => setAsk({ kind: 'drive', d })
   const eject = (d: number) => quiet(p.onCardMount(d, null))
   const fromComputer = (d: number | null) => {
     setAsk(null)
@@ -68,7 +70,14 @@ export function DiskPane(p: Props) {
   const picked = async (file: File) => {
     const d = pickFor.current
     const f = await p.onCardUpload(file)
-    if (f && d !== null) await p.onCardMount(d, f)
+    if (f && d !== null) {
+      const cur = inDrive(d)
+      if (cur) {
+        setAsk({ kind: 'confirm_replace', d, file: f, currentName: cur.name })
+      } else {
+        await p.onCardMount(d, f)
+      }
+    }
   }
 
   const led = (d: number) => {
@@ -103,14 +112,55 @@ export function DiskPane(p: Props) {
           )}
         </div>
         <div className="dd-buttons">
-          <button type="button" className="dd-select" onClick={() => load(d)} disabled={busy || !onCard}>LOAD</button>
-          <button type="button" className="dd-select" onClick={() => eject(d)} disabled={busy || !h}>EJECT</button>
+          {h ? (
+            <button
+              type="button"
+              className="dd-select dd-replace"
+              onClick={() => replace(d)}
+              disabled={busy || !onCard}
+              title={`Replace ${h.name} with another disk image`}
+            >
+              REPLACE
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="dd-select"
+              onClick={() => load(d)}
+              disabled={busy || !onCard}
+              title="Load disk image into drive"
+            >
+              LOAD
+            </button>
+          )}
+          <button
+            type="button"
+            className="dd-select"
+            onClick={() => eject(d)}
+            disabled={busy || !h}
+            title={h ? `Eject ${h.name}` : undefined}
+          >
+            EJECT
+          </button>
           {h?.file && (
             <details className="dd-more">
               <summary title="More">⋯</summary>
               <div className="dd-menu">
-                <button type="button" onClick={() => quiet(p.onCardDownload(h.file!))} disabled={busy}
-                  title="The card's copy: the board writes a track back about a second after the drive goes quiet">Download</button>
+                <button
+                  type="button"
+                  onClick={() => replace(d)}
+                  disabled={busy || !onCard}
+                >
+                  Replace disk…
+                </button>
+                <button
+                  type="button"
+                  onClick={() => quiet(p.onCardDownload(h.file!))}
+                  disabled={busy}
+                  title="The card's copy: the board writes a track back about a second after the drive goes quiet"
+                >
+                  Download
+                </button>
               </div>
             </details>
           )}
@@ -142,8 +192,57 @@ export function DiskPane(p: Props) {
           )}
         </div>
         <div className="dd-buttons">
-          <button type="button" className="dd-select" onClick={() => load(d)} disabled={busy || !onCard}>LOAD</button>
-          <button type="button" className="dd-select" onClick={() => eject(d)} disabled={busy || !h}>EJECT</button>
+          {h ? (
+            <button
+              type="button"
+              className="dd-select dd-replace"
+              onClick={() => replace(d)}
+              disabled={busy || !onCard}
+              title={`Replace ${h.name} with another disk image`}
+            >
+              REPLACE
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="dd-select"
+              onClick={() => load(d)}
+              disabled={busy || !onCard}
+              title="Load disk image into drive"
+            >
+              LOAD
+            </button>
+          )}
+          <button
+            type="button"
+            className="dd-select"
+            onClick={() => eject(d)}
+            disabled={busy || !h}
+            title={h ? `Eject ${h.name}` : undefined}
+          >
+            EJECT
+          </button>
+          {h?.file && (
+            <details className="dd-more">
+              <summary title="More">⋯</summary>
+              <div className="dd-menu">
+                <button
+                  type="button"
+                  onClick={() => replace(d)}
+                  disabled={busy || !onCard}
+                >
+                  Replace disk…
+                </button>
+                <button
+                  type="button"
+                  onClick={() => quiet(p.onCardDownload(h.file!))}
+                  disabled={busy}
+                >
+                  Download
+                </button>
+              </div>
+            </details>
+          )}
         </div>
       </div>
     )
@@ -165,6 +264,32 @@ export function DiskPane(p: Props) {
         </>
       )
     }
+    if (ask.kind === 'confirm_replace') {
+      return (
+        <>
+          <h3>Replace disk in {LABEL[ask.d]}?</h3>
+          <p className="disk-meta">
+            Replace <strong>{ask.currentName}</strong> with <strong>{ask.file.name}</strong> ({kb(ask.file.size)}) in {LABEL[ask.d]}?
+          </p>
+          <p className="disk-meta" style={{ color: '#d08c2a', marginTop: '6px' }}>
+            The current disk will be unmounted and replaced.
+          </p>
+          <div className="dlg-actions">
+            <button
+              type="button"
+              className="btn-disk-action"
+              onClick={() => {
+                setAsk(null)
+                quiet(p.onCardMount(ask.d, ask.file))
+              }}
+            >
+              Replace
+            </button>
+            {cancel}
+          </div>
+        </>
+      )
+    }
     if (ask.kind === 'file') {
       const fit = [0, 1, 2, 3].filter((d) => fitsDrive(ask.file, d))
       return (
@@ -172,12 +297,26 @@ export function DiskPane(p: Props) {
           <h3>Load {ask.file.name} into…</h3>
           <p className="disk-meta">{kb(ask.file.size)}. A drive that holds another disk swaps it out.</p>
           <div className="dlg-actions">
-            {fit.map((d) => (
-              <button key={d} type="button" className="btn-disk-action"
-                onClick={() => { setAsk(null); quiet(p.onCardMount(d, ask.file)) }}>
-                {LABEL[d]}{inDrive(d) ? ` (now ${inDrive(d)!.name})` : ''}
-              </button>
-            ))}
+            {fit.map((d) => {
+              const cur = inDrive(d)
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  className="btn-disk-action"
+                  onClick={() => {
+                    if (cur) {
+                      setAsk({ kind: 'confirm_replace', d, file: ask.file, currentName: cur.name })
+                    } else {
+                      setAsk(null)
+                      quiet(p.onCardMount(d, ask.file))
+                    }
+                  }}
+                >
+                  {LABEL[d]}{cur ? ` (replace ${cur.name})` : ''}
+                </button>
+              )
+            })}
             {cancel}
           </div>
         </>
@@ -185,22 +324,58 @@ export function DiskPane(p: Props) {
     }
     // a drive: choose its file, then confirm
     if (ask.file) {
+      const cur = inDrive(ask.d)
+      if (cur) {
+        return (
+          <>
+            <h3>Replace disk in {LABEL[ask.d]}?</h3>
+            <p className="disk-meta">
+              Replace <strong>{cur.name}</strong> with <strong>{ask.file.name}</strong> ({kb(ask.file.size)}) in {LABEL[ask.d]}?
+            </p>
+            <p className="disk-meta" style={{ color: '#d08c2a', marginTop: '6px' }}>
+              The current disk will be unmounted and replaced.
+            </p>
+            <div className="dlg-actions">
+              <button
+                type="button"
+                className="btn-disk-action"
+                onClick={() => {
+                  setAsk(null)
+                  quiet(p.onCardMount(ask.d, ask.file!))
+                }}
+              >
+                Replace
+              </button>
+              {cancel}
+            </div>
+          </>
+        )
+      }
       return (
         <>
           <h3>Load {ask.file.name} into {LABEL[ask.d]}?</h3>
-          {inDrive(ask.d) && <p className="disk-meta">{inDrive(ask.d)!.name} comes out.</p>}
           <div className="dlg-actions">
-            <button type="button" className="btn-disk-action"
-              onClick={() => { setAsk(null); quiet(p.onCardMount(ask.d, ask.file!)) }}>Load</button>
+            <button
+              type="button"
+              className="btn-disk-action"
+              onClick={() => {
+                setAsk(null)
+                quiet(p.onCardMount(ask.d, ask.file!))
+              }}
+            >
+              Load
+            </button>
             {cancel}
           </div>
         </>
       )
     }
+    const cur = inDrive(ask.d)
     const fit = card?.files.filter((f) => fitsDrive(f, ask.d)) ?? []
     return (
       <>
-        <h3>Load into {LABEL[ask.d]}</h3>
+        <h3>{cur ? `Replace disk in ${LABEL[ask.d]}` : `Load into ${LABEL[ask.d]}`}</h3>
+        {cur && <p className="disk-meta">Current disk: <strong>{cur.name}</strong></p>}
         <div className="dlg-list">
           {fit.length === 0 && <span className="disk-meta">No image on the card fits this drive.</span>}
           {fit.map((f) => (
