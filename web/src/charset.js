@@ -31,9 +31,56 @@
 import charset from './generated/charset.json' with { type: 'json' }
 
 /** True when the real glyphs were built from the ROM. */
-export const HAS_GLYPHS = Boolean(charset && Array.isArray(charset.bytes) && charset.bytes.length)
+export function parseCharRom(raw) {
+  const bytes = []
+  for (const line of raw.split(/\r?\n/)) {
+    const tok = line.replace(/\/\/.*$/, '').trim().split(/\s+/)[0]
+    if (!tok) continue
+    if (!/^[0-9a-fA-F]{1,2}$/.test(tok)) continue
+    bytes.push(parseInt(tok, 16))
+  }
+  return bytes
+}
 
-const ROM = HAS_GLYPHS ? Uint8Array.from(charset.bytes) : null
+function loadRom() {
+  if (charset && Array.isArray(charset.bytes) && charset.bytes.length) {
+    return Uint8Array.from(charset.bytes)
+  }
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('a2e.userCharRom')
+      if (stored) {
+        const parsed = JSON.parse(stored)
+        if (Array.isArray(parsed) && parsed.length >= 2048) {
+          return Uint8Array.from(parsed)
+        }
+      }
+    } catch (_) {}
+  }
+  return null
+}
+
+let ROM = loadRom()
+
+export function hasGlyphs() {
+  return Boolean(ROM)
+}
+
+export function setUserCharRom(bytes) {
+  if (Array.isArray(bytes) || bytes instanceof Uint8Array) {
+    ROM = Uint8Array.from(bytes)
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('a2e.userCharRom', JSON.stringify(Array.from(ROM)))
+      } catch (_) {}
+    }
+    return true
+  }
+  return false
+}
+
+export const HAS_GLYPHS = Boolean(ROM)
+
 
 export const GLYPH_W = 7
 export const GLYPH_H = 8

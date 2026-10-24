@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { AppleStream, screenToText } from '../stream.js'
-import { dotRow, HAS_GLYPHS, GLYPH_W, GLYPH_H } from '../charset.js'
+import { dotRow, HAS_GLYPHS, GLYPH_W, GLYPH_H, hasGlyphs, parseCharRom, setUserCharRom } from '../charset.js'
 import { LORES_PALETTE, SCR_COLS, SCR_TEXT_ROWS, SCR_GFX_ROWS, SCR_GFX_ROW_BYTES } from '../protocol.js'
 import {
   PREF_SCREEN_PALETTE,
@@ -64,6 +64,8 @@ interface Props {
  */
 export function Screen({ screen, onCapture, busy, onClose }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
+  const [hasCustomRom, setHasCustomRom] = useState(() => hasGlyphs())
+  const canDrawPixels = HAS_GLYPHS || hasCustomRom
   const [flash, setFlash] = useState(false)
 
   const store = typeof localStorage !== 'undefined' ? localStorage : null
@@ -270,13 +272,35 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
       )}
 
       <div className={'screen-container' + (scanlines ? ' with-scanlines' : '')}>
-        {HAS_GLYPHS ? (
+        {canDrawPixels ? (
           <canvas ref={canvas} className="screen" />
         ) : (
           <p className="warn">
-            No character ROM, so this is showing text rather than pixels. Run{' '}
-            <code>npm run charset</code> in <code>web/</code> after supplying{' '}
-            <code>roms/apple2e_char.hex</code> to draw the real //e glyphs.
+            No character ROM built in (monospaced fallback active).
+            <label style={{ display: 'inline-block', marginLeft: '8px', padding: '2px 8px', background: '#222', color: '#e0e0e0', border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}>
+              📁 Load apple2e_char.hex
+              <input
+                type="file"
+                accept=".hex,.bin,.rom"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  const reader = new FileReader()
+                  reader.onload = (ev) => {
+                    const raw = ev.target?.result as string
+                    const bytes = parseCharRom(raw)
+                    if (bytes.length >= 2048) {
+                      setUserCharRom(bytes)
+                      setHasCustomRom(true)
+                    } else {
+                      alert('Invalid character ROM. Expected at least 2048 hex bytes.')
+                    }
+                  }
+                  reader.readAsText(file)
+                }}
+              />
+            </label>
           </p>
         )}
       </div>
@@ -288,7 +312,16 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
             {screen.mixed ? ' + MIXED' : ''} &middot; {screen.page2 ? 'PAGE 2' : 'PAGE 1'} &middot;{' '}
             {screen.hires ? 'HIRES' : 'LORES'} &middot; PLL {screen.pll ? 'locked' : 'unlocked'}
           </p>
-          {!HAS_GLYPHS && <pre className="screen-fallback">{text.join('\n')}</pre>}
+          {!screen.text && !screen.mixed && (
+            <p className="dim" style={{ margin: '6px 0', fontSize: '12px' }}>
+              ℹ Apple //e is currently in full-screen Graphics mode. This captures the 40&times;24 text buffer ($0400). Return to text mode (press Esc then 4, or Reset to BASIC) to view text.
+            </p>
+          )}
+          {!canDrawPixels && (
+            <pre className="screen-fallback">
+              {text.join('\n').trim() ? text.join('\n') : (screen.text ? '(empty text screen)' : '(graphics display active - text page empty)')}
+            </pre>
+          )}
         </>
       ) : (
         <p className="dim">
