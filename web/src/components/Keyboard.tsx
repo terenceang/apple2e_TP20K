@@ -5,12 +5,48 @@ import {
   isModifier,
   isDebuggerToggle,
   paddleButtonBits,
+  resolve,
   REPEAT_DELAY_MS,
   REPEAT_INTERVAL_MS,
 } from '../keymap.js'
 import { BAUD } from '../serial-link.js'
 import { AppleGlyph } from './AppleGlyph.js'
 import type { Conn, Mode } from '../useApple'
+
+interface KeyLogEntry {
+  text: string
+  hex?: string
+}
+
+function formatKeyLog(
+  id: string,
+  mods: { shift: boolean; caps: boolean; ctrl: boolean },
+): KeyLogEntry {
+  const code = resolve(id, mods)
+  if (code !== null) {
+    const hex = `$${code.toString(16).toUpperCase().padStart(2, '0')}`
+    if (mods.ctrl && id.length === 1 && id >= 'a' && id <= 'z') {
+      return { text: `^${id.toUpperCase()}`, hex }
+    }
+    if (id === 'space') return { text: '␣ Space', hex }
+    if (id === 'return') return { text: '⏎ Return', hex }
+    if (id === 'delete') return { text: '⌫ Del', hex }
+    if (id === 'tab') return { text: '⇥ Tab', hex }
+    if (id === 'esc') return { text: 'Esc', hex }
+    if (id === 'left') return { text: '←', hex }
+    if (id === 'right') return { text: '→', hex }
+    if (id === 'up') return { text: '↑', hex }
+    if (id === 'down') return { text: '↓', hex }
+    if (code >= 0x20 && code <= 0x7E) {
+      return { text: String.fromCharCode(code), hex }
+    }
+    return { text: id, hex }
+  }
+  if (id === 'reset') return { text: 'RESET' }
+  if (id === 'apple-o') return { text: ' Open' }
+  if (id === 'apple-c') return { text: ' Solid' }
+  return { text: id }
+}
 
 interface Props {
   mode: Mode
@@ -38,7 +74,7 @@ type Cap = (typeof KEYS)[number]
  * provides immediate visual connection feedback (Power LED, TX activity, and
  * offline alerts).
  */
-export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSerial = true, onConnect }: Props) {
+export function Keyboard({ mode, onPress, onReset, onRelease, held, conn }: Props) {
   const [down, setDown] = useState<Set<string>>(new Set())
   // Character keys currently held, for the any-key-down release
   const charsDown = useRef(new Set<string>())
@@ -85,22 +121,17 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
     return () => ro.disconnect()
   }, [])
 
-  // Visual feedback when typing while disconnected, and TX activity pulse when connected
-  const [warnDisconnected, setWarnDisconnected] = useState(false)
-  const warnTimer = useRef<number | null>(null)
+  // Key log state for live keystroke display in the keyboard header
+  const [keyLog, setKeyLog] = useState<KeyLogEntry[]>([])
+
+  // TX activity pulse when typing
   const [txPulse, setTxPulse] = useState(false)
   const txTimer = useRef<number | null>(null)
 
   const triggerActivity = () => {
-    if (!isConnected) {
-      setWarnDisconnected(true)
-      if (warnTimer.current) clearTimeout(warnTimer.current)
-      warnTimer.current = window.setTimeout(() => setWarnDisconnected(false), 3500)
-    } else {
-      setTxPulse(true)
-      if (txTimer.current) clearTimeout(txTimer.current)
-      txTimer.current = window.setTimeout(() => setTxPulse(false), 120)
-    }
+    setTxPulse(true)
+    if (txTimer.current) clearTimeout(txTimer.current)
+    txTimer.current = window.setTimeout(() => setTxPulse(false), 120)
   }
 
   // Ref mirror so event handlers don't stale
@@ -128,7 +159,9 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
     const press = (id: string) => {
       triggerActivity()
       const buttons = heldButtons()
-      onPress(id, { ...mods.current, caps: heldRef.current.caps }, buttons)
+      const m = { ...mods.current, caps: heldRef.current.caps }
+      onPress(id, m, buttons)
+      setKeyLog((prev) => [...prev.slice(-9), formatKeyLog(id, m)])
     }
 
     const startRepeat = () => {
@@ -206,7 +239,6 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
       window.removeEventListener('keydown', onDown)
       window.removeEventListener('keyup', onUp)
       window.removeEventListener('blur', onBlur)
-      if (warnTimer.current) clearTimeout(warnTimer.current)
       if (txTimer.current) clearTimeout(txTimer.current)
     }
   }, [onPress, onReset, onRelease])
@@ -241,7 +273,9 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
       triggerActivity()
       setDown((d) => new Set(d).add(k.id))
       if (!isModifier(k.id)) charsDown.current.add(k.id)
-      onPress(k.id, { shift, caps: heldRef.current.caps, ctrl }, buttons)
+      const m = { shift, caps: heldRef.current.caps, ctrl }
+      onPress(k.id, m, buttons)
+      setKeyLog((prev) => [...prev.slice(-9), formatKeyLog(k.id, m)])
     } else {
       charUp(k.id)
       setDown((d) => {
@@ -271,12 +305,12 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
             }`}
             title={
               isConnected
-                ? `Tang Nano 20K connected (${BAUD} 8N1)`
+                ? `Apple //e online (${BAUD} 8N1)`
                 : isConnecting
-                ? 'Connecting to Tang Nano 20K...'
+                ? 'Connecting to Apple //e...'
                 : isWrongPort
                 ? 'Selected port did not respond (likely JTAG or unprogrammed board)'
-                : 'Not connected - click Connect USB to enable typing'
+                : 'Hardware offline - connect USB serial to enable typing'
             }
           >
             <span className={`pwr-led ${txPulse ? 'tx-active' : ''}`} />
@@ -297,35 +331,33 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
           </div>
         </div>
 
-        <div className="keyboard-status-bar">
-          {!isConnected && (
-            <div className={`kb-notice ${warnDisconnected || isWrongPort ? 'alert' : ''}`}>
-              <span className="kb-notice-msg">
-                {isWrongPort
-                  ? conn?.detail
-                    ? `⚠️ Wrong USB Port! ${conn.detail}`
-                    : '⚠️ Wrong USB Port! Selected port did not respond to Apple //e probe.'
-                  : warnDisconnected
-                  ? '⚠️ Not connected! Keystrokes are not reaching the board.'
-                  : 'Hardware offline'}
-              </span>
-              {onConnect && (
-                <button
-                  type="button"
-                  className="kb-quick-connect"
-                  onClick={onConnect}
-                  disabled={!canSerial}
-                  title="Select Tang Nano 20K USB serial"
+        <div className="key-log-container">
+          <span className="key-log-title">KEY LOG</span>
+          <div className="key-log-stream">
+            {keyLog.length === 0 ? (
+              <span className="key-log-empty">Press keys to type</span>
+            ) : (
+              keyLog.map((k, i) => (
+                <span
+                  key={i}
+                  className={`key-tag ${i === keyLog.length - 1 ? 'latest' : ''}`}
+                  title={k.hex ? `ASCII ${k.hex}` : undefined}
                 >
-                  ⚡ {isWrongPort ? 'Pick Port' : 'Connect USB'}
-                </button>
-              )}
-            </div>
-          )}
-          {isConnected && (
-            <span className="kb-connected-tag">
-              <span className="online-dot" /> Online • {BAUD} 8N1
-            </span>
+                  <span className="key-label">{k.text}</span>
+                  {k.hex && <span className="key-hex">{k.hex}</span>}
+                </span>
+              ))
+            )}
+          </div>
+          {keyLog.length > 0 && (
+            <button
+              type="button"
+              className="key-log-clear"
+              onClick={() => setKeyLog([])}
+              title="Clear key log"
+            >
+              ×
+            </button>
           )}
         </div>
       </div>
@@ -390,29 +422,12 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn, canSer
         </div>
       </div>
 
-      <p className={'keyboard-note' + (!isConnected ? ' offline-note' : '')}>
-        {!isConnected ? (
-          <>
-            <strong className="status-highlight offline">⚠️ OFFLINE:</strong> Not connected to the Tang Nano 20K.
-            Keystrokes will not reach the Apple //e until you{' '}
-            {onConnect && canSerial ? (
-              <button type="button" className="link-inline-btn" onClick={onConnect}>
-                connect USB
-              </button>
-            ) : (
-              'connect USB'
-            )}.
-          </>
-        ) : mode === 'debugger' ? (
-          <>
-            <strong className="status-highlight paused">⏸️ DEBUGGER:</strong> CPU is paused. Letters are commands;{' '}
-            <kbd>Ctrl</kbd>+<kbd>B</kbd> or <kbd>c</kbd> resumes.
-          </>
-        ) : (
-          <>
-            <strong className="status-highlight online">🟢 READY:</strong> Connected to Apple //e. Click a cap, or just type. <kbd>Alt</kbd> is the apple key,{' '}
-            <kbd>Shift</kbd> and <kbd>Ctrl</kbd> are the //e's own, and holding a key repeats.
-          </>
+      <p className="keyboard-note">
+        <kbd>Alt</kbd> is Open/Solid-Apple, <kbd>Shift</kbd> and <kbd>Ctrl</kbd> are the //e's own, and holding repeats.
+        {mode === 'debugger' && (
+          <span className="note-dbg">
+            {' '}CPU paused in debugger (letters are commands; press <kbd>Ctrl</kbd>+<kbd>B</kbd> or <kbd>c</kbd> to resume).
+          </span>
         )}
       </p>
     </div>
