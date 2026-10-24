@@ -30,6 +30,7 @@ module video_generator (
     input  wire        store80,      // 1: 80STORE, PAGE2 no longer selects the display page
     input  wire        color_tv,     // 1: hi-res as a composite colour TV shows it (softer; key S3)
     input  wire [1:0]  scanlines,    // darken each Apple line's second copy: 0 off, 1 25%, 2 50%, 3 75% (key S4)
+    input  wire [1:0]  mon_mode,     // 00: Color, 01: Mono Green (P31), 10: Mono Amber (P134), 11: Mono White (P4)
 
     // Video RAM interface (reads from main 64KB RAM)
     output wire        vram_req,
@@ -298,21 +299,81 @@ module video_generator (
     endfunction
     wire [11:0] c_all = {c_3, c_2, c_1, c_0};
     wire        kill  = color_tv && text_mode;
-    wire [2:0]  luma  = kill ? {{1'b0, hist[3]} + {1'b0, hist[4]}, 1'b0}  // full detail: 0, 2, 4
+    wire [2:0]  luma  = kill ? {hist[3], 2'b00}  // full detail: 0, 4 (crisp 1-dot contrast)
                              : hist[2] + hist[3] + hist[4] + hist[5];    // 0..4
     wire signed [4:0] ci = kill ? 5'sd0
                          : $signed({2'b00, term(c_all, ph - 2'd1)}) - $signed({2'b00, term(c_all, ph - 2'd3)});
     wire signed [4:0] cq = kill ? 5'sd0
                          : $signed({2'b00, term(c_all, ph - 2'd2)}) - $signed({2'b00, term(c_all, ph)});
+
+    // Hardware DSP multiplier-based color matrix calculation:
     // 64 a unit of luma, chroma per 5: violet/green/blue/orange come out as
-    // lo-res colours 3, C, 6 and 9 (sim/tb_video_hdmi.v's pal() and
-    // web/src/ntsc.js hold the table)
-    wire signed [10:0] r_s = 64 * $signed({1'b0, luma}) + 16 * ci;
-    wire signed [10:0] g_s = 64 * $signed({1'b0, luma}) - 8 * ci - 4 * cq;
-    wire signed [10:0] b_s = 64 * $signed({1'b0, luma}) + 20 * cq;
-    function [7:0] sat8(input signed [10:0] v);
-        sat8 = v[10] ? 8'd0 : (v > 11'sd255) ? 8'd255 : v[7:0];
+    // lo-res colours 3, C, 6 and 9 (sim/tb_video_hdmi.v's pal() and web/src/ntsc.js hold the table)
+    wire signed [7:0]  k_y    = 8'sd64;
+    wire signed [7:0]  k_r_i  = 8'sd16;
+    wire signed [7:0]  k_g_i  = -8'sd8;
+    wire signed [7:0]  k_g_q  = -8'sd4;
+    wire signed [7:0]  k_b_q  = 8'sd20;
+
+    wire signed [5:0]  s_luma = $signed({1'b0, luma});
+    wire signed [11:0] prod_yr = s_luma * k_y;
+    wire signed [11:0] prod_ri = ci * k_r_i;
+    wire signed [11:0] prod_yg = s_luma * k_y;
+    wire signed [11:0] prod_gi = ci * k_g_i;
+    wire signed [11:0] prod_gq = cq * k_g_q;
+    wire signed [11:0] prod_yb = s_luma * k_y;
+    wire signed [11:0] prod_bq = cq * k_b_q;
+
+    wire signed [11:0] r_s = prod_yr + prod_ri;
+    wire signed [11:0] g_s = prod_yg + prod_gi + prod_gq;
+    wire signed [11:0] b_s = prod_yb + prod_bq;
+
+    function [7:0] sat8(input signed [11:0] v);
+        sat8 = v[11] ? 8'd0 : (v > 12'sd255) ? 8'd255 : v[7:0];
     endfunction
+
+    // ------------------------------------------------------------------
+    // Monitor Modes: Green (P31), Amber (P134), White (P4)
+    // ------------------------------------------------------------------
+    wire is_mono  = (mon_mode != 2'b00);
+    wire is_lores = !hires_mode && !is_text_line;
+
+    reg [7:0] mono_base_r, mono_base_g, mono_base_b;
+    reg [7:0] mono_ped_r,  mono_ped_g,  mono_ped_b;
+
+    always @(*) begin
+        case (mon_mode)
+            2'b01: begin // P31 Green Phosphor (Apple Monitor //, Monitor ///)
+                mono_base_r = 8'h20; mono_base_g = 8'hE8; mono_base_b = 8'h20;
+                mono_ped_r  = 8'h02; mono_ped_g  = 8'h06; mono_ped_b  = 8'h02;
+            end
+            2'b10: begin // P134 Amber Phosphor (Apple Monitor //c)
+                mono_base_r = 8'hFF; mono_base_g = 8'hA0; mono_base_b = 8'h00;
+                mono_ped_r  = 8'h08; mono_ped_g  = 8'h04; mono_ped_b  = 8'h00;
+            end
+            default: begin // White Phosphor (B&W / Paper White)
+                mono_base_r = 8'hF0; mono_base_g = 8'hF0; mono_base_b = 8'hF0;
+                mono_ped_r  = 8'h04; mono_ped_g  = 8'h04; mono_ped_b  = 8'h04;
+            end
+        endcase
+    end
+
+    // Lo-Res 5-level luminance scaling using hardware multipliers:
+    wire [15:0] scale_r = (mono_base_r - mono_ped_r) * {5'd0, luma};
+    wire [15:0] scale_g = (mono_base_g - mono_ped_g) * {5'd0, luma};
+    wire [15:0] scale_b = (mono_base_b - mono_ped_b) * {5'd0, luma};
+
+    wire [7:0] mono_lr_r = mono_ped_r + scale_r[9:2];
+    wire [7:0] mono_lr_g = mono_ped_g + scale_g[9:2];
+    wire [7:0] mono_lr_b = mono_ped_b + scale_b[9:2];
+
+    wire [7:0] mono_dot_r = hist[3] ? mono_base_r : mono_ped_r;
+    wire [7:0] mono_dot_g = hist[3] ? mono_base_g : mono_ped_g;
+    wire [7:0] mono_dot_b = hist[3] ? mono_base_b : mono_ped_b;
+
+    wire [7:0] mono_r = is_lores ? mono_lr_r : mono_dot_r;
+    wire [7:0] mono_g = is_lores ? mono_lr_g : mono_dot_g;
+    wire [7:0] mono_b = is_lores ? mono_lr_b : mono_dot_b;
 
     // Output: the picture is 4 pixels on from the fetch, so its window is too
     wire in_pic = (h_cnt >= A2_X0 + 10'd4) && (h_cnt < A2_X1 + 10'd4) && in_apple_y;
@@ -320,6 +381,8 @@ module video_generator (
     always @(*) begin
         if (!in_pic) begin
             pix_r = 8'h00; pix_g = 8'h00; pix_b = 8'h00;
+        end else if (is_mono) begin
+            pix_r = mono_r; pix_g = mono_g; pix_b = mono_b;
         end else if (is_text_line && !color_tv) begin
             // green phosphor, the same 4 samples late as the decoder
             pix_r = hist[3] ? 8'h20 : 8'h02;

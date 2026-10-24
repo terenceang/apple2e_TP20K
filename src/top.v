@@ -9,6 +9,7 @@ module top (
     input  wire       key_s2_n,   // Dock button S1 (T3, active low, 1.5 V bank): HDMI test pattern
     input  wire       sw_color_tv,// DIP1 (C7, 1.5 V bank): Colour TV mode (1 = ON, 0 = OFF)
     input  wire [1:0] sw_scanline,// DIP2 (E9), DIP3 (E8, 1.5 V bank): scanlines (00=off, 01=25%, 10=50%, 11=75%)
+    input  wire [1:0] sw_mon_mode,// DIP4 (T4), DIP5 (T5, 1.5 V bank): monitor mode (00=Color, 01=Green, 10=Amber, 11=White)
 
     // Dock LEDs 0-5 (C13 A13 N16 N14 L14 L16, active low)
     output wire [5:0] led,
@@ -544,16 +545,22 @@ module top (
     // Persistent configuration via DIP switches:
     //   DIP1 (C7): Color TV mode (1 = softer hi-res decode, 0 = sharp RGB)
     //   DIP2 (E9), DIP3 (E8): Scanlines (00 = off, 01 = 25%, 10 = 50%, 11 = 75%)
+    //   DIP4 (T4), DIP5 (T5): Monitor mode (00 = Color, 01 = Green, 10 = Amber, 11 = White)
     reg [1:0] color_tv_sync  = 2'b00;
     reg [1:0] scanline0_sync = 2'b00;
     reg [1:0] scanline1_sync = 2'b00;
+    reg [1:0] mon_mode0_sync = 2'b00;
+    reg [1:0] mon_mode1_sync = 2'b00;
     always @(posedge clk_pixel) begin
         color_tv_sync  <= {color_tv_sync[0],  sw_color_tv};
         scanline0_sync <= {scanline0_sync[0], sw_scanline[0]};
         scanline1_sync <= {scanline1_sync[0], sw_scanline[1]};
+        mon_mode0_sync <= {mon_mode0_sync[0], sw_mon_mode[0]};
+        mon_mode1_sync <= {mon_mode1_sync[0], sw_mon_mode[1]};
     end
     wire       color_tv  = color_tv_sync[1];
     wire [1:0] scanlines = {scanline1_sync[1], scanline0_sync[1]};
+    wire [1:0] mon_mode  = {mon_mode1_sync[1], mon_mode0_sync[1]};
 
     // Flashing text, as the //e makes it from its video counter: the state
     // changes every 16 frames, ~1.9 Hz a full cycle (one clock of the frame,
@@ -582,6 +589,7 @@ module top (
         .store80(store80),
         .color_tv(color_tv),
         .scanlines(scanlines),
+        .mon_mode(mon_mode),
         .aux_data(aux_line_data),
         .aux_col(aux_col),
         .aux_fill_addr(aux_fill_addr),

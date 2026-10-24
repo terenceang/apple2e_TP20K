@@ -74,14 +74,20 @@ this section).
 | **DIP 1** | **C7** | 4 | 1.5 V | **Colour TV mode** (`sw_color_tv`, 1 = ON, 0 = OFF) |
 | **DIP 2** | **E9** | 4 | 1.5 V | **Scanline mode [1]** (`sw_scanline[1]`) |
 | **DIP 3** | **E8** | 4 | 1.5 V | **Scanline mode [0]** (`sw_scanline[0]`) |
-| **DIP 4** | **T4** | 4 | 1.5 V | Spare DIP switch |
-| **DIP 5** | **T5** | 4 | 1.5 V | Spare DIP switch |
+| **DIP 4** | **T4** | 4 | 1.5 V | **Monitor mode [0]** (`sw_mon_mode[0]`) |
+| **DIP 5** | **T5** | 4 | 1.5 V | **Monitor mode [1]** (`sw_mon_mode[1]`) |
 
 Scanline modes on DIP 2 & 3:
 - `00`: Scanlines off
 - `01`: 25% scanlines
 - `10`: 50% scanlines
 - `11`: 75% scanlines
+
+Monitor modes on DIP 4 & 5:
+- `00`: Color (uses DIP 1: 0 = Sharp RGB, 1 = Soft Composite TV)
+- `01`: Monochrome Green (P31 phosphor, e.g. Apple Monitor // / ///)
+- `10`: Monochrome Amber (P134 phosphor, e.g. Apple Monitor //c)
+- `11`: Monochrome White (B&W / Paper White, e.g. Apple Composite Mono)
 
 > **Check your board's revision and wiring.** The Dock's revision number does not settle
 > which of `B10` / `C7` is the `RCFG` button and which is DIP 1: an early Rev 3713 schematic

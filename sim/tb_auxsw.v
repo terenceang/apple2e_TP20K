@@ -68,6 +68,12 @@ module tb_auxsw;
         wr(16'hC00B); status(16'hC017, "SLOTC3ROM on", 1);
         wr(16'hC00A); status(16'hC017, "SLOTC3ROM off", 0);
 
+        // Double Hi-Res and IOUDIS ($C07E / $C07F)
+        wr(16'hC07E); status(16'hC07E, "IOUDIS on", 1);
+        wr(16'hC07F); status(16'hC07E, "IOUDIS off", 0);
+        wr(16'hC05E); status(16'hC07F, "DHIRES on", 1);
+        wr(16'hC05F); status(16'hC07F, "DHIRES off", 0);
+
         // Internal ROM gating.  Reset state: INTCXROM off, as on a //e, so the
         // slot scan boots the card and not the self-test at $C600.
         status(16'hC015, "INTCXROM reset", 0);

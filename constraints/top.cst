@@ -22,12 +22,18 @@ IO_PORT "key_s2_n" IO_TYPE=LVCMOS15 PULL_MODE=UP;
 // DIP1: C7 (Color TV mode, 1 = ON, 0 = OFF)
 // DIP2: E9 (Scanlines bit 1)
 // DIP3: E8 (Scanlines bit 0)
+// DIP4: T4 (Monitor mode bit 0)
+// DIP5: T5 (Monitor mode bit 1)
 IO_LOC "sw_color_tv" C7;
 IO_PORT "sw_color_tv" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;
 IO_LOC "sw_scanline[0]" E8;
 IO_PORT "sw_scanline[0]" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;
 IO_LOC "sw_scanline[1]" E9;
 IO_PORT "sw_scanline[1]" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;
+IO_LOC "sw_mon_mode[0]" T4;
+IO_PORT "sw_mon_mode[0]" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;
+IO_LOC "sw_mon_mode[1]" T5;
+IO_PORT "sw_mon_mode[1]" IO_TYPE=LVCMOS15 PULL_MODE=DOWN;
 
 // LEDs, active low
 IO_LOC "led[0]" C13;

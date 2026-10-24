@@ -287,6 +287,7 @@ module apple2_core (
     reg ramrd;          // 1: reads of $0200-$BFFF come from aux RAM
     reg ramwrt;         // 1: writes to $0200-$BFFF go to aux RAM
     reg altzp;          // 1: zero page, stack and language card use aux RAM
+    reg ioudis;         // 1: IOU disabled (DHIRES enabled via $C05E/$C05F)
 
     // Softswitches decoding on posedge clk when ce_1m is active
     always @(posedge clk or posedge reset) begin
@@ -296,6 +297,7 @@ module apple2_core (
             page2        <= 1'b0; // Default: Page 1
             hires_mode   <= 1'b0; // Default: Lo-Res
             dhires       <= 1'b0;
+            ioudis       <= 1'b0;
             lc_bank2     <= 1'b0;
             lc_read_ram  <= 1'b0; // Default: Read ROM ($D000-$FFFF)
             lc_write_ram <= 1'b0;
@@ -373,6 +375,11 @@ module apple2_core (
                             lc_pre_write <= 1'b0;
                             if (!cpu_addr[0]) lc_write_ram <= 1'b0;
                         end
+                    end
+
+                    // IOUDIS softswitches ($C07E/$C07F)
+                    if (cpu_addr[7:4] == 4'h7 && cpu_addr[3:1] == 3'b111) begin
+                        ioudis <= ~cpu_addr[0]; // $C07E: SETIOUDIS (1), $C07F: CLRIOUDIS (0)
                     end
                 end
             end
@@ -605,6 +612,9 @@ module apple2_core (
                 cpu_din_comb = input_dout;
             end else if (effective_cpu_addr[7:4] == 4'h1 && effective_cpu_addr[3:0] != 4'h0) begin
                 cpu_din_comb = softswitch_read_data;
+            end else if (effective_cpu_addr[7:4] == 4'h7 && effective_cpu_addr[3:1] == 3'b111) begin
+                // $C07E (RDIOUDIS) and $C07F (RDDHIRES)
+                cpu_din_comb = {effective_cpu_addr[0] ? dhires : ioudis, input_dout[6:0]};
             end else if (d2_io_hit) begin
                 // The Disk ][ controller's registers: the data register at Q6L
                 // and Q6, and the floating bus at the rest of $C0E0-$C0EF.

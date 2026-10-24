@@ -37,8 +37,9 @@ The companion web application connects directly to the Tang Primer 20K over USB-
 
 ### Display & Video
 * **HDMI 720×480p60 Output** (CEA-861 VIC 2) with the active 560×384 Apple raster centered.
-* **NTSC Colour Render Engine**: An Apple //e has no colour memory. Every mode sends one stream of dots at 14.318 MHz, four to a cycle of the colour subcarrier, and the TV reads colour from where in that cycle the lit dots fall. The engine works the same way, with no palette tables:
+* **NTSC Colour Render Engine & Hardware DSP Multiplier**: An Apple //e has no colour memory. Every mode sends one stream of dots at 14.318 MHz, four to a cycle of the colour subcarrier, and the TV reads colour from where in that cycle the lit dots fall. The engine works the same way, with no palette tables:
   * **One dot stream for every mode.** Text, lo-res, double lo-res, hi-res (with the bit-7 half-dot delay) and double hi-res each only produce samples, one per pixel, into a single 8-sample history.
+  * **Hardware Multiplier Acceleration.** YIQ-to-RGB matrix conversion and monochrome Lo-Res multi-level luminance scaling are computed using on-chip hardware signed multipliers (`MULT18X18`), saving valuable slice logic on the ~96% utilized FPGA die.
   * **One decoder, modelled on a TV.** Brightness comes from a 4-dot window (the TV's filter that removes the colour carrier); colour from the subcarrier phase of the lit dots. So hi-res fringes, white where dots touch, solid fills from dot patterns and the blue/orange shift of bit 7 all come out of the signal, as on a real machine.
   * **One set of colours.** Lo-res, hi-res and double hi-res share the decode, so lo-res orange is hi-res orange, as on a //e. Double hi-res sits one dot later against the subcarrier (nibble *v* shows as lo-res colour ROL1(*v*), Apple's DHGR table, checked against AppleWin), and double lo-res aux blocks follow the same rule.
   * **Pinned to the //e's colours.** `tb_video_hdmi` checks every mode pixel for pixel against independent models, and holds all colours to a literal 16-colour table, so the RTL and its model cannot drift together.
@@ -47,6 +48,11 @@ The companion web application connects directly to the Tang Primer 20K over USB-
   * Lo-Res and Double Lo-Res (80-column lo-res) Graphics
   * Hi-Res and Double Hi-Res Graphics (560×192, 16 colors)
   * Mixed Graphics/Text and Page 1 / Page 2 flipping (80STORE respected)
+* **Monitor Display Modes (DIP 4 & 5)**:
+  * `00` (**Color Mode**): Full NTSC artifact color decoding. DIP 1 selects between Sharp RGB Monitor (ideal 4-tap box filter, green text) and Composite Color TV (8-tap weighted analog filter with authentic color bleeding and fringes). Alternating 14 MHz dots in 80-column text retain full 100% modulation contrast in both settings.
+  * `01` (**Monochrome Green**): P31 green phosphor (`#20E820`), emulating Apple Monitor // and Monitor ///. Bypasses NTSC chroma demodulation so 560×192 Double Hi-Res graphics (GEOS, desktop publishing) render as crisp 1-bit monochrome pixels without color fringes.
+  * `10` (**Monochrome Amber**): P134 amber phosphor (`#FFA000`), emulating the Apple Monitor //c CRT.
+  * `11` (**Monochrome White**): Paper-white phosphor (`#F0F0F0`) for high-contrast composite monochrome display.
 * **Color TV Mode (DIP 1)**: The same decoder with a TV's narrow colour filter: colour is read over 8 dots (weighted 1-2-3-4-4-3-2-1) instead of 4, so colour bleeds across edges and fringes blend while brightness detail stays sharp. Solid colours are identical with it on or off, and the picture does not move. It also adds the set's colour killer: in TEXT mode a //e sends no colour burst, so text is white with no colour, while mixed-mode text lines fringe as they did on a real TV. Off: an ideal monitor with sharp colour and green text.
 * **CRT Scanlines (DIP 2 & 3)**: Selectable line darkening (Off, 25%, 50%, 75%) of the second copy of each doubled Apple line, in every mode.
 * **Full-Range RGB**: Declares full-range color (0–255) in the AVI InfoFrame so modern TVs and monitors do not crush deep blacks.
@@ -90,6 +96,7 @@ The companion web application connects directly to the Tang Primer 20K over USB-
 | **Button S1 (Key 2)** | HDMI Test Pattern | Overrides display with SMPTE color bars and 1 kHz tone (bypasses core for display diagnostics). |
 | **DIP Switch 1** | Color TV Mode | **ON**: Composite colour TV: colour bleeds and fringes blend (detail stays sharp), white text with no colour in TEXT mode. **OFF**: Ideal monitor: sharp colour, green text. Solid colours are the same either way. |
 | **DIP Switch 2 & 3** | Scanline Intensity | Sets scanline darkening: `00` = Off, `01` = 25%, `10` = 50%, `11` = 75%. |
+| **DIP Switch 4 & 5** | Monitor Display Mode | Selects phosphor/color mode: `00` = Color (DIP 1), `01` = Monochrome Green (P31), `10` = Monochrome Amber (P134), `11` = Monochrome White (B&W). In monochrome modes, chroma demodulation is bypassed for razor-sharp 560×192 DHGR graphics without rainbow fringes. |
 
 ### Status LEDs
 

@@ -38,6 +38,7 @@ module tb_video_hdmi;
     reg tv = 1'b0;                          // colour TV mode
     reg [1:0] scanl = 2'd0;                 // scanlines: 0 off .. 3 75%
     reg col80 = 1'b0, store80 = 1'b0, dhires = 1'b0, altchar = 1'b0;
+    reg [1:0] mon_mode = 2'b00;
     reg dh_phase   = 1'b0;                  // expect double hi-res page 1
     reg lr_phase   = 1'b0;                  // expect lo-res page 1
     reg dl_phase   = 1'b0;                  // expect double lo-res page 1
@@ -62,7 +63,7 @@ module tb_video_hdmi;
         .clk_pixel(clk), .reset(!rst_n), .flash_clk(1'b0),
         .h_cnt(pixel_x + 10'd1), .v_cnt(pixel_y),
         .text_mode(text_mode), .mixed_mode(mixed_mode), .page2(page2), .hires_mode(hires_mode),
-        .col80(col80), .altchar(altchar), .dhires(dhires), .store80(store80), .color_tv(tv), .scanlines(scanl), .aux_data(aux_data),
+        .col80(col80), .altchar(altchar), .dhires(dhires), .store80(store80), .color_tv(tv), .scanlines(scanl), .mon_mode(mon_mode), .aux_data(aux_data),
         .vram_req(vram_req), .vram_addr(vram_addr), .vram_data(vram_data),
         .char_rom_addr(char_rom_addr), .char_rom_data(char_rom_data),
         .red(vid_r), .green(vid_g), .blue(vid_b), .vbl(vbl)
