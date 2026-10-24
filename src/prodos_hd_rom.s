@@ -13,7 +13,7 @@
 ;    $C7FB=$00                       SmartPort ID type: not RAM, not SCSI
 ;    $C7FC-$C7FD=$0000               block count: ask STATUS
 ;    $C7FE=$9F                       removable, 2 volumes, format/write/read/status
-;    $C7FF=$29                       ProDOS entry $C729; SmartPort entry $C72C
+;    $C7FF=$0A                       ProDOS entry $C70A; SmartPort entry $C70D
 ;  ProDOS 8 only counts SmartPort units on a card in slot 5 (Technical Note
 ;  #20), so in slot 7 it uses the block entry and $C7FE's two volumes, as
 ;  before.  The SmartPort is for software that asks for it (MECC's Computer
@@ -46,13 +46,20 @@ BLK     = $46
 BLKH    = $47
 
         .org $C700
-; ---- boot: read block 0 of drive 1 to $0800 and run it ----
-; The first four instructions are the signature bytes $20 $00 $03 $00.
-BOOT:   LDX #$20
+; ---- signature bytes and standard entry vectors ----
+; $C701=$20 $C703=$00 $C705=$03 a disk device (Autostart, ProDOS)
+; $C707=$00 ...with a SmartPort
+        LDX #$20
         LDY #$00
         LDX #$03
         LDX #$00
-        LDA #$01
+        BEQ BOOT
+PRODOS: JMP BLKDRV              ; $C70A canonical ProDOS entry ($C7FF points here)
+SPORT:  BIT $CFFF               ; $C70D canonical SmartPort entry (ProDOS entry + 3)
+        JMP SPDISP
+
+; ---- boot: read block 0 of drive 1 to $0800 and run it ----
+BOOT:   LDA #$01
         STA CMD
         LDA #$70
         STA UNIT
@@ -67,13 +74,6 @@ BOOT:   LDX #$20
         LDX #$70
         JMP $0801
 NOBOOT: JMP $FABA               ; no volume: the Autostart scan's next slot
-
-        .org $C729
-PRODOS: JMP BLKDRV              ; $C7FF points here
-SPORT:  BIT $CFFF               ; SmartPort entry, ProDOS entry + 3
-        JMP SPDISP
-
-; ---- ProDOS block driver: $42 command, $43 unit, $44 buffer, $46 block ----
 BLKDRV: LDA UNIT
         ASL
         LDA #$00

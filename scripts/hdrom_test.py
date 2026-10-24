@@ -146,14 +146,14 @@ def sp_call(bus, cmd, plist, **kw):
     """JSR $C72C / .byte cmd / .word $0280, with the parameter list at $0280."""
     for i, b in enumerate(plist):
         bus.ram[0x280 + i] = b
-    mpu = run(bus, [0x20, 0x2C, 0xC7, cmd, 0x80, 0x02], **kw)
+    mpu = run(bus, [0x20, 0x0D, 0xC7, cmd, 0x80, 0x02], **kw)
     carry = bool(mpu.p & mpu.CARRY)
     return mpu.a, carry, mpu.x, mpu.y
 
 
 def blk_call(bus, cmd, unit, buf, block):
     bus.ram[0x42:0x48] = bytes([cmd, unit, buf & 0xFF, buf >> 8, block & 0xFF, block >> 8])
-    mpu = run(bus, [0x20, 0x29, 0xC7])
+    mpu = run(bus, [0x20, 0x0A, 0xC7])
     return mpu.a, bool(mpu.p & mpu.CARRY), mpu.x, mpu.y
 
 
@@ -176,7 +176,7 @@ def main():
 
     # ---- the signature and the ID bytes ----
     sig = {0xC701: 0x20, 0xC703: 0x00, 0xC705: 0x03, 0xC707: 0x00, 0xC7FB: 0x00,
-           0xC7FC: 0x00, 0xC7FD: 0x00, 0xC7FE: 0x9F, 0xC7FF: 0x29}
+           0xC7FC: 0x00, 0xC7FD: 0x00, 0xC7FE: 0x9F, 0xC7FF: 0x0A}
     for a, v in sig.items():
         check(ROM.get(a, 0) == v, f'${a:04X} = ${ROM.get(a, 0):02X}, want ${v:02X}')
 
