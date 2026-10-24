@@ -319,14 +319,9 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
             {screen.mixed ? ' + MIXED' : ''} &middot; {screen.page2 ? 'PAGE 2' : 'PAGE 1'} &middot;{' '}
             {screen.hires ? 'HIRES' : 'LORES'} &middot; PLL {screen.pll ? 'locked' : 'unlocked'}
           </p>
-          {!screen.text && !screen.mixed && (
-            <p className="dim" style={{ margin: '6px 0', fontSize: '12px' }}>
-              ℹ Apple //e is currently in full-screen Graphics mode. This captures the 40&times;24 text buffer ($0400). Return to text mode (press Esc then 4, or Reset to BASIC) to view text.
-            </p>
-          )}
-          {!canDrawPixels && (
+          {!canDrawPixels && (screen.text || screen.mixed) && (
             <pre className="screen-fallback">
-              {text.join('\n').trim() ? text.join('\n') : (screen.text ? '(empty text screen)' : '(graphics display active - text page empty)')}
+              {text.join('\n').trim() || '(empty text screen)'}
             </pre>
           )}
         </>

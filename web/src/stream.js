@@ -160,12 +160,32 @@ export class AppleStream {
     // --- a screen dump in progress, or starting --------------------------
     if (this.frame) {
       if (s.startsWith('$GF')) {
+        this.frame.inGfx = true
+        this.frame.inHgr = false
         this.frame.gfx += s.slice(3)
         this.frameGfx()
         return
       }
+      if (s.startsWith('$HR')) {
+        this.frame.inHgr = true
+        this.frame.inGfx = false
+        this.frame.hgr += s.slice(3)
+        return
+      }
       if (s === '$SEND') {
+        if (this.frame.inHgr) {
+          this.frameHgr()
+        }
         this.finishFrame()
+        return
+      }
+      if (this.frame.inHgr) {
+        this.frame.hgr += s
+        return
+      }
+      if (this.frame.inGfx) {
+        this.frame.gfx += s
+        this.frameGfx()
         return
       }
       // text rows, or the space the firmware emits before the first one
@@ -181,6 +201,9 @@ export class AppleStream {
         // the firmware carries on with the first 40 bytes on this same line
         text: s.slice(6).replace(/\s+/g, ''),
         gfx: '',
+        hgr: '',
+        inGfx: false,
+        inHgr: false,
         rows: 0,
       }
       if (this.frame.text.length >= HEX_RUN) this.frameText()
@@ -265,7 +288,7 @@ export class AppleStream {
 
   frameHgr() {
     if (!this.frame) return
-    const hex = this.frame.hgr.slice(0, HGR_RUN)
+    const hex = (this.frame.hgr || '').replace(/[^0-9A-Fa-f]/g, '')
     const hgr = new Uint8Array(SCR_HGR_BYTES)
     const count = Math.min(Math.floor(hex.length / 2), SCR_HGR_BYTES)
     for (let i = 0; i < count; i++) {
@@ -277,7 +300,28 @@ export class AppleStream {
   finishFrame() {
     const f = this.frame
     this.frame = null
-    if (!f || !f.page) return
+    if (!f) return
+    if (!f.page && f.text) {
+      const hex = f.text.replace(/[^0-9A-Fa-f]/g, '')
+      const page = new Uint8Array(SCR_TEXT_BYTES)
+      const count = Math.min(Math.floor(hex.length / 2), SCR_TEXT_BYTES)
+      for (let i = 0; i < count; i++) page[i] = parseInt(hex.substr(i * 2, 2), 16) || 0
+      f.page = page
+    }
+    if (f.gfx && !f.gfxPage) {
+      const hex = f.gfx.replace(/[^0-9A-Fa-f]/g, '')
+      const gfx = new Uint8Array(SCR_GFX_BYTES)
+      const count = Math.min(Math.floor(hex.length / 2), SCR_GFX_BYTES)
+      for (let i = 0; i < count; i++) gfx[i] = parseInt(hex.substr(i * 2, 2), 16) || 0
+      f.gfxPage = gfx
+    }
+    if (f.hgr && !f.hgrPage) {
+      const hex = f.hgr.replace(/[^0-9A-Fa-f]/g, '')
+      const hgr = new Uint8Array(SCR_HGR_BYTES)
+      const count = Math.min(Math.floor(hex.length / 2), SCR_HGR_BYTES)
+      for (let i = 0; i < count; i++) hgr[i] = parseInt(hex.substr(i * 2, 2), 16) || 0
+      f.hgrPage = hgr
+    }
     const flags = f.flags
     this.emit({
       t: 'screen',
@@ -287,7 +331,7 @@ export class AppleStream {
       mixed: Boolean(flags & SCR_FLAG.MIXED),
       hires: Boolean(flags & SCR_FLAG.HIRES),
       pll: Boolean(flags & SCR_FLAG.PLL),
-      page: f.page,
+      page: f.page ?? new Uint8Array(SCR_TEXT_BYTES),
       gfx: f.gfxPage ?? new Uint8Array(0),
       hgr: f.hgrPage ?? new Uint8Array(0),
     })

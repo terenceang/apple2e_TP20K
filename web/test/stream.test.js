@@ -15,6 +15,7 @@ import {
   SCR_GFX_BYTES,
   SCR_GFX_ROWS,
   SCR_GFX_ROW_BYTES,
+  SCR_HGR_BYTES,
   textPageIndex,
 } from '../src/protocol.js'
 
@@ -200,6 +201,33 @@ test('the dump does not leak into the console as text', () => {
   const { s } = screenFrame(0b00111, 0xa0)
   const { text } = collect([s])
   assert.equal(text, '', 'hex rows should not be shown as console output')
+})
+
+test('a hi-res screen dump parses all 8192 graphics bytes', () => {
+  const page = new Uint8Array(SCR_TEXT_BYTES).fill(0x20)
+  const hgr = new Uint8Array(SCR_HGR_BYTES)
+  for (let i = 0; i < SCR_HGR_BYTES; i++) hgr[i] = (i * 7) & 0xff
+  const hexOf = (bytes, at, n) =>
+    [...bytes.slice(at, at + n)].map((v) => v.toString(16).toUpperCase().padStart(2, '0')).join('')
+
+  // Flags: TEXT=0, PAGE2=0, MIXED=0, HIRES=1, PLL=1 -> flags = 0b11000 = 0x18
+  let s = '\r\n$SS 18 '
+  for (let at = 0; at < SCR_TEXT_BYTES; at += 40) s += hexOf(page, at, 40) + '\r\n'
+  s += '\r\n$HR'
+  for (let at = 0; at < SCR_HGR_BYTES; at += 40) s += hexOf(hgr, at, 40) + '\r\n'
+  s += '\r\n$SEND\r\n'
+
+  for (const size of [1, 137, 1024, 8192]) {
+    const chunks = []
+    for (let i = 0; i < s.length; i += size) chunks.push(s.slice(i, i + size))
+    const { events } = collect(chunks)
+    const sc = events.find((e) => e.t === 'screen')
+    assert.ok(sc, `no screen event at chunk size ${size}`)
+    assert.equal(sc.hires, true)
+    assert.equal(sc.text, false)
+    assert.equal(sc.hgr.length, SCR_HGR_BYTES)
+    assert.deepEqual([...sc.hgr], [...hgr], `hgr mismatch at chunk size ${size}`)
+  }
 })
 
 test('cells undo the row interleaving and keep the whole byte', () => {
