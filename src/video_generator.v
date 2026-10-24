@@ -65,7 +65,7 @@ module video_generator (
     localparam [9:0] A2_Y0 = 10'd48, A2_Y1 = 10'd432; // first v_cnt in / past the Apple area
     localparam [9:0] A2_PRE0 = A2_X0 - 10'd14;        // the pre-roll slot before column 0
 
-    assign vbl = (v_cnt >= A2_Y1);
+    assign vbl = (v_cnt < A2_Y0) || (v_cnt >= A2_Y1);
 
     wire in_apple_x = (h_cnt >= A2_X0) && (h_cnt < A2_X1);
     wire in_apple_y = (v_cnt >= A2_Y0) && (v_cnt < A2_Y1);
