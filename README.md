@@ -94,16 +94,18 @@ The design runs as a self-contained system with digital video and audio over HDM
 
 ---
 
-## System Quirks & Operational Behaviors
+## Authentic Hardware Behaviors & Operational Notes
+
+These are not FPGA anomalies—they are the **exact, authentic behaviors of original Apple //e hardware and firmware**:
 
 1. **Hardware Reset Gating (Requires `Ctrl`)**:
-   On authentic Apple //e hardware, the keyboard RESET line is electrically gated by the CONTROL key. Pressing `Reset` alone has no effect; `Ctrl` must be depressed simultaneously.
-2. **Boot Order (Slot 7 over Slot 6)**:
-   The Apple //e Autostart ROM scans expansion slots in descending order (Slot 7 down to 1). If a valid hard disk volume is mounted on Slot 7 Drive 1, the system will boot from the hard disk rather than the floppy drive. To boot a floppy disk in Slot 6 when a hard disk is attached, type `PR#6` at the `]` prompt. If no disks are attached, the machine drops to Applesoft BASIC.
-3. **Triggering the ROM Self-Test vs. Disk Boot**:
-   When entering the built-in diagnostic test (`Ctrl + Open-Apple + Closed-Apple + Reset`), the CPU samples the Apple modifier keys *immediately after reset release*. Release `Reset` first while keeping `Open-Apple` and `Closed-Apple` depressed. If both Apple keys are held, the ROM enters diagnostics; if both keys are released concurrently with Reset, the machine will boot disk volumes as normal.
-4. **Automated Burn-In / Soak Test**:
-   The built-in self-test includes a continuous burn-in mode. As long as both `Open-Apple` and `Closed-Apple` remain held, the diagnostic routines loop indefinitely (completing one rigorous RAM/ROM/MMU pass every ~10.5 seconds). Releasing the keys allows the final pass to conclude with `System OK`.
+   On the Apple II and II+, users frequently complained about accidentally hitting the top-right `RESET` key while typing. On the Apple //e, Apple redesigned the keyboard encoder circuit so the physical `RESET` line is electrically gated through the `CONTROL` key. `Reset` alone does nothing by design.
+2. **Expansion Slot Boot Priority (Slot 7 over Slot 6)**:
+   The official Apple Autostart ROM scans expansion slots in descending order from Slot 7 down to Slot 1. Because hard disk controllers are traditionally placed in Slot 7 and Disk II floppy controllers in Slot 6, the system always boots the hard drive first if an image is attached. To boot floppy disks instead, type `PR#6` from the Applesoft BASIC prompt (`]`), or configure Slot 7 Drive 1 as empty.
+3. **Diagnostic Self-Test Sample Timing**:
+   The Apple //e Enhanced ROM samples the paddle buttons ($C061 and $C062) at reset release. To enter the self-test, release `Reset` while keeping `Open-Apple` and `Closed-Apple` depressed for a moment so the reset vector reads them before the slot scan begins.
+4. **Firmware Burn-In / Soak Test**:
+   The self-test routine inside Apple's Enhanced CD/EF ROM explicitly checks at address `$C794` whether both Apple buttons are still held down. If so, it branches directly back to `$C600` to repeat the test indefinitely. This was Apple's intentional factory and service bench soak test. Releasing the keys lets the pass conclude with `System OK`.
 5. **TF Card Requirements**:
    * Must be formatted as **FAT32** (32 GB or smaller recommended).
    * Disk images must be stored contiguously in the root directory.
