@@ -3,7 +3,7 @@
 A complete, cycle-accurate implementation of the **Apple //e Enhanced** computer in Verilog for the [Sipeed Tang Primer 20K](https://wiki.sipeed.com/hardware/en/tang/tang-primer-20k/primer-20k.html) (Gowin GW2A-LV18PG256C8/I7) on its Dock board.
 
 > 🌐 **Live Web Console & Companion App:** [https://terenceang.github.io/apple2e_TP20K/](https://terenceang.github.io/apple2e_TP20K/)  
-> Connect directly to your Tang Primer 20K over USB-C Web Serial (Chrome or Edge) for keyboard input, screen display, floppy/hard disk image mounting, and hardware debugging with zero software installs.
+> Connect directly to your Tang Primer 20K over USB-C Web Serial (Chrome or Edge) for keyboard input, screen display, floppy/hard disk image mounting, and hardware debugging with zero software installs. You can use the live GitHub Pages app, run your own local server (`http://localhost:5273`), or host it anywhere on any static web host.
 
 The design runs as a self-contained system with digital video and audio over HDMI, stereo analog headphone audio, dual Disk II floppy drives, a ProDOS SmartPort hard disk, CP/M support, modem communications, and a browser-based Web Serial companion interface.
 
@@ -23,6 +23,12 @@ The companion web application connects directly to the Tang Primer 20K over USB-
 ---
 
 ## Features
+
+> [!NOTE]
+> **Hardware Testing Status:** The core system, video (Text/Lo-Res/Hi-Res/DHGR), audio (Speaker/Mockingboard), Dual Disk II, ProDOS SmartPort HD, Real-Time Clock, and Web Serial debugger are verified and fully functional. The following three features are implemented in RTL but are currently **untested on hardware**:
+> 1. **Direct USB Host Keyboard** (ULPI USB-C `J8`)
+> 2. **Super Serial Card (SSC)** (Slot 1)
+> 3. **Microsoft Z-80 SoftCard** (Slot 2 / CP/M)
 
 ### System Core & Memory
 * **65C02 CPU** clocked at an exact, cycle-accurate **1.0227 MHz** (5/132 of the 27 MHz master crystal).
@@ -57,13 +63,13 @@ The companion web application connects directly to the Tang Primer 20K over USB-
   * Answers as both a ProDOS block driver and an Apple SmartPort device.
 * **Slot 5 — Real-Time Clock**:
   * Thunderclock-compatible hardware clock; files saved under ProDOS receive live timestamps.
-* **Slot 2 — Microsoft Z-80 SoftCard**:
+* **Slot 2 — Microsoft Z-80 SoftCard** *(Implemented, Untested)*:
   * Hardware Z80 CPU running at 2.045 MHz for running CP/M 2.2 and CP/M applications.
-* **Slot 1 — Super Serial Card (SSC)**:
+* **Slot 1 — Super Serial Card (SSC)** *(Implemented, Untested)*:
   * Full 6551 ACIA-compatible serial interface connected to the host USB link; supports virtual Hayes modem emulation via the web interface.
 
 ### Keyboard & Input
-* **Direct USB Keyboard (Dock USB-C J8)**: Plug any standard USB keyboard directly into the second USB-C port (`J8`). The built-in hardware ULPI USB host controller interfaces with the onboard Microchip USB3317 PHY, auto-enumerates HID boot keyboards, translates scancodes directly to Apple //e ASCII characters, maps modifier keys (Left Alt / Windows key = Open-Apple, Right Alt = Closed-Apple), and routes `Ctrl` + `Alt` + `Del` directly to the Apple //e Reset line.
+* **Direct USB Keyboard (Dock USB-C J8)** *(Implemented, Untested)*: Plug any standard USB keyboard directly into the second USB-C port (`J8`). The built-in hardware ULPI USB host controller interfaces with the onboard Microchip USB3317 PHY, auto-enumerates HID boot keyboards, translates scancodes directly to Apple //e ASCII characters, maps modifier keys (Left Alt / Windows key = Open-Apple, Right Alt = Closed-Apple), and routes `Ctrl` + `Alt` + `Del` directly to the Apple //e Reset line.
 * **Web Serial Console & Virtual Input**: Connect directly via Chrome or Edge at 1,000,000 baud 8N1 — provides virtual keyboard, paddle button controls, and analog joystick emulation with no background daemons, drivers, or software installs required.
 * **Disk Manager**: Live mounting, blank disk creation, and on-the-fly conversion of `.dsk`, `.do`, `.po`, and `.nib` images to `.woz`.
 * **Hardware Debugger & Screen Capture**: Built-in serial debugger allows freezing the CPU at any instant to inspect registers, single-step instructions, examine RAM, and capture the live framebuffer (Text, Lo-Res, Mixed, 280×192 Hi-Res, and 560×192 Double Hi-Res graphics in authentic NTSC composite color) directly into the browser companion.
@@ -172,14 +178,30 @@ make flash
 ```
 
 ### 3. Web Companion Interface
-* **Published Live Web App:** Visit [https://terenceang.github.io/apple2e_TP20K/](https://terenceang.github.io/apple2e_TP20K/) in Chrome or Edge, click **Connect USB**, and select the Dock's serial port.
-* **Running Locally (Optional):**
+
+The web companion is a 100% client-side web application that directly connects to the Tang Primer 20K over the browser's Web Serial API. You have three flexible ways to run or host it:
+
+* **Option A: GitHub Pages (Instant, Zero Setup)**
+  * **Live Hosted Version:** Open [https://terenceang.github.io/apple2e_TP20K/](https://terenceang.github.io/apple2e_TP20K/) in Chrome or Edge, click **Connect USB**, and pick the Dock's USB serial port.
+  * **Your Own Fork:** To publish on your own GitHub Pages, run `cd web && npm run pages`, commit the `docs/` folder, and enable Pages in GitHub (**Settings → Pages → Deploy from branch** `main` → `/docs`).
+
+* **Option B: Run Locally on Localhost**
+  You can run your own local development or preview server on the machine your Tang Primer 20K is plugged into:
   ```bash
   cd web
   npm install
+
+  # Launch local development server (runs at http://localhost:5273/):
+  npm run dev
+
+  # Or build and serve the production bundle:
   npm run build
-  python3 -m http.server -d dist 8000
+  npm run preview         # or: python3 -m http.server -d dist 8000
   ```
+
+* **Option C: Self-Host Anywhere (Static Web Hosting)**
+  * Because the companion compiles into pure static HTML/CSS/JavaScript without any backend server or daemon requirements, you can host the output of `web/dist/` on **any web server or static hosting platform** (e.g. Cloudflare Pages, Netlify, Vercel, AWS S3, Apache, or Nginx).
+  * **Security Requirement:** Modern web browsers require a **Secure Context** to grant Web Serial access. Ensure your self-hosted domain is served over `https://` (or `http://localhost` for local testing).
 
 #### Web Companion Gallery
 | Virtual Keyboard & Gamepad | Storage & Disk Manager | Hardware Debugger & Live Screen Capture |

@@ -14,23 +14,24 @@ thing.** There is no daemon, no Node process and nothing to install: the app is
 a static bundle and the browser opens the serial port itself. Web Serial is the
 only transport; there is no fallback for other machines or other browsers.
 
-## Running it
+## Running & Hosting it
+
+You can run the web companion locally, use GitHub Pages, or host it on any static web server:
 
 ```sh
 cd web
 npm install
-npm run charset          # optional; needs the ROM, see below
+
+# Option 1: Live local development server (runs at http://localhost:5273/):
+npm run dev
+
+# Option 2: Build production bundle:
 npm run build
+npm run preview       # or: python3 -m http.server -d dist 8000 (open http://localhost:8000)
 ```
 
 Serve the result over `https://` or `http://localhost` — Web Serial needs a
-*secure context*, so a plain `http://192.168.x.x` will not do. GitHub Pages is
-`https`, so it is fine. For a quick look on the machine the board is plugged
-into:
-
-```sh
-python3 -m http.server -d web/dist 8000   # then open http://localhost:8000
-```
+*secure context*, so a plain unencrypted `http://192.168.x.x` will not work. GitHub Pages, Netlify, Cloudflare Pages, Vercel, or any standard SSL host is fine.
 
 Press **Connect USB** and pick the Dock's serial port. Then type.
 
@@ -308,6 +309,8 @@ bug and the dropped 8N1 were found.
   cannot start a subprocess. Use `make flash-sram` / `make flash` from a terminal.
 
 ## The modem (slot 1 Super Serial Card)
+
+> **Note:** The Slot 1 Super Serial Card (SSC) hardware integration and modem pipeline are currently **untested on hardware**.
 
 Slot 1 is a Super Serial Card whose serial line is this USB link, and the page
 is the modem on it (`src/modem.js`, the **Modem** pane).  The Apple's comm

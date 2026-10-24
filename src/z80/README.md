@@ -1,5 +1,7 @@
 # src/z80/
 
+> **Note:** The Slot 2 Microsoft Z-80 SoftCard implementation (`src/softcard.v`) is currently **untested on hardware**.
+
 A vendored Z80 core for the Z-80 SoftCard (`src/softcard.v`), not written for
 this project.
 
