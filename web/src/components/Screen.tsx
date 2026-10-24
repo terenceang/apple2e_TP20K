@@ -319,9 +319,17 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
       {screen ? (
         <>
           <p className="screen-status">
-            {screen.text ? 'TEXT' : 'GRAPHICS'}
+            {screen.text
+              ? screen.col80
+                ? '80-COL TEXT'
+                : 'TEXT'
+              : screen.dhires
+                ? 'DOUBLE HIRES'
+                : screen.hires
+                  ? 'HIRES'
+                  : 'LORES'}
             {screen.mixed ? ' + MIXED' : ''} &middot; {screen.page2 ? 'PAGE 2' : 'PAGE 1'} &middot;{' '}
-            {screen.hires ? 'HIRES' : 'LORES'} &middot; PLL {screen.pll ? 'locked' : 'unlocked'}
+            PLL {screen.pll ? 'locked' : 'unlocked'}
           </p>
           {!canDrawPixels && (screen.text || screen.mixed) && (
             <pre className="screen-fallback">
@@ -339,7 +347,7 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
   )
 }
 
-/** Hi-Res graphics renderer: full NTSC composite artifact color or monochrome phosphor. */
+/** Hi-Res & Double Hi-Res graphics renderer: full NTSC composite artifact color or monochrome phosphor. */
 function drawHires(
   ctx: CanvasRenderingContext2D,
   screen: ScreenFrame,
@@ -347,6 +355,7 @@ function drawHires(
   palette: { on: number[]; off: number[] }
 ) {
   if (!screen.hgr || screen.hgr.length < 8192) return
+  const isDh = Boolean(screen.dhires && screen.aux && screen.aux.length >= 8192)
   const numScanlines = screen.mixed ? 160 : 192
   const targetW = SCR_COLS * GLYPH_W * SCALE // 560
   const targetH = numScanlines * SCALE        // 384 or 320
@@ -358,17 +367,33 @@ function drawHires(
     const samples = new Uint8Array(targetW)
     for (let y = 0; y < numScanlines; y++) {
       const offset = hgrScanlineOffset(y)
-      let prevLast = 0
-      for (let col = 0; col < 40; col++) {
-        const byte = screen.hgr[offset + col] ?? 0
-        const delay = (byte >> 7) & 1
-        for (let dot = 0; dot < 7; dot++) {
-          const cur = (byte >> dot) & 1
-          const left = dot === 0 ? prevLast : (byte >> (dot - 1)) & 1
-          samples[col * 14 + dot * 2] = delay ? left : cur
-          samples[col * 14 + dot * 2 + 1] = cur
+
+      if (isDh) {
+        // Double Hi-Res (560x192): 7 dots from Aux RAM, 7 dots from Main RAM per column
+        for (let col = 0; col < 40; col++) {
+          const auxByte = screen.aux[offset + col] ?? 0
+          const mainByte = screen.hgr[offset + col] ?? 0
+          for (let dot = 0; dot < 7; dot++) {
+            samples[col * 14 + dot] = (auxByte >> dot) & 1
+          }
+          for (let dot = 0; dot < 7; dot++) {
+            samples[col * 14 + 7 + dot] = (mainByte >> dot) & 1
+          }
         }
-        prevLast = (byte >> 6) & 1
+      } else {
+        // Standard Hi-Res (280x192): 7 dots from Main RAM, 2 samples per dot with delay shift
+        let prevLast = 0
+        for (let col = 0; col < 40; col++) {
+          const byte = screen.hgr[offset + col] ?? 0
+          const delay = (byte >> 7) & 1
+          for (let dot = 0; dot < 7; dot++) {
+            const cur = (byte >> dot) & 1
+            const left = dot === 0 ? prevLast : (byte >> (dot - 1)) & 1
+            samples[col * 14 + dot * 2] = delay ? left : cur
+            samples[col * 14 + dot * 2 + 1] = cur
+          }
+          prevLast = (byte >> 6) & 1
+        }
       }
 
       for (let x = 0; x < targetW; x++) {
@@ -415,26 +440,57 @@ function drawHires(
     const [offR, offG, offB] = palette.off
     for (let y = 0; y < numScanlines; y++) {
       const offset = hgrScanlineOffset(y)
-      for (let col = 0; col < 40; col++) {
-        const byte = screen.hgr[offset + col] ?? 0
-        const baseX = col * 7 * SCALE
-        for (let dot = 0; dot < 7; dot++) {
-          const lit = (byte >> dot) & 1
-          const r = lit ? onR : offR
-          const g = lit ? onG : offG
-          const b = lit ? onB : offB
-          for (let dx = 0; dx < SCALE; dx++) {
-            const px = baseX + dot * SCALE + dx
+
+      if (isDh) {
+        for (let col = 0; col < 40; col++) {
+          const auxByte = screen.aux[offset + col] ?? 0
+          const mainByte = screen.hgr[offset + col] ?? 0
+          const baseX = col * 14
+          for (let dot = 0; dot < 7; dot++) {
+            const lit = (auxByte >> dot) & 1
+            const r = lit ? onR : offR
+            const g = lit ? onG : offG
+            const b = lit ? onB : offB
+            const px = baseX + dot
             const idx0 = (y * 2 * targetW + px) * 4
             const idx1 = ((y * 2 + 1) * targetW + px) * 4
-            data[idx0]     = r
-            data[idx0 + 1] = g
-            data[idx0 + 2] = b
-            data[idx0 + 3] = 255
-            data[idx1]     = r
-            data[idx1 + 1] = g
-            data[idx1 + 2] = b
-            data[idx1 + 3] = 255
+            data[idx0] = r; data[idx0 + 1] = g; data[idx0 + 2] = b; data[idx0 + 3] = 255
+            data[idx1] = r; data[idx1 + 1] = g; data[idx1 + 2] = b; data[idx1 + 3] = 255
+          }
+          for (let dot = 0; dot < 7; dot++) {
+            const lit = (mainByte >> dot) & 1
+            const r = lit ? onR : offR
+            const g = lit ? onG : offG
+            const b = lit ? onB : offB
+            const px = baseX + 7 + dot
+            const idx0 = (y * 2 * targetW + px) * 4
+            const idx1 = ((y * 2 + 1) * targetW + px) * 4
+            data[idx0] = r; data[idx0 + 1] = g; data[idx0 + 2] = b; data[idx0 + 3] = 255
+            data[idx1] = r; data[idx1 + 1] = g; data[idx1 + 2] = b; data[idx1 + 3] = 255
+          }
+        }
+      } else {
+        for (let col = 0; col < 40; col++) {
+          const byte = screen.hgr[offset + col] ?? 0
+          const baseX = col * 7 * SCALE
+          for (let dot = 0; dot < 7; dot++) {
+            const lit = (byte >> dot) & 1
+            const r = lit ? onR : offR
+            const g = lit ? onG : offG
+            const b = lit ? onB : offB
+            for (let dx = 0; dx < SCALE; dx++) {
+              const px = baseX + dot * SCALE + dx
+              const idx0 = (y * 2 * targetW + px) * 4
+              const idx1 = ((y * 2 + 1) * targetW + px) * 4
+              data[idx0]     = r
+              data[idx0 + 1] = g
+              data[idx0 + 2] = b
+              data[idx0 + 3] = 255
+              data[idx1]     = r
+              data[idx1 + 1] = g
+              data[idx1 + 2] = b
+              data[idx1 + 3] = 255
+            }
           }
         }
       }

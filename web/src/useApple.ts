@@ -75,10 +75,13 @@ type AppleEvent =
       page2: boolean
       mixed: boolean
       hires: boolean
+      dhires?: boolean
+      col80?: boolean
       pll: boolean
       page: Uint8Array
       gfx: Uint8Array
       hgr?: Uint8Array
+      aux?: Uint8Array
     }
 
 export type Mode = 'console' | 'debugger'
@@ -109,10 +112,13 @@ export interface Screen {
   page2: boolean
   mixed: boolean
   hires: boolean
+  dhires: boolean
+  col80: boolean
   pll: boolean
   page: Uint8Array
   gfx: Uint8Array
   hgr: Uint8Array
+  aux: Uint8Array
   at: number
 }
 
@@ -260,10 +266,13 @@ export function useApple() {
               page2: e.page2,
               mixed: e.mixed,
               hires: e.hires,
+              dhires: Boolean(e.dhires),
+              col80: Boolean(e.col80),
               pll: e.pll,
               page: e.page,
               gfx: e.gfx,
               hgr: e.hgr ?? new Uint8Array(0),
+              aux: e.aux ?? new Uint8Array(0),
               at: Date.now(),
             })
             setBusy(false)

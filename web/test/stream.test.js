@@ -230,6 +230,42 @@ test('a hi-res screen dump parses all 8192 graphics bytes', () => {
   }
 })
 
+test('a double hi-res screen dump parses both 8192-byte pages (Main + Aux)', () => {
+  const page = new Uint8Array(SCR_TEXT_BYTES).fill(0x20)
+  const hgr = new Uint8Array(SCR_HGR_BYTES)
+  const aux = new Uint8Array(SCR_HGR_BYTES)
+  for (let i = 0; i < SCR_HGR_BYTES; i++) {
+    hgr[i] = (i * 3) & 0xff
+    aux[i] = (i * 5) & 0xff
+  }
+  const hexOf = (bytes, at, n) =>
+    [...bytes.slice(at, at + n)].map((v) => v.toString(16).toUpperCase().padStart(2, '0')).join('')
+
+  // Flags: TEXT=0, PAGE2=0, MIXED=0, HIRES=1, PLL=1, DHIRES=1 -> flags = 0b111000 = 0x38
+  let s = '\r\n$SS 38 '
+  for (let at = 0; at < SCR_TEXT_BYTES; at += 40) s += hexOf(page, at, 40) + '\r\n'
+  s += '\r\n$HR'
+  for (let at = 0; at < SCR_HGR_BYTES; at += 40) s += hexOf(hgr, at, 40) + '\r\n'
+  s += '\r\n$AX'
+  for (let at = 0; at < SCR_HGR_BYTES; at += 40) s += hexOf(aux, at, 40) + '\r\n'
+  s += '\r\n$SEND\r\n'
+
+  for (const size of [1, 256, 4096, 16384]) {
+    const chunks = []
+    for (let i = 0; i < s.length; i += size) chunks.push(s.slice(i, i + size))
+    const { events } = collect(chunks)
+    const sc = events.find((e) => e.t === 'screen')
+    assert.ok(sc, `no screen event at chunk size ${size}`)
+    assert.equal(sc.hires, true)
+    assert.equal(sc.dhires, true)
+    assert.equal(sc.text, false)
+    assert.equal(sc.hgr.length, SCR_HGR_BYTES)
+    assert.equal(sc.aux.length, SCR_HGR_BYTES)
+    assert.deepEqual([...sc.hgr], [...hgr], `hgr mismatch at chunk size ${size}`)
+    assert.deepEqual([...sc.aux], [...aux], `aux mismatch at chunk size ${size}`)
+  }
+})
+
 test('cells undo the row interleaving and keep the whole byte', () => {
   const page = new Uint8Array(SCR_TEXT_BYTES)
   // row 3, col 7 gets a normal '$' ($A4), at its interleaved address

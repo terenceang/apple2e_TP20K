@@ -168,15 +168,30 @@ export class AppleStream {
       }
       if (s.startsWith('$HR')) {
         this.frame.inHgr = true
+        this.frame.inAux = false
         this.frame.inGfx = false
         this.frame.hgr += s.slice(3)
+        return
+      }
+      if (s.startsWith('$AX')) {
+        this.frame.inAux = true
+        this.frame.inHgr = false
+        this.frame.inGfx = false
+        this.frame.aux += s.slice(3)
         return
       }
       if (s === '$SEND') {
         if (this.frame.inHgr) {
           this.frameHgr()
         }
+        if (this.frame.inAux) {
+          this.frameAux()
+        }
         this.finishFrame()
+        return
+      }
+      if (this.frame.inAux) {
+        this.frame.aux += s
         return
       }
       if (this.frame.inHgr) {
@@ -202,8 +217,10 @@ export class AppleStream {
         text: s.slice(6).replace(/\s+/g, ''),
         gfx: '',
         hgr: '',
+        aux: '',
         inGfx: false,
         inHgr: false,
+        inAux: false,
         rows: 0,
       }
       if (this.frame.text.length >= HEX_RUN) this.frameText()
@@ -297,6 +314,17 @@ export class AppleStream {
     this.frame.hgrPage = hgr
   }
 
+  frameAux() {
+    if (!this.frame) return
+    const hex = (this.frame.aux || '').replace(/[^0-9A-Fa-f]/g, '')
+    const aux = new Uint8Array(SCR_HGR_BYTES)
+    const count = Math.min(Math.floor(hex.length / 2), SCR_HGR_BYTES)
+    for (let i = 0; i < count; i++) {
+      aux[i] = parseInt(hex.substr(i * 2, 2), 16) || 0
+    }
+    this.frame.auxPage = aux
+  }
+
   finishFrame() {
     const f = this.frame
     this.frame = null
@@ -322,6 +350,13 @@ export class AppleStream {
       for (let i = 0; i < count; i++) hgr[i] = parseInt(hex.substr(i * 2, 2), 16) || 0
       f.hgrPage = hgr
     }
+    if (f.aux && !f.auxPage) {
+      const hex = f.aux.replace(/[^0-9A-Fa-f]/g, '')
+      const aux = new Uint8Array(SCR_HGR_BYTES)
+      const count = Math.min(Math.floor(hex.length / 2), SCR_HGR_BYTES)
+      for (let i = 0; i < count; i++) aux[i] = parseInt(hex.substr(i * 2, 2), 16) || 0
+      f.auxPage = aux
+    }
     const flags = f.flags
     this.emit({
       t: 'screen',
@@ -330,10 +365,13 @@ export class AppleStream {
       page2: Boolean(flags & SCR_FLAG.PAGE2),
       mixed: Boolean(flags & SCR_FLAG.MIXED),
       hires: Boolean(flags & SCR_FLAG.HIRES),
+      dhires: Boolean(flags & SCR_FLAG.DHIRES),
+      col80: Boolean(flags & SCR_FLAG.COL80),
       pll: Boolean(flags & SCR_FLAG.PLL),
       page: f.page ?? new Uint8Array(SCR_TEXT_BYTES),
       gfx: f.gfxPage ?? new Uint8Array(0),
       hgr: f.hgrPage ?? new Uint8Array(0),
+      aux: f.auxPage ?? new Uint8Array(0),
     })
   }
 

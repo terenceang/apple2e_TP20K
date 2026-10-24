@@ -219,6 +219,8 @@ export const SCR_FLAG = {
   MIXED: 1 << 2,
   HIRES: 1 << 3,
   PLL: 1 << 4,
+  DHIRES: 1 << 5,
+  COL80: 1 << 6,
 }
 
 /**

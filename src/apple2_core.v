@@ -101,6 +101,7 @@ module apple2_core (
     // Diagnostic status & Debugger Interface
     input  wire        cpu_rdy,
     input  wire [15:0] dbg_mem_addr,
+    input  wire        dbg_aux_read,   // 1 to read Auxiliary RAM from DDR3 during pause
     output wire [7:0]  dbg_mem_din,
     output wire        dbg_mem_ready,  // dbg_mem_din is valid
 
@@ -491,13 +492,14 @@ module apple2_core (
     wire ddr_sel_wr = aux_sel_wr || main_lc_wr;
     // The debugger, while it holds the CPU, sees main memory; main
     // language-card RAM is in the DDR3, so reading it waits on the port too.
+    // dbg_aux_read allows the debugger to explicitly dump Auxiliary RAM (e.g. DHGR/80COL).
     // dbg_mem_ready is a clock late: it comes off aux_ram's tag compare, and
     // the debugger waits four clocks after setting an address anyway.
-    wire dbg_lc_sel = !cpu_rdy && dbg_mem_addr >= 16'hD000 && lc_read_ram;
-    wire aux_sel_rd    = ddr_sel_rd || dbg_lc_sel;
-    assign aux_rd_want = (ddr_sel_rd && !cpu_we) || dbg_lc_sel;
+    wire dbg_ddr_sel = !cpu_rdy && (dbg_aux_read || (dbg_mem_addr >= 16'hD000 && lc_read_ram));
+    wire aux_sel_rd  = ddr_sel_rd || dbg_ddr_sel;
+    assign aux_rd_want = (ddr_sel_rd && !cpu_we) || dbg_ddr_sel;
     reg dbg_ready_q = 1'b1;
-    always @(posedge clk) dbg_ready_q <= !dbg_lc_sel || aux_rd_hit;
+    always @(posedge clk) dbg_ready_q <= !dbg_ddr_sel || aux_rd_hit;
     assign dbg_mem_ready = dbg_ready_q;
     assign aux_stall   = (ddr_sel_rd && !cpu_we && !aux_rd_hit) || (ddr_sel_wr && cpu_we && aux_wr_busy);
     assign aux_wr_go   = cpu_go && cpu_we && ddr_sel_wr;
@@ -519,7 +521,8 @@ module apple2_core (
 
     wire is_lc_bank2_d = lc_bank2 && (effective_cpu_addr >= 16'hD000 && effective_cpu_addr < 16'hE000);
     wire [15:0] cpu_ram_addr = is_lc_bank2_d ? {4'hC, effective_cpu_addr[11:0]} : effective_cpu_addr;
-    assign aux_rd_addr = {cpu_rdy ? main_lc_rd : 1'b1, cpu_ram_addr};
+    assign aux_rd_addr = cpu_rdy ? {main_lc_rd, cpu_ram_addr} :
+                         dbg_aux_read ? {1'b0, cpu_ram_addr} : {1'b1, cpu_ram_addr};
     assign aux_wr_addr = {main_lc_wr, cpu_ram_addr};
     wire [15:0] ram_addr   = vram_req ? vram_addr : cpu_ram_addr;
     wire [7:0]  ram_dout;

@@ -36,9 +36,10 @@ Press **Connect USB** and pick the Dock's serial port. Then type.
 
 ### Interface Gallery
 
-| Virtual Keyboard & Gamepad | Storage & Disk Manager | Hardware Debugger & Hi-Res Screen Capture |
+| **Virtual Keyboard & Gamepad** | **Storage & Disk Manager** | **Hardware Debugger & Screen Capture** |
 | :---: | :---: | :---: |
-| ![Virtual Keyboard](../Documents/images/keyboard.png) | ![Disk Storage Manager](../Documents/images/storage.png) | ![Debugger and Screen Capture](../Documents/images/debugger.png) |
+| [![Virtual Keyboard](../Documents/images/keyboard.png)](../Documents/images/keyboard.png) | [![Disk Storage Manager](../Documents/images/storage.png)](../Documents/images/storage.png) | [![Debugger and Screen Capture](../Documents/images/debugger.png)](../Documents/images/debugger.png) |
+| Authentic Apple //e layout, softswitch toggles & paddles | Live Disk II (.woz/.dsk) & SmartPort (.hdv/.po) management | 65C02 CPU inspection, single-step & live Text / Hi-Res / Double Hi-Res NTSC screen capture |
 
 
 ### Which port?

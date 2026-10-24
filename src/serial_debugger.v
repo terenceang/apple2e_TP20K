@@ -58,6 +58,7 @@ module serial_debugger (
 
     // Memory Inspection Bus
     output reg  [15:0] dbg_mem_addr,
+    output reg         dbg_aux_read = 1'b0,
     input  wire [7:0]  dbg_mem_din,
     input  wire        dbg_mem_ready,   // dbg_mem_din is valid (LC RAM is in DDR3 and answers slowly)
 
@@ -101,6 +102,8 @@ module serial_debugger (
     input  wire        mixed_mode,
     input  wire        page2,
     input  wire        hires_mode,
+    input  wire        dhires,
+    input  wire        col80,
     input  wire        pll_locked,
     input  wire [31:0] ddr_diag      // printed after PLL: by `t` (src/aux_ram.v diag)
 );
@@ -237,7 +240,9 @@ module serial_debugger (
     localparam [7:0] STR_GFX_LEN   = 8'd5;
     localparam [8:0] STR_HR_START  = STR_GFX_START + STR_GFX_LEN;
     localparam [7:0] STR_HR_LEN    = 8'd5;
-    localparam [8:0] STR_END_START = STR_HR_START + STR_HR_LEN;
+    localparam [8:0] STR_AX_START  = STR_HR_START + STR_HR_LEN;
+    localparam [7:0] STR_AX_LEN    = 8'd5;
+    localparam [8:0] STR_END_START = STR_AX_START + STR_AX_LEN;
     localparam [7:0] STR_END_LEN   = 8'd7;
     localparam [8:0] STR_DONE_START = STR_END_START + STR_END_LEN;
     localparam [7:0] STR_DONE_LEN   = 8'd8;
@@ -253,7 +258,7 @@ module serial_debugger (
     localparam [7:0] STR_PLL_LEN   = 8'd5;
     localparam [8:0] STR_DDR_START = STR_PLL_START + STR_PLL_LEN;
     localparam [7:0] STR_DDR_LEN   = 8'd3;
-    localparam integer STR_BYTES = 235;
+    localparam integer STR_BYTES = 240;
     // \015\012 is CR LF: Verilog-2001 has no \r escape.
     localparam [8*STR_BYTES-1:0] STR_TEXT = {
         "\015\012[ Apple //e Debugger ] (h=Help, c=Cont)\015\012> ",  // BANNER
@@ -272,6 +277,7 @@ module serial_debugger (
         "\015\012$SS",  // SCR
         "\015\012$GF",  // GFX
         "\015\012$HR",  // HR
+        "\015\012$AX",  // AX (Auxiliary RAM dump)
         "\015\012$SEND",  // END
         "\015\012done\015\012",  // DONE
         "\015\012lost\015\012",  // LOST
@@ -516,6 +522,7 @@ module serial_debugger (
             scr_col        <= 6'd0;
             scr_wait       <= 3'd0;
             scr_flags      <= 8'h00;
+            dbg_aux_read   <= 1'b0;
         end else begin
             fifo_push_en <= 1'b0;
             sd_mnt_go    <= 1'b0;
@@ -915,8 +922,10 @@ module serial_debugger (
                 M_SCREEN: begin
                     case (seq_step)
                         5'd0: begin // "\r\n$SS"
-                            scr_flags <= {2'b00, pll_locked, hires_mode, mixed_mode,
+                            scr_flags <= {1'b0, (dhires && col80 && hires_mode && !text_mode),
+                                          pll_locked, hires_mode, mixed_mode,
                                           page2, text_mode};
+                            dbg_aux_read <= 1'b0;
                             sub_say(STR_SCR_START, STR_SCR_LEN, 5'd1);
                         end
                         5'd1: if (!tx_fifo_full) begin // flags byte
@@ -979,14 +988,16 @@ module serial_debugger (
                         end
                         5'd11: if (!tx_fifo_full) begin // "\r\n$HR"
                             sub_say(STR_HR_START, STR_HR_LEN, 5'd12);
-                            scr_addr <= page2 ? 16'h4000 : 16'h2000;
-                            scr_left <= 14'd8192;
-                            scr_col  <= 6'd0;
-                            scr_wait <= 3'd0;
+                            scr_addr     <= page2 ? 16'h4000 : 16'h2000;
+                            scr_left     <= 14'd8192;
+                            scr_col      <= 6'd0;
+                            scr_wait     <= 3'd0;
+                            dbg_aux_read <= 1'b0;
                         end
                         5'd12: begin
                             if (scr_left == 14'd0) begin
-                                seq_step <= 5'd9;
+                                if (dhires && col80 && !text_mode) seq_step <= 5'd14;
+                                else seq_step <= 5'd9;
                             end else begin
                                 scr_read_byte(5'd13);
                             end
@@ -997,10 +1008,40 @@ module serial_debugger (
                         end else begin
                             seq_step <= 5'd12;
                         end
-                        5'd9: if (!tx_fifo_full) // "\r\n$SEND" then prompt
+                        5'd14: if (!tx_fifo_full) begin // "\r\n$AX"
+                            sub_say(STR_AX_START, STR_AX_LEN, 5'd15);
+                            scr_addr     <= page2 ? 16'h4000 : 16'h2000;
+                            scr_left     <= 14'd8192;
+                            scr_col      <= 6'd0;
+                            scr_wait     <= 3'd0;
+                            dbg_aux_read <= 1'b1;
+                        end
+                        5'd15: begin
+                            if (scr_left == 14'd0) begin
+                                dbg_aux_read <= 1'b0;
+                                seq_step     <= 5'd9;
+                            end else begin
+                                scr_read_byte(5'd16);
+                            end
+                        end
+                        5'd16: if (scr_col == 6'd40) begin // end of a 40-byte line
+                            scr_col <= 6'd0;
+                            say(STR_CRLF_START, STR_CRLF_LEN, M_SCREEN);
+                        end else begin
+                            seq_step <= 5'd15;
+                        end
+                        5'd9: if (!tx_fifo_full) begin // "\r\n$SEND" then prompt
+                            dbg_aux_read <= 1'b0;
                             sub_say(STR_END_START, STR_END_LEN, 5'd10);
-                        5'd10: prompt;
-                        default: main_state <= M_IDLE;
+                        end
+                        5'd10: begin
+                            dbg_aux_read <= 1'b0;
+                            prompt;
+                        end
+                        default: begin
+                            dbg_aux_read <= 1'b0;
+                            main_state <= M_IDLE;
+                        end
                     endcase
                 end
 
