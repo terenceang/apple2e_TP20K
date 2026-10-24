@@ -186,10 +186,9 @@ module slot_bus (
     // ------------------------------------------------------------------
     // Interrupts
     // ------------------------------------------------------------------
-    // /IRQ daisy chain: chain[i] is INT IN of slot i+1, chain[NSLOT] is what
-    // the CPU sees.  A slot without a card passes the chain on untouched; a
-    // slot with one passes it on only while the card is not asserting, so the
-    // card's own request reaches the CPU and the rest of the chain is blocked.
+    // /INT daisy chain (Pins 28 INT IN / 27 INT OUT): chain[i] is INT IN of
+    // slot i+1, passed on only while the card is not asserting, so downstream
+    // slots see higher priority slots asserting.
     wire [NSLOT:0] chain;
     assign chain[0] = int_in_n;
     genvar c;
@@ -200,7 +199,10 @@ module slot_bus (
             assign irq_out_n[c] = chain[c + 1];
         end
     endgenerate
-    assign irq_n = chain[NSLOT];
+
+    // Pin 30 (/IRQ): wired-OR across all populated slots, plus incoming INT IN
+    wire card_irq_active = |((~card_irq_n) & card_present);
+    assign irq_n = ~card_irq_active & int_in_n;
 
     // /NMI and /DMA are shared, not chained: any card holding the line low
     // takes it, and only a populated slot can do that.  /NMI reaches the 65C02

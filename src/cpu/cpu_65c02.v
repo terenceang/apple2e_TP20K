@@ -119,6 +119,11 @@ wire [7:0] PCL = PC[7:0];
 reg NMI_edge = 0;       // captured NMI edge
 reg [2:0] IRQ_q = 0;    // IRQ three steps back, as polled (below)
 wire IRQ_poll = IRQ_q[2];
+reg [2:0] I_q = 3'b111; // I flag three steps back, matching IRQ polling timing
+wire I_poll = I_q[2];
+wire irq_enabled = ~I & ~I_poll;
+wire irq_take = (irq_enabled & IRQ_poll) | NMI_edge;
+reg wai_wake = 0;
 
 reg [1:0] regsel;                       // Select A, X, Y or S register
 wire [7:0] regfile = AXYS[regsel];      // Selected register output
@@ -365,7 +370,7 @@ always @*
  */
 always @*
     case( state )
-        DECODE:         if( (~I & IRQ_poll) | NMI_edge )
+        DECODE:         if( irq_take )
                             PC_temp = { ABH, ABL };
                         else
                             PC_temp = PC;
@@ -394,7 +399,7 @@ always @*
  */
 always @*
     case( state )
-        DECODE:         if( (~I & IRQ_poll) | NMI_edge )
+        DECODE:         if( irq_take || (IR == 8'b1100_1011) )
                             PC_inc = 0;
                         else
                             PC_inc = 1;
@@ -478,7 +483,6 @@ always @*
 
         REG,
         READ,
-        WAIT,           // DS
         WRITE:          AB = { ABH, ABL };
 
         default:        AB = PC;
@@ -512,7 +516,7 @@ always @*
 
         PUSH1:   DO = php ? P : ADD;
 
-        BRK2:    DO = (IRQ_poll | NMI_edge) ? (P & 8'b1110_1111) : P;
+        BRK2:    DO = (IRQ_poll | NMI_edge | wai_wake) ? (P & 8'b1110_1111) : P;
 
         default: DO = store_zero ? 8'b0 : regfile;
     endcase
@@ -962,7 +966,7 @@ always @(posedge clk )
             IRHOLD_valid <= 0;
     end
 
-assign IR = (IRQ_poll & ~I) | NMI_edge ? 8'h00 :
+assign IR = irq_take ? 8'h00 :
                      IRHOLD_valid ? IRHOLD : DIMUX;
 
 //assign DIMUX = ~RDY1 ? DIHOLD : DI;
@@ -973,9 +977,13 @@ assign DIMUX = DI;
  * Microcode state machine
  */
 always @(posedge clk or posedge reset)
-    if( reset )
-        state <= BRK0;
-    else if( RDY ) case( state )
+    if( reset ) begin
+        state    <= BRK0;
+        wai_wake <= 1'b0;
+    end else if( RDY ) begin
+        if( state == BRK3 )
+            wai_wake <= 1'b0;
+        case( state )
         DECODE  :
             casex ( IR )
                 // TODO Review for simplifications as in verilog the first matching case has priority
@@ -1095,8 +1103,20 @@ always @(posedge clk or posedge reset)
         BRK2    : state <= BRK3;
         BRK3    : state <= JMP0;
 
-        WAIT    : state <= (IRQ | NMI_edge) ? DECODE : WAIT;   // DS
+        WAIT    : begin
+            if (IRQ | NMI_edge) begin
+                if ((~I & IRQ) | NMI_edge) begin
+                    state    <= BRK0;
+                    wai_wake <= 1'b1;
+                end else begin
+                    state    <= FETCH;
+                end
+            end else begin
+                state <= WAIT;
+            end
+        end
     endcase
+    end
 
 
 /*
@@ -1440,9 +1460,14 @@ always @*
  * (French Touch's OldSkool times its raster IRQ off the 6522's T1 and
  * crashed on it). WAI still wakes on the live line.
  */
-always @(posedge clk)
-    if( RDY )
+always @(posedge clk or posedge reset)
+    if( reset ) begin
+        IRQ_q <= 3'b000;
+        I_q   <= 3'b111;
+    end else if( RDY ) begin
         IRQ_q <= { IRQ_q[1:0], IRQ };
+        I_q   <= { I_q[1:0], I };
+    end
 
 reg NMI_1 = 0;          // delayed NMI signal
 

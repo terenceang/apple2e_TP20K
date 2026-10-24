@@ -75,6 +75,8 @@ module serial_debugger (
     input  wire        cpu_sync,
     input  wire        z80_on,       // the SoftCard's Z80 has the bus: s cannot step the 6502
     input  wire        wp_hit,       // the k watchpoint's write (apple2_core debug_wp_hit)
+    input  wire        slot_irq_n,
+    input  wire [6:0]  card_irq_n,
 
     // The TF card (src/sd_vol.v)
     output reg         sd_mnt_go,
@@ -695,7 +697,7 @@ module serial_debugger (
                         cpu_rdy     <= 1'b0;
                     end
 
-                    "i", "I": begin
+                    "i", "I", "q", "Q": begin
                         main_state <= M_INFO;
                         seq_step   <= 5'd0;
                     end
@@ -897,7 +899,11 @@ module serial_debugger (
                         5'd5: if (!tx_fifo_full) begin fifo_push("S"); seq_step <= 5'd6; end
                         5'd6: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd7; end
                         5'd7: sub_hex(sd_stat, 3'd4, 5'd8);
-                        5'd8: prompt;
+                        5'd8: if (!tx_fifo_full) begin fifo_push(" "); seq_step <= 5'd9; end
+                        5'd9: if (!tx_fifo_full) begin fifo_push("Q"); seq_step <= 5'd10; end
+                        5'd10: if (!tx_fifo_full) begin fifo_push(":"); seq_step <= 5'd11; end
+                        5'd11: sub_hex({~slot_irq_n, ~card_irq_n, 8'h00}, 3'd2, 5'd12);
+                        5'd12: prompt;
                         default: main_state <= M_IDLE;
                     endcase
                 end

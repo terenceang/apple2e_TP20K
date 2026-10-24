@@ -135,7 +135,9 @@ module apple2_core (
     output wire [7:0]  debug_cpu_y,
     output wire [7:0]  debug_cpu_s,
     output wire [7:0]  debug_cpu_p,
-    output wire [7:0]  debug_cpu_ir
+    output wire [7:0]  debug_cpu_ir,
+    output wire        debug_irq_n,
+    output wire [6:0]  debug_card_irq_n
 );
 
     // CPU Signals.  cpu_addr/cpu_dout/cpu_we are the bus, driven by the 65C02
@@ -254,6 +256,8 @@ module apple2_core (
     assign debug_cpu_we   = c02_we;
     assign debug_cpu_sync = cpu_sync;
     assign debug_z80_on   = z80_on;
+    assign debug_irq_n      = slot_irq_n;
+    assign debug_card_irq_n = card_irq_n;
 
     // 65C02 CPU Core
     cpu_65c02 u_cpu (
@@ -401,6 +405,7 @@ module apple2_core (
     wire [7:0]  hd_io_data;
     wire [7:0]  tc_rom_data;
     wire [7:0]  tc_io_data;
+    wire        tc_irq_n;
     wire [7:0]  ssc_rom_data;
     wire [7:0]  ssc_io_data;
     wire        ssc_irq_n;
@@ -433,7 +438,7 @@ module apple2_core (
     wire        mock_iosel_n  = !(effective_cpu_addr[15:8] == 8'hC4);
     wire        mock_devsel_n = !(is_io && (effective_cpu_addr[7:4] == 4'hC));
 
-    wire [6:0]  card_irq_n = {1'b1, 1'b1, 1'b1, mock_irq_n, 1'b1, 1'b1, ssc_irq_n};
+    wire [6:0]  card_irq_n = {1'b1, 1'b1, tc_irq_n, mock_irq_n, 1'b1, 1'b1, ssc_irq_n};
 
     slot_bus u_slot_bus (
         .clk(clk),
@@ -741,6 +746,9 @@ module apple2_core (
     // Clock (ProDOS sees a Thunderclock), slot 5
     // ------------------------------------------------------------------
     thunderclock u_clock (
+        .reset(reset),
+        .din(cpu_dout),
+        .irq_n(tc_irq_n),
         .clk(clk),
         .bus_cycle(cpu_go),
         .cpu_we(cpu_we),

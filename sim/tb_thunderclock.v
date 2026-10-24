@@ -12,13 +12,17 @@ module tb_thunderclock;
     reg clk = 1'b0;
     always #18.5 clk = ~clk;
 
+    reg         reset = 1'b0;
     reg         bus_cycle = 1'b0, cpu_we = 1'b0, set = 1'b0;
+    reg  [7:0]  din = 8'h00;
     reg  [15:0] addr = 16'h0000;
     reg  [51:0] set_time = 52'd0;
     wire [7:0]  rom_data, io_data;
+    wire        irq_n;
 
     thunderclock #(.TICKS(25'd4)) dut (
         .clk(clk), .bus_cycle(bus_cycle), .cpu_we(cpu_we), .addr(addr),
+        .reset(reset), .din(din), .irq_n(irq_n),
         .set(set), .set_time(set_time), .rom_data(rom_data), .io_data(io_data));
 
     integer fails = 0, i;
@@ -33,6 +37,12 @@ module tb_thunderclock;
         end
     endtask
     // what ProDOS's driver gets: $C0D1, then $C0D0 up to the CR
+    task wr(input [15:0] a, input [7:0] d);
+        begin
+            @(negedge clk); addr = a; din = d; cpu_we = 1'b1; bus_cycle = 1'b1;
+            @(posedge clk); #1 bus_cycle = 1'b0; cpu_we = 1'b0;
+        end
+    endtask
     task read_str;
         begin
             rd(16'hC0D1, b); got = 0;
@@ -109,6 +119,18 @@ module tb_thunderclock;
         if (got !== {"10,04,22,13,45,59", 8'h0D}) begin
             $display("FAIL: torn read \"%0s\"", got[8*18-1:8]); fails = fails + 1;
         end
+
+        // ---- periodic interrupt ----
+        if (irq_n !== 1'b1) begin $display("FAIL: initial IRQ is not inactive"); fails = fails + 1; end
+        wr(16'hC0D2, 8'h01); // enable periodic interrupt
+        repeat (8) @(posedge clk);
+        if (irq_n !== 1'b0) begin $display("FAIL: periodic IRQ did not assert"); fails = fails + 1; end
+        rd(16'hC0D2, b); // read status clears flag
+        if (b[7] !== 1'b1) begin $display("FAIL: status bit 7 not set on IRQ"); fails = fails + 1; end
+        if (irq_n !== 1'b1) begin $display("FAIL: reading $C0D2 did not clear IRQ"); fails = fails + 1; end
+        wr(16'hC0D2, 8'h00); // disable periodic interrupt
+        repeat (8) @(posedge clk);
+        if (irq_n !== 1'b1) begin $display("FAIL: IRQ asserted while disabled"); fails = fails + 1; end
 
         if (fails == 0) $display("tb_thunderclock: PASS");
         else            $display("tb_thunderclock: FAIL (%0d)", fails);

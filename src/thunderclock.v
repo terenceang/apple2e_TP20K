@@ -43,13 +43,16 @@ module thunderclock #(
     parameter [24:0] TICKS = `VM_PIXEL_HZ     // clocks per second
 ) (
     input  wire        clk,
+    input  wire        reset,
     input  wire        bus_cycle,      // cpu_go: the CPU's own cycles only
     input  wire        cpu_we,
     input  wire [15:0] addr,
+    input  wire [7:0]  din,
     input  wire        set,            // load set_time (input_controller FF 05)
     input  wire [51:0] set_time,       // BCD {YY, MO, DD, W, HH, MI, SS}
     output wire [7:0]  rom_data,       // $C500-$C5FF, to slot_bus
-    output wire [7:0]  io_data         // $C0D0-$C0DF
+    output wire [7:0]  io_data,        // $C0D0-$C0DF
+    output wire        irq_n           // Active-low periodic interrupt
 );
 
     function [7:0] rom(input [7:0] a);
@@ -127,15 +130,53 @@ module thunderclock #(
             5'd17: ch = 8'h8D;                                  // CR ends it
             default: ch = 8'hAC;                                // ","
         endcase
-    assign io_data = addr[3:0] == 4'h0 ? ch : 8'h00;
+    assign io_data = (addr[3:0] == 4'h0) ? ch :
+                     (addr[3:0] == 4'h2) ? {irq_flag, 7'b0000000} :
+                     (addr[3:0] == 4'h3) ? {irq_en, 7'b0000000} : 8'h00;
+
+    localparam [24:0] TICK_64HZ = (TICKS >= 25'd64) ? (TICKS / 25'd64) : 25'd1;
+    reg [24:0] tick_64_cnt = 25'd0;
+    reg        irq_en      = 1'b0;
+    reg        irq_flag    = 1'b0;
+
+    assign irq_n = !(irq_en && irq_flag);
 
     wire io_hit = bus_cycle && addr[15:4] == 12'hC0D;
-    always @(posedge clk)
+    always @(posedge clk) begin
+        if (reset) begin
+            tick_64_cnt <= 25'd0;
+            irq_en      <= 1'b0;
+            irq_flag    <= 1'b0;
+        end else begin
+            if (tick_64_cnt >= TICK_64HZ - 25'd1) begin
+                tick_64_cnt <= 25'd0;
+                if (irq_en) irq_flag <= 1'b1;
+            end else begin
+                tick_64_cnt <= tick_64_cnt + 25'd1;
+            end
+
+            if (io_hit) begin
+                if (!cpu_we) begin
+                    // Reading $C0D2 clears pending interrupt flag
+                    if (addr[3:0] == 4'h2) irq_flag <= 1'b0;
+                end else begin
+                    // Writing $C0D2 sets/clears interrupt enable
+                    if (addr[3:0] == 4'h2) begin
+                        irq_en <= din[0];
+                        if (!din[0]) irq_flag <= 1'b0;
+                    end
+                    // Writing $C0D3 clears interrupt flag
+                    if (addr[3:0] == 4'h3) irq_flag <= 1'b0;
+                end
+            end
+        end
+
         if (io_hit && addr[3:0] == 4'h1) begin
             snap <= {mo, dd, dw, hh, mi, ss};
             idx  <= 5'd0;
         end else if (io_hit && addr[3:0] == 4'h0 && !cpu_we && idx != 5'd17)
             idx <= idx + 5'd1;
+    end
 
 endmodule
 

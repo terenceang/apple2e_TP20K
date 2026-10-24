@@ -179,6 +179,8 @@ module top (
     wire [7:0]  debug_cpu_s;
     wire [7:0]  debug_cpu_p;
     wire [7:0]  debug_cpu_ir;
+    wire        debug_irq_n;
+    wire [6:0]  debug_card_irq_n;
 
     // Softswitch state wires
     wire        spkr_pulse;
@@ -235,6 +237,8 @@ module top (
         .cpu_sync(debug_cpu_sync),
         .z80_on(debug_z80_on),
         .wp_hit(debug_wp_hit),
+        .slot_irq_n(debug_irq_n),
+        .card_irq_n(debug_card_irq_n),
         .text_mode(text_mode),
         .mixed_mode(mixed_mode),
         .page2(page2 && !store80),   // the page on screen: with 80STORE, PAGE2 selects aux
@@ -517,7 +521,9 @@ module top (
         .debug_cpu_y(debug_cpu_y),
         .debug_cpu_s(debug_cpu_s),
         .debug_cpu_p(debug_cpu_p),
-        .debug_cpu_ir(debug_cpu_ir)
+        .debug_cpu_ir(debug_cpu_ir),
+        .debug_irq_n(debug_irq_n),
+        .debug_card_irq_n(debug_card_irq_n)
     );
 
     // HDMI link reset: held only until the PLL has locked and the pixel clock
