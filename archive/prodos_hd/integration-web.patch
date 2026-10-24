@@ -1,0 +1,813 @@
+--- a/web/src/disk.js
++++ b/web/src/disk.js
+@@ -15,12 +15,6 @@
+ export const TRACK_BYTES = SECTORS_PER_TRACK * SECTOR_BYTES // 4096
+ export const DISK_BYTES = TRACKS * TRACK_BYTES // 143360
+ 
+-export const HD_BLOCK_BYTES = 512
+-export const HD_BLOCKS = 4096
+-export const HD_BYTES = HD_BLOCKS * HD_BLOCK_BYTES // 2097152 (2 MB)
+-export const HD_CHUNK_BYTES = 4096 // 8 blocks per ACK chunk
+-export const HD_CHUNKS = HD_BYTES / HD_CHUNK_BYTES // 512 chunks
+-
+ export const ACK_BYTE = 0x06 // ASCII ACK returned by serial_debugger.v after each chunk
+ 
+ /**
+@@ -386,105 +380,3 @@
+     reader.restore()
+   }
+ }
+-
+-/**
+- * Validates a ProDOS hard disk image buffer (.po, .hdv, .2mg, .bin, .img).
+- * If a 2MG container header ('2IMG') is detected, strips the header and extracts the raw disk payload.
+- * If the payload is smaller than 2 MB (2,097,152 bytes), pads it with zeros to exactly 2 MB.
+- *
+- * @param {ArrayBuffer | Uint8Array} buffer
+- * @param {string} [filename]
+- * @returns {{ data: Uint8Array, originalSize: number, is2mg: boolean, filename: string }}
+- */
+-export function validateHardDiskImage(buffer, filename = '') {
+-  const raw = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
+-  let data = raw
+-  let is2mg = false
+-
+-  if (
+-    data.length >= 64 &&
+-    data[0] === 0x32 && // '2'
+-    data[1] === 0x49 && // 'I'
+-    data[2] === 0x4d && // 'M'
+-    data[3] === 0x47    // 'G'
+-  ) {
+-    is2mg = true
+-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+-    const dataOffset = view.getUint32(0x18, true)
+-    const dataLen = view.getUint32(0x1c, true)
+-    if (dataOffset + dataLen > data.length) {
+-      throw new Error(
+-        `Corrupted 2MG file: header specifies ${dataLen} bytes at offset ${dataOffset}, but file is only ${data.length} bytes.`,
+-      )
+-    }
+-    data = data.subarray(dataOffset, dataOffset + dataLen)
+-  }
+-
+-  if (data.byteLength === 0) {
+-    throw new Error('Hard disk image is empty.')
+-  }
+-  if (data.byteLength > HD_BYTES) {
+-    throw new Error(
+-      `Hard disk image exceeds 2 MB limit: expected at most ${HD_BYTES.toLocaleString()} bytes (4,096 blocks), got ${data.byteLength.toLocaleString()} bytes.`,
+-    )
+-  }
+-
+-  // Pad to 2 MB if smaller
+-  let padded = data
+-  if (data.byteLength < HD_BYTES) {
+-    padded = new Uint8Array(HD_BYTES)
+-    padded.set(data, 0)
+-  }
+-
+-  return {
+-    data: padded,
+-    originalSize: data.byteLength,
+-    is2mg,
+-    filename,
+-  }
+-}
+-
+-/**
+- * Upload a 2,097,152-byte ProDOS hard disk image to Slot 7 Drive 1 or Drive 2 over Web Serial
+- * (`p`, then 512 chunks of 4096 bytes, each ACKed).
+- *
+- * @param {{ write: (b: Uint8Array | number[]) => void, onBytes: (b: Uint8Array) => void }} link
+- * @param {1 | 2} drive
+- * @param {Uint8Array} hardDiskBytes
+- * @param {{
+- *   onProgress?: (p: { phase: 'uploading', chunk: number, totalChunks: number, bytesSent: number, totalBytes: number }) => void,
+- *   timeoutMs?: number
+- * }} [opts]
+- * @returns {Promise<void>}
+- */
+-export async function uploadHardDisk(link, drive, hardDiskBytes, opts = {}) {
+-  if (!hardDiskBytes || hardDiskBytes.length !== HD_BYTES) {
+-    throw new Error(`Hard disk upload payload must be exactly ${HD_BYTES} bytes, got ${hardDiskBytes?.length}`)
+-  }
+-  await sendImage(link, 'p', drive, hardDiskBytes, HD_CHUNK_BYTES, opts.timeoutMs ?? 10000, (c) =>
+-    opts.onProgress?.({
+-      phase: 'uploading',
+-      chunk: c,
+-      totalChunks: HD_CHUNKS,
+-      bytesSent: c * HD_CHUNK_BYTES,
+-      totalBytes: HD_BYTES,
+-    }),
+-  )
+-}
+-
+-/**
+- * Download a 2,097,152-byte ProDOS hard disk image from Slot 7 Drive 1 or Drive 2 over Web Serial (`o`).
+- *
+- * @param {{ write: (b: Uint8Array | number[]) => void, onBytes: (b: Uint8Array) => void }} link
+- * @param {1 | 2} drive
+- * @param {{
+- *   onProgress?: (p: { phase: 'downloading', bytesReceived: number, totalBytes: number }) => void,
+- *   timeoutMs?: number
+- * }} [opts]
+- * @returns {Promise<Uint8Array>} Raw 2,097,152 byte ProDOS hard disk image bytes
+- */
+-export function downloadHardDisk(link, drive, opts = {}) {
+-  return receiveImage(link, 'o', drive, HD_BYTES, opts.timeoutMs ?? 10000, (bytesReceived) =>
+-    opts.onProgress?.({ phase: 'downloading', bytesReceived, totalBytes: HD_BYTES }),
+-  )
+-}
+--- a/web/src/useApple.ts
++++ b/web/src/useApple.ts
+@@ -10,9 +10,6 @@
+   prepareDownloadImage,
+   uploadDisk,
+   downloadDisk,
+-  validateHardDiskImage,
+-  uploadHardDisk,
+-  downloadHardDisk,
+   diskChecksum,
+   queryDiskSums,
+ } from './disk.js'
+@@ -115,7 +112,6 @@
+ 
+ export interface DiskProgress {
+   drive: 1 | 2
+-  device?: 'floppy' | 'harddisk'
+   phase: 'uploading' | 'downloading'
+   percent: number
+   detail: string
+@@ -405,10 +401,6 @@
+     1: { filename: null, busy: false },
+     2: { filename: null, busy: false },
+   })
+-  const [hardDrives, setHardDrives] = useState<Record<1 | 2, DriveState>>({
+-    1: { filename: null, busy: false },
+-    2: { filename: null, busy: false },
+-  })
+   const [diskProgress, setDiskProgress] = useState<DiskProgress | null>(null)
+   const [diskError, setDiskError] = useState<string | null>(null)
+ 
+@@ -439,8 +431,7 @@
+         if (onBoard !== sum) {
+           setDiskProgress({
+             drive,
+-            device: 'floppy',
+-            phase: 'uploading',
++              phase: 'uploading',
+             percent: 0,
+             detail: `Starting upload of ${file.name}...`,
+           })
+@@ -451,8 +442,7 @@
+             const percent = Math.round((p.track / p.totalTracks) * 100)
+             setDiskProgress({
+               drive,
+-              device: 'floppy',
+-              phase: 'uploading',
++                  phase: 'uploading',
+               percent,
+               detail: `Track ${p.track}/${p.totalTracks} (${percent}%)`,
+             })
+@@ -541,7 +531,6 @@
+ 
+         setDiskProgress({
+           drive,
+-          device: 'floppy',
+           phase: 'downloading',
+           percent: 0,
+           detail: `Starting download from Drive ${drive}...`,
+@@ -552,8 +541,7 @@
+             const percent = Math.round((p.bytesReceived / p.totalBytes) * 100)
+             setDiskProgress({
+               drive,
+-              device: 'floppy',
+-              phase: 'downloading',
++                  phase: 'downloading',
+               percent,
+               detail: `${Math.round(p.bytesReceived / 1024)} KB / ${Math.round(p.totalBytes / 1024)} KB (${percent}%)`,
+             })
+@@ -603,142 +591,6 @@
+     setDrives((d) => ({ ...d, [drive]: { filename: null, busy: false } }))
+   }, [])
+ 
+-  const uploadHardDiskFile = useCallback(
+-    async (drive: 1 | 2, file: File) => {
+-      if (!link.current || conn.state !== 'open') {
+-        throw new Error('Connect USB serial before uploading a hard disk image.')
+-      }
+-      setDiskError(null)
+-      setHardDrives((d) => ({ ...d, [drive]: { ...d[drive], busy: true } }))
+-      const wasConsole = stream.current.mode === 'console'
+-
+-      try {
+-        const buffer = await file.arrayBuffer()
+-        const { data } = validateHardDiskImage(buffer, file.name)
+-
+-        if (wasConsole) {
+-          send([CTRL_B])
+-          await new Promise((r) => setTimeout(r, QUIET_MS))
+-        }
+-
+-        setDiskProgress({
+-          drive,
+-          device: 'harddisk',
+-          phase: 'uploading',
+-          percent: 0,
+-          detail: `Starting upload of ${file.name}...`,
+-        })
+-
+-        await uploadHardDisk(link.current, drive, data, {
+-          onProgress: (p) => {
+-            const percent = Math.round((p.chunk / p.totalChunks) * 100)
+-            setDiskProgress({
+-              drive,
+-              device: 'harddisk',
+-              phase: 'uploading',
+-              percent,
+-              detail: `Chunk ${p.chunk}/${p.totalChunks} (${percent}%)`,
+-            })
+-          },
+-        })
+-
+-        setHardDrives((d) => ({ ...d, [drive]: { filename: file.name, busy: false } }))
+-        setDiskProgress(null)
+-
+-        if (wasConsole) {
+-          release(CMD.cont.charCodeAt(0))
+-        }
+-      } catch (err: any) {
+-        setHardDrives((d) => ({ ...d, [drive]: { ...d[drive], busy: false } }))
+-        setDiskProgress(null)
+-        const msg = err?.message ?? String(err)
+-        setDiskError(msg)
+-        if (wasConsole) {
+-          release(CMD.cont.charCodeAt(0))
+-        }
+-        throw err
+-      }
+-    },
+-    [conn.state, mode, send, release],
+-  )
+-
+-  const downloadHardDiskFile = useCallback(
+-    async (drive: 1 | 2) => {
+-      if (!link.current || conn.state !== 'open') {
+-        throw new Error('Connect USB serial before downloading a hard disk image.')
+-      }
+-      setDiskError(null)
+-      setHardDrives((d) => ({ ...d, [drive]: { ...d[drive], busy: true } }))
+-      const wasConsole = stream.current.mode === 'console'
+-
+-      try {
+-        if (wasConsole) {
+-          send([CTRL_B])
+-          await new Promise((r) => setTimeout(r, QUIET_MS))
+-        }
+-
+-        setDiskProgress({
+-          drive,
+-          device: 'harddisk',
+-          phase: 'downloading',
+-          percent: 0,
+-          detail: `Starting download from Slot 7 Drive ${drive}...`,
+-        })
+-
+-        const fileData = await downloadHardDisk(link.current, drive, {
+-          onProgress: (p) => {
+-            const percent = Math.round((p.bytesReceived / p.totalBytes) * 100)
+-            setDiskProgress({
+-              drive,
+-              device: 'harddisk',
+-              phase: 'downloading',
+-              percent,
+-              detail: `${Math.round(p.bytesReceived / 1024)} KB / ${Math.round(p.totalBytes / 1024)} KB (${percent}%)`,
+-            })
+-          },
+-        })
+-
+-        setHardDrives((d) => ({ ...d, [drive]: { ...d[drive], busy: false } }))
+-        setDiskProgress(null)
+-
+-        const baseName = hardDrives[drive].filename
+-          ? hardDrives[drive].filename!.replace(/\.[^.]+$/, '')
+-          : `hd7_d${drive}`
+-        const filename = `${baseName}.po`
+-
+-        if (typeof document !== 'undefined') {
+-          const blob = new Blob([fileData as unknown as BlobPart], { type: 'application/octet-stream' })
+-          const url = URL.createObjectURL(blob)
+-          const a = document.createElement('a')
+-          a.href = url
+-          a.download = filename
+-          document.body.appendChild(a)
+-          a.click()
+-          document.body.removeChild(a)
+-          URL.revokeObjectURL(url)
+-        }
+-
+-        if (wasConsole) {
+-          release(CMD.cont.charCodeAt(0))
+-        }
+-      } catch (err: any) {
+-        setHardDrives((d) => ({ ...d, [drive]: { ...d[drive], busy: false } }))
+-        setDiskProgress(null)
+-        const msg = err?.message ?? String(err)
+-        setDiskError(msg)
+-        if (wasConsole) {
+-          release(CMD.cont.charCodeAt(0))
+-        }
+-        throw err
+-      }
+-    },
+-    [conn.state, mode, send, release, hardDrives],
+-  )
+-
+-  const ejectHardDisk = useCallback((drive: 1 | 2) => {
+-    setHardDrives((d) => ({ ...d, [drive]: { filename: null, busy: false } }))
+-  }, [])
+-
+   const clearDiskError = useCallback(() => setDiskError(null), [])
+ 
+   const clearConsole = useCallback(() => setLines([]), [])
+@@ -760,15 +612,11 @@
+       screen,
+       busy,
+       drives,
+-      hardDrives,
+       diskProgress,
+       diskError,
+       uploadDiskFile,
+       downloadDiskFile,
+       ejectDisk,
+-      uploadHardDiskFile,
+-      downloadHardDiskFile,
+-      ejectHardDisk,
+       clearDiskError,
+       pressKey,
+       resetKey,
+@@ -795,15 +643,11 @@
+       screen,
+       busy,
+       drives,
+-      hardDrives,
+       diskProgress,
+       diskError,
+       uploadDiskFile,
+       downloadDiskFile,
+       ejectDisk,
+-      uploadHardDiskFile,
+-      downloadHardDiskFile,
+-      ejectHardDisk,
+       clearDiskError,
+       pressKey,
+       resetKey,
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -142,15 +142,11 @@
+             {showDisks && (
+               <DiskPane
+                 drives={apple.drives}
+-                hardDrives={apple.hardDrives}
+                 progress={apple.diskProgress}
+                 error={apple.diskError}
+                 onUpload={apple.uploadDiskFile}
+                 onDownload={apple.downloadDiskFile}
+                 onEject={apple.ejectDisk}
+-                onUploadHardDisk={apple.uploadHardDiskFile}
+-                onDownloadHardDisk={apple.downloadHardDiskFile}
+-                onEjectHardDisk={apple.ejectHardDisk}
+                 onClearError={apple.clearDiskError}
+                 onClose={() => setShowDisks(false)}
+                 disabled={apple.conn.state !== 'open'}
+--- a/web/src/components/DiskPane.tsx
++++ b/web/src/components/DiskPane.tsx
+@@ -3,15 +3,11 @@
+ 
+ interface Props {
+   drives: Record<1 | 2, DriveState>
+-  hardDrives?: Record<1 | 2, DriveState>
+   progress: DiskProgress | null
+   error: string | null
+   onUpload: (drive: 1 | 2, file: File) => Promise<void>
+   onDownload: (drive: 1 | 2, format: 'dsk' | 'po') => Promise<void>
+   onEject: (drive: 1 | 2) => void
+-  onUploadHardDisk?: (drive: 1 | 2, file: File) => Promise<void>
+-  onDownloadHardDisk?: (drive: 1 | 2) => Promise<void>
+-  onEjectHardDisk?: (drive: 1 | 2) => void
+   onClearError: () => void
+   onClose: () => void
+   disabled?: boolean
+@@ -19,40 +15,25 @@
+ 
+ export function DiskPane({
+   drives,
+-  hardDrives = { 1: { filename: null, busy: false }, 2: { filename: null, busy: false } },
+   progress,
+   error,
+   onUpload,
+   onDownload,
+   onEject,
+-  onUploadHardDisk,
+-  onDownloadHardDisk,
+-  onEjectHardDisk,
+   onClearError,
+   onClose,
+   disabled = false,
+ }: Props) {
+-  const [activeSlot, setActiveSlot] = useState<6 | 7>(6)
+-
+   const fileInputFloppy1 = useRef<HTMLInputElement>(null)
+   const fileInputFloppy2 = useRef<HTMLInputElement>(null)
+-  const fileInputHd1 = useRef<HTMLInputElement>(null)
+-  const fileInputHd2 = useRef<HTMLInputElement>(null)
+ 
+   const [dragOver1, setDragOver1] = useState(false)
+   const [dragOver2, setDragOver2] = useState(false)
+ 
+-  const isFloppy = activeSlot === 6
+-  const currentDrives = isFloppy ? drives : hardDrives
+-
+   const handleFile = (drive: 1 | 2, files: FileList | null) => {
+     if (!files || !files.length) return
+     const file = files[0]
+-    if (isFloppy) {
+-      void onUpload(drive, file)
+-    } else if (onUploadHardDisk) {
+-      void onUploadHardDisk(drive, file)
+-    }
++    void onUpload(drive, file)
+   }
+ 
+   const renderDriveCard = (
+@@ -61,9 +42,8 @@
+     dragOver: boolean,
+     setDragOver: (v: boolean) => void,
+   ) => {
+-    const d = currentDrives[drive]
+-    const devMatch = progress?.device ? (isFloppy ? progress.device === 'floppy' : progress.device === 'harddisk') : true
+-    const isBusy = d.busy || (progress?.drive === drive && devMatch)
++    const d = drives[drive]
++    const isBusy = d.busy || progress?.drive === drive
+     const hasDisk = Boolean(d.filename)
+ 
+     return (
+@@ -85,7 +65,7 @@
+         <div className="disk-drive-header">
+           <div className="disk-drive-title">
+             <span className={`disk-led ${isBusy ? 'busy' : hasDisk ? 'active' : 'off'}`} />
+-            <h3>{isFloppy ? `Floppy Drive ${drive}` : `Hard Disk ${drive}`}</h3>
++            <h3>Floppy Drive {drive}</h3>
+           </div>
+           <span className="disk-status-tag">
+             {isBusy ? 'Busy' : hasDisk ? 'Mounted' : 'Empty'}
+@@ -95,14 +75,12 @@
+         <div className="disk-drive-body">
+           {hasDisk ? (
+             <div className="disk-info">
+-              <span className="disk-icon" aria-hidden>{isFloppy ? '💾' : '💽'}</span>
++              <span className="disk-icon" aria-hidden>💾</span>
+               <div className="disk-details">
+                 <span className="disk-filename" title={d.filename ?? ''}>
+                   {d.filename}
+                 </span>
+-                <span className="disk-meta">
+-                  {isFloppy ? '140 KB Floppy (35 Tracks)' : '2 MB ProDOS Volume (4,096 Blocks)'}
+-                </span>
++                <span className="disk-meta">140 KB Floppy (35 Tracks)</span>
+               </div>
+             </div>
+           ) : (
+@@ -111,11 +89,7 @@
+               onClick={() => !disabled && !isBusy && fileInputRef.current?.click()}
+             >
+               <span className="drop-icon">⇪</span>
+-              <span>
+-                {isFloppy
+-                  ? 'Drop .dsk / .do / .po image here'
+-                  : 'Drop .po / .hdv / .2mg image here'}
+-              </span>
++              <span>Drop .dsk / .do / .po image here</span>
+               <span className="drop-sub">or click to browse</span>
+             </div>
+           )}
+@@ -123,7 +97,7 @@
+           <input
+             ref={fileInputRef}
+             type="file"
+-            accept={isFloppy ? '.dsk,.do,.po,.bin' : '.po,.hdv,.2mg,.bin,.img'}
++            accept=".dsk,.do,.po,.bin"
+             style={{ display: 'none' }}
+             onChange={(e) => {
+               handleFile(drive, e.target.files)
+@@ -138,44 +112,30 @@
+               <button
+                 type="button"
+                 className="btn-disk-action"
+-                onClick={() => (isFloppy ? onEject(drive) : onEjectHardDisk?.(drive))}
++                onClick={() => onEject(drive)}
+                 disabled={disabled || isBusy}
+                 title="Eject this disk"
+               >
+                 ⏏ Eject
+               </button>
+-              {isFloppy ? (
+-                <>
+-                  <button
+-                    type="button"
+-                    className="btn-disk-action"
+-                    onClick={() => void onDownload(drive, 'dsk')}
+-                    disabled={disabled || isBusy}
+-                    title="Download image from FPGA in DOS 3.3 (.dsk) format"
+-                  >
+-                    ⬇ Save .dsk
+-                  </button>
+-                  <button
+-                    type="button"
+-                    className="btn-disk-action"
+-                    onClick={() => void onDownload(drive, 'po')}
+-                    disabled={disabled || isBusy}
+-                    title="Download image from FPGA in ProDOS (.po) format"
+-                  >
+-                    ⬇ Save .po
+-                  </button>
+-                </>
+-              ) : (
+-                <button
+-                  type="button"
+-                  className="btn-disk-action"
+-                  onClick={() => void onDownloadHardDisk?.(drive)}
+-                  disabled={disabled || isBusy || !onDownloadHardDisk}
+-                  title="Download 2 MB ProDOS hard disk image from FPGA (.po format)"
+-                >
+-                  ⬇ Save .po
+-                </button>
+-              )}
++              <button
++                type="button"
++                className="btn-disk-action"
++                onClick={() => void onDownload(drive, 'dsk')}
++                disabled={disabled || isBusy}
++                title="Download image from FPGA in DOS 3.3 (.dsk) format"
++              >
++                ⬇ Save .dsk
++              </button>
++              <button
++                type="button"
++                className="btn-disk-action"
++                onClick={() => void onDownload(drive, 'po')}
++                disabled={disabled || isBusy}
++                title="Download image from FPGA in ProDOS (.po) format"
++              >
++                ⬇ Save .po
++              </button>
+               <button
+                 type="button"
+                 className="btn-disk-action secondary"
+@@ -193,7 +153,7 @@
+               onClick={() => fileInputRef.current?.click()}
+               disabled={disabled || isBusy}
+             >
+-              {isFloppy ? 'Insert Floppy Image...' : 'Insert Hard Disk Image...'}
++              Insert Floppy Image...
+             </button>
+           )}
+         </div>
+@@ -216,27 +176,6 @@
+         </button>
+       </header>
+ 
+-      <div className="disk-tabs" role="tablist">
+-        <button
+-          type="button"
+-          role="tab"
+-          aria-selected={activeSlot === 6}
+-          className={`disk-tab-btn ${activeSlot === 6 ? 'active' : ''}`}
+-          onClick={() => setActiveSlot(6)}
+-        >
+-          💾 Slot 6: Floppy (140 KB)
+-        </button>
+-        <button
+-          type="button"
+-          role="tab"
+-          aria-selected={activeSlot === 7}
+-          className={`disk-tab-btn ${activeSlot === 7 ? 'active' : ''}`}
+-          onClick={() => setActiveSlot(7)}
+-        >
+-          💽 Slot 7: ProDOS HD (2 MB)
+-        </button>
+-      </div>
+-
+       {error && (
+         <div className="disk-error-banner" role="alert">
+           <span>⚠️ {error}</span>
+@@ -251,7 +190,7 @@
+           <div className="disk-progress-labels">
+             <span className="progress-phase">
+               {progress.phase === 'uploading' ? 'Uploading to' : 'Downloading from'}{' '}
+-              {progress.device === 'harddisk' ? 'Slot 7' : 'Slot 6'} Drive {progress.drive}
++              Slot 6 Drive {progress.drive}
+             </span>
+             <span className="progress-detail">{progress.detail}</span>
+           </div>
+@@ -265,24 +204,13 @@
+       )}
+ 
+       <div className="disk-drives-grid">
+-        {isFloppy ? (
+-          <>
+-            {renderDriveCard(1, fileInputFloppy1, dragOver1, setDragOver1)}
+-            {renderDriveCard(2, fileInputFloppy2, dragOver2, setDragOver2)}
+-          </>
+-        ) : (
+-          <>
+-            {renderDriveCard(1, fileInputHd1, dragOver1, setDragOver1)}
+-            {renderDriveCard(2, fileInputHd2, dragOver2, setDragOver2)}
+-          </>
+-        )}
++        {renderDriveCard(1, fileInputFloppy1, dragOver1, setDragOver1)}
++        {renderDriveCard(2, fileInputFloppy2, dragOver2, setDragOver2)}
+       </div>
+ 
+       <footer className="disk-pane-footer">
+         <span className="disk-tip">
+-          {isFloppy
+-            ? 'Supported: 140 KB 5.25" floppy images (143,360 bytes). Logical sector order (.dsk, .do) is automatically translated to physical order for the FPGA.'
+-            : 'Supported: 2 MB ProDOS volumes (.po, .hdv, .2mg, max 4,096 blocks). Images smaller than 2 MB are automatically padded with zeros.'}
++          Supported: 140 KB 5.25" floppy images (143,360 bytes). Logical sector order (.dsk, .do) is automatically translated to physical order for the FPGA.
+         </span>
+       </footer>
+     </section>
+--- a/web/test/disk.test.js
++++ b/web/test/disk.test.js
+@@ -24,14 +24,6 @@
+   diskChecksum,
+   queryDiskSums,
+   downloadDisk,
+-  HD_BLOCK_BYTES,
+-  HD_BLOCKS,
+-  HD_BYTES,
+-  HD_CHUNK_BYTES,
+-  HD_CHUNKS,
+-  validateHardDiskImage,
+-  uploadHardDisk,
+-  downloadHardDisk,
+ } from '../src/disk.js'
+ 
+ test('disk dimensions match standard 140K 5.25" floppy geometry', () => {
+@@ -279,154 +271,6 @@
+   assert.equal(link.onBytes, originalOnBytes)
+ })
+ 
+-test('hard disk geometry constants match 2 MB ProDOS specifications', () => {
+-  assert.equal(HD_BLOCK_BYTES, 512)
+-  assert.equal(HD_BLOCKS, 4096)
+-  assert.equal(HD_BYTES, 2097152)
+-  assert.equal(HD_CHUNK_BYTES, 4096)
+-  assert.equal(HD_CHUNKS, 512)
+-})
+-
+-test('validateHardDiskImage parses raw images and enforces <= 2 MB', () => {
+-  // Exact 2 MB
+-  const raw2mb = new Uint8Array(HD_BYTES)
+-  raw2mb[0] = 0xa5
+-  raw2mb[HD_BYTES - 1] = 0x5a
+-  const res1 = validateHardDiskImage(raw2mb.buffer, 'drive1.po')
+-  assert.equal(res1.data.length, HD_BYTES)
+-  assert.equal(res1.originalSize, HD_BYTES)
+-  assert.equal(res1.is2mg, false)
+-  assert.equal(res1.data[0], 0xa5)
+-  assert.equal(res1.data[HD_BYTES - 1], 0x5a)
+-
+-  // Sub-2 MB image (e.g. 800 KB) is padded with zeros to 2 MB
+-  const raw800k = new Uint8Array(800 * 1024)
+-  raw800k[0] = 0x11
+-  raw800k[raw800k.length - 1] = 0x22
+-  const res2 = validateHardDiskImage(raw800k, 'small.hdv')
+-  assert.equal(res2.data.length, HD_BYTES)
+-  assert.equal(res2.originalSize, 800 * 1024)
+-  assert.equal(res2.data[0], 0x11)
+-  assert.equal(res2.data[800 * 1024 - 1], 0x22)
+-  assert.equal(res2.data[800 * 1024], 0x00) // padding
+-
+-  // Oversized image throws
+-  const oversized = new Uint8Array(HD_BYTES + 1)
+-  assert.throws(
+-    () => validateHardDiskImage(oversized, 'huge.hdv'),
+-    /exceeds 2 MB limit/,
+-  )
+-
+-  // Empty buffer throws
+-  assert.throws(
+-    () => validateHardDiskImage(new Uint8Array(0), 'empty.po'),
+-    /empty/,
+-  )
+-})
+-
+-test('validateHardDiskImage parses 2MG container files', () => {
+-  const payloadSize = 4096
+-  const file = new Uint8Array(64 + payloadSize)
+-  // '2IMG' magic
+-  file[0] = 0x32
+-  file[1] = 0x49
+-  file[2] = 0x4d
+-  file[3] = 0x47
+-
+-  const view = new DataView(file.buffer)
+-  view.setUint32(0x18, 64, true) // data offset
+-  view.setUint32(0x1c, payloadSize, true) // data length
+-
+-  file[64] = 0xee
+-  file[64 + payloadSize - 1] = 0xff
+-
+-  const res = validateHardDiskImage(file, 'test.2mg')
+-  assert.equal(res.is2mg, true)
+-  assert.equal(res.originalSize, payloadSize)
+-  assert.equal(res.data.length, HD_BYTES) // padded to 2MB
+-  assert.equal(res.data[0], 0xee)
+-  assert.equal(res.data[payloadSize - 1], 0xff)
+-  assert.equal(res.data[payloadSize], 0x00)
+-})
+-
+-test('uploadHardDisk executes 512-chunk handshake with p1/p2 command', async () => {
+-  const link = createMockLink()
+-  const payload = new Uint8Array(HD_BYTES)
+-  for (let i = 0; i < 256; i++) payload[i] = i
+-
+-  const progressEvents = []
+-  const originalOnBytes = link.onBytes
+-
+-  const uploadPromise = uploadHardDisk(link, 1, payload, {
+-    onProgress: (p) => progressEvents.push(p),
+-    timeoutMs: 1000,
+-  })
+-
+-  await new Promise((r) => setTimeout(r, 60))
+-  assert.equal(link.written[0][0], 0x70) // 'p'
+-  assert.equal(link.written[1][0], 0x31) // '1'
+-
+-  // Board responds with upload prompt
+-  link.feed('\r\nUPLOAD 2097152 bytes, send now\r\n')
+-
+-  // Stream 512 chunks
+-  for (let c = 0; c < HD_CHUNKS; c++) {
+-    while (link.written.length < 3 + c) {
+-      await new Promise((r) => setTimeout(r, 2))
+-    }
+-    assert.equal(link.written[2 + c].length, HD_CHUNK_BYTES)
+-    link.feed([ACK_BYTE])
+-  }
+-
+-  link.feed('\r\ndone\r\n> ')
+-
+-  await uploadPromise
+-
+-  assert.equal(progressEvents.length, HD_CHUNKS)
+-  assert.equal(progressEvents[HD_CHUNKS - 1].chunk, 512)
+-  assert.equal(progressEvents[HD_CHUNKS - 1].bytesSent, HD_BYTES)
+-  assert.equal(link.onBytes, originalOnBytes)
+-})
+-
+-test('downloadHardDisk streams 2 MB from FPGA with o1/o2 command', async () => {
+-  const link = createMockLink()
+-  const expected = new Uint8Array(HD_BYTES)
+-  expected[0] = 0x77
+-  expected[HD_BYTES - 1] = 0x88
+-
+-  const progressEvents = []
+-  const originalOnBytes = link.onBytes
+-
+-  const downloadPromise = downloadHardDisk(link, 2, {
+-    onProgress: (p) => progressEvents.push(p),
+-    timeoutMs: 1000,
+-  })
+-
+-  await new Promise((r) => setTimeout(r, 60))
+-  assert.equal(link.written[0][0], 0x6f) // 'o'
+-  assert.equal(link.written[1][0], 0x32) // '2'
+-
+-  // Board responds with download banner
+-  link.feed('\r\nDOWNLOAD 2097152 bytes\r\n')
+-
+-  // Feed chunks of 64 KB
+-  const chunkSize = 65536
+-  for (let i = 0; i < HD_BYTES; i += chunkSize) {
+-    link.feed(expected.subarray(i, Math.min(i + chunkSize, HD_BYTES)))
+-  }
+-
+-  link.feed('\r\ndone\r\n> ')
+-
+-  const downloaded = await downloadPromise
+-
+-  assert.equal(downloaded.length, HD_BYTES)
+-  assert.equal(downloaded[0], 0x77)
+-  assert.equal(downloaded[HD_BYTES - 1], 0x88)
+-  assert.ok(progressEvents.length > 0)
+-  assert.equal(progressEvents[progressEvents.length - 1].bytesReceived, HD_BYTES)
+-  assert.equal(link.onBytes, originalOnBytes)
+-})
+-
+ test('diskChecksum is the rotate-and-add the FPGA computes', () => {
+   assert.equal(diskChecksum(new Uint8Array(0)), 0)
+   assert.equal(diskChecksum(Uint8Array.from([1])), 1)
