@@ -2,6 +2,9 @@
 
 A complete, cycle-accurate implementation of the **Apple //e Enhanced** computer in Verilog for the [Sipeed Tang Primer 20K](https://wiki.sipeed.com/hardware/en/tang/tang-primer-20k/primer-20k.html) (Gowin GW2A-LV18PG256C8/I7) on its Dock board.
 
+> 🌐 **Live Web Console & Companion App:** [https://terenceang.github.io/apple2e_TP20K/](https://terenceang.github.io/apple2e_TP20K/)  
+> Connect directly to your Tang Primer 20K over USB-C Web Serial (Chrome or Edge) for keyboard input, screen display, floppy/hard disk image mounting, and hardware debugging with zero software installs.
+
 The design runs as a self-contained system with digital video and audio over HDMI, stereo analog headphone audio, dual Disk II floppy drives, a ProDOS SmartPort hard disk, CP/M support, modem communications, and a browser-based Web Serial companion interface.
 
 ---
@@ -156,14 +159,14 @@ make flash
 ```
 
 ### 3. Web Companion Interface
-Launch the zero-install web interface:
-```bash
-cd web
-npm install
-npm run build
-python3 -m http.server -d dist 8000
-```
-Open Chrome or Edge to `http://localhost:8000`, click **Connect USB**, and select the Dock's serial port.
+* **Published Live Web App:** Visit [https://terenceang.github.io/apple2e_TP20K/](https://terenceang.github.io/apple2e_TP20K/) in Chrome or Edge, click **Connect USB**, and select the Dock's serial port.
+* **Running Locally (Optional):**
+  ```bash
+  cd web
+  npm install
+  npm run build
+  python3 -m http.server -d dist 8000
+  ```
 
 ---
 
