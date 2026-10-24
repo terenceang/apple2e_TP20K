@@ -53,7 +53,7 @@ The design runs as a self-contained system with digital video and audio over HDM
 * **Direct USB Keyboard (Dock USB-C J8)**: Plug any standard USB keyboard directly into the second USB-C port (`J8`). The built-in hardware ULPI USB host controller interfaces with the onboard Microchip USB3317 PHY, auto-enumerates HID boot keyboards, translates scancodes directly to Apple //e ASCII characters, maps modifier keys (Left Alt / Windows key = Open-Apple, Right Alt = Closed-Apple), and routes `Ctrl` + `Alt` + `Del` directly to the Apple //e Reset line.
 * **Web Serial Console & Virtual Input**: Connect directly via Chrome or Edge at 1,000,000 baud 8N1 — provides virtual keyboard, paddle button controls, and analog joystick emulation with no background daemons, drivers, or software installs required.
 * **Disk Manager**: Live mounting, blank disk creation, and on-the-fly conversion of `.dsk`, `.do`, `.po`, and `.nib` images to `.woz`.
-* **Hardware Debugger**: Built-in serial debugger allows freezing the CPU at any instant to inspect registers, single-step instructions, examine RAM, and dump the text display.
+* **Hardware Debugger & Screen Capture**: Built-in serial debugger allows freezing the CPU at any instant to inspect registers, single-step instructions, examine RAM, and capture the live framebuffer (Text, Lo-Res, Mixed, and 280×192 Hi-Res graphics) directly into the browser companion.
 
 ---
 
@@ -130,7 +130,7 @@ When paused in debugger mode (`Ctrl+B` or via serial):
 | `m` | Memory Dump | Dumps 16 bytes of memory (subsequent `m` commands page forward). |
 | `@hhhh` | Set Address | Sets the active memory dump pointer (e.g. `@0400` or `@c0f0`). |
 | `0`, `1`, `4`, `8`, `f`, `v` | Quick Address | Jump presets for `$0000`, `$0100`, `$0400`, `$0800`, `$FA60`, and `$FFF0`. |
-| `w` | Screen Dump | Captures the entire 1 KB text display page ($0400–$07FF). |
+| `w` | Screen Dump | Captures live display framebuffer: 1 KB text/lo-res page ($0400–$07FF) plus full 8 KB hi-res graphics page ($2000/$4000) when active. |
 | `t` | Diagnostic Status | Displays video mode (`VID:T`/`VID:G`), PLL lock status, and DDR3 calibration. |
 | `i` | Drive Info | Displays Disk II head track (`H:hh`) and TF card status word (`S:ssss`). |
 | `y1`–`y4` | Reload Drive | Hot-reloads drive image 1–4 from `A2CONFIG.TXT` on the TF card. |
@@ -167,6 +167,11 @@ make flash
   npm run build
   python3 -m http.server -d dist 8000
   ```
+
+#### Web Companion Gallery
+| Virtual Keyboard & Gamepad | Storage & Disk Manager | Hardware Debugger & Live Screen Capture |
+| :---: | :---: | :---: |
+| ![Virtual Keyboard](Documents/images/keyboard.png) | ![Disk Storage Manager](Documents/images/storage.png) | ![Debugger and Screen Capture](Documents/images/debugger.png) |
 
 ---
 

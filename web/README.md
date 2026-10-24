@@ -34,6 +34,13 @@ python3 -m http.server -d web/dist 8000   # then open http://localhost:8000
 
 Press **Connect USB** and pick the Dock's serial port. Then type.
 
+### Interface Gallery
+
+| Virtual Keyboard & Gamepad | Storage & Disk Manager | Hardware Debugger & Hi-Res Screen Capture |
+| :---: | :---: | :---: |
+| ![Virtual Keyboard](../Documents/images/keyboard.png) | ![Disk Storage Manager](../Documents/images/storage.png) | ![Debugger and Screen Capture](../Documents/images/debugger.png) |
+
+
 ### Which port?
 
 The Dock's BL702 shows one serial port, but the picker may list others (and on
@@ -213,9 +220,11 @@ RAM while the CPU is running: the 64 KB is time-multiplexed between the CPU and
 the video generator, and stealing cycles from either is how the display goes
 wrong.
 
-The screen shows text only. Hi-res is not rendered in the browser: `w` dumps
-the text page, not `$2000`/`$4000`, so a hi-res screen is only visible on the
-HDMI output.
+The screen renders both text and graphics modes. When in hi-res graphics mode,
+`w` dumps the full 8 KB graphics page (`$HR`, 8,192 bytes from `$2000` or `$4000`),
+which the browser renders directly on the phosphor canvas (280×192 dots).
+Mixed mode (160 graphics lines + 4 text rows) and Lo-Res (40×48 blocks) are
+likewise rendered accurately.
 
 The dump is memory order, and the renderer mirrors `video_generator.v` exactly:
 
