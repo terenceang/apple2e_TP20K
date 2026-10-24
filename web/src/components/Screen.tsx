@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { AppleStream, screenToText } from '../stream.js'
 import { dotRow, HAS_GLYPHS, GLYPH_W, GLYPH_H, hasGlyphs, parseCharRom, setUserCharRom } from '../charset.js'
-import { LORES_PALETTE, SCR_COLS, SCR_TEXT_ROWS, SCR_GFX_ROWS, SCR_GFX_ROW_BYTES, hgrScanlineOffset, SCR_GFX_BYTES } from '../protocol.js'
+import { textPageIndex, SCR_COLS, SCR_TEXT_ROWS, SCR_GFX_ROWS, SCR_GFX_ROW_BYTES, hgrScanlineOffset, SCR_GFX_BYTES } from '../protocol.js'
+import { LORES_PALETTE, DHR_PHASE, loresNibble, rol1, hiresSamples, decodeLine } from '../ntsc.js'
 import {
   PREF_SCREEN_PALETTE,
   PREF_SCREEN_SCANLINES,
@@ -407,75 +408,20 @@ function drawHires(
   const data = img.data
 
   if (theme === 'color') {
-    // Authentic Apple II NTSC composite artifact color demodulation (matching video_generator.v)
+    // NTSC composite colour, decoded as video_generator.v does (ntsc.js)
     const samples = new Uint8Array(targetW)
+    const line = new Uint8Array(targetW * 3)
+    const phase = isDh ? DHR_PHASE : 0
     for (let y = 0; y < numScanlines; y++) {
-      const offset = hgrScanlineOffset(y)
-
-      if (isDh) {
-        // Double Hi-Res (560x192): 7 dots from Aux RAM, 7 dots from Main RAM per column
-        for (let col = 0; col < 40; col++) {
-          const auxByte = screen.aux[offset + col] ?? 0
-          const mainByte = screen.hgr[offset + col] ?? 0
-          for (let dot = 0; dot < 7; dot++) {
-            samples[col * 14 + dot] = (auxByte >> dot) & 1
-          }
-          for (let dot = 0; dot < 7; dot++) {
-            samples[col * 14 + 7 + dot] = (mainByte >> dot) & 1
-          }
-        }
-      } else {
-        // Standard Hi-Res (280x192): 7 dots from Main RAM, 2 samples per dot with delay shift
-        let prevLast = 0
-        for (let col = 0; col < 40; col++) {
-          const byte = screen.hgr[offset + col] ?? 0
-          const delay = (byte >> 7) & 1
-          for (let dot = 0; dot < 7; dot++) {
-            const cur = (byte >> dot) & 1
-            const left = dot === 0 ? prevLast : (byte >> (dot - 1)) & 1
-            samples[col * 14 + dot * 2] = delay ? left : cur
-            samples[col * 14 + dot * 2 + 1] = cur
-          }
-          prevLast = (byte >> 6) & 1
-        }
-      }
-
+      hiresSamples(screen.hgr, isDh ? screen.aux : null, hgrScanlineOffset(y), samples)
+      decodeLine(samples, phase, line)
       for (let x = 0; x < targetW; x++) {
-        const s_m2 = x >= 2 ? samples[x - 2] : 0
-        const s_m1 = x >= 1 ? samples[x - 1] : 0
-        const s_0 = samples[x]
-        const s_p1 = x < targetW - 1 ? samples[x + 1] : 0
-
-        const yVal = s_m2 + s_m1 + s_0 + s_p1
-        const ph = (x + (isDh ? 1 : 0)) & 3 // double hi-res is one sample on (video_generator.v)
-
-        const ci =
-          chromaI(s_m2, (ph + 2) & 3) +
-          chromaI(s_m1, (ph + 3) & 3) +
-          chromaI(s_0, ph) +
-          chromaI(s_p1, (ph + 1) & 3)
-        const cq =
-          chromaQ(s_m2, (ph + 2) & 3) +
-          chromaQ(s_m1, (ph + 3) & 3) +
-          chromaQ(s_0, ph) +
-          chromaQ(s_p1, (ph + 1) & 3)
-
-        const r = Math.max(0, Math.min(255, 64 * yVal + 80 * ci))
-        const g = Math.max(0, Math.min(255, 64 * yVal - 41 * ci - 20 * cq))
-        const b = Math.max(0, Math.min(255, 64 * yVal + 101 * cq))
-
         const idx0 = (y * 2 * targetW + x) * 4
-        const idx1 = ((y * 2 + 1) * targetW + x) * 4
-
-        data[idx0]     = r
-        data[idx0 + 1] = g
-        data[idx0 + 2] = b
-        data[idx0 + 3] = 255
-
-        data[idx1]     = r
-        data[idx1 + 1] = g
-        data[idx1 + 2] = b
-        data[idx1 + 3] = 255
+        const idx1 = idx0 + targetW * 4
+        data[idx0] = data[idx1] = line[x * 3]
+        data[idx0 + 1] = data[idx1 + 1] = line[x * 3 + 1]
+        data[idx0 + 2] = data[idx1 + 2] = line[x * 3 + 2]
+        data[idx0 + 3] = data[idx1 + 3] = 255
       }
     }
   } else {
@@ -544,28 +490,17 @@ function drawHires(
   ctx.putImageData(img, 0, 0)
 }
 
-function chromaI(s: number, q: number): number {
-  if (!s) return 0
-  if (q === 0) return 1
-  if (q === 2) return -1
-  return 0
-}
-
-function chromaQ(s: number, q: number): number {
-  if (!s) return 0
-  if (q === 1) return 1
-  if (q === 3) return -1
-  return 0
-}
-
-/** Lo-res: 40 blocks across, four scanlines from the high nibble and four from
- *  the low one, which is what video_generator.v does with glyph_row[2]. */
+/** Lo-res: 40 blocks across, the low nibble's four scanlines on top and the
+ *  high nibble's below, as video_generator.v does with glyph_row[2]. Double
+ *  lo-res (AN3 off with 80COL, the aux text page in screen.aux): the aux
+ *  block is the left half of each cell, as colour ROL1 of its nibble. */
 function drawLores(
   ctx: CanvasRenderingContext2D,
   row: number,
   screen: ScreenFrame,
   cells: Array<Array<{ code: number }>>
 ) {
+  const dl = Boolean(screen.dhires && !screen.hires && screen.aux && screen.aux.length >= 1024)
   for (let col = 0; col < SCR_COLS; col++) {
     let byte = 0
     if (screen.mixed && row >= (SCR_TEXT_ROWS - SCR_GFX_ROWS) && screen.gfx && screen.gfx.length >= SCR_GFX_BYTES) {
@@ -576,9 +511,14 @@ function drawLores(
     }
     const x = col * LORES_BLOCK_W * SCALE
     const y = row * GLYPH_H * SCALE
-    ctx.fillStyle = LORES_PALETTE_RGB[(byte >> 4) & 0x0f]
-    ctx.fillRect(x, y, LORES_BLOCK_W * SCALE, 4 * SCALE)
-    ctx.fillStyle = LORES_PALETTE_RGB[byte & 0x0f]
-    ctx.fillRect(x, y + 4 * SCALE, LORES_BLOCK_W * SCALE, 4 * SCALE)
+    for (const bottom of [false, true]) {
+      const by = y + (bottom ? 4 * SCALE : 0)
+      ctx.fillStyle = LORES_PALETTE_RGB[loresNibble(byte, bottom)]
+      ctx.fillRect(x, by, LORES_BLOCK_W * SCALE, 4 * SCALE)
+      if (dl) {
+        ctx.fillStyle = LORES_PALETTE_RGB[rol1(loresNibble(screen.aux[textPageIndex(row, col)] ?? 0, bottom))]
+        ctx.fillRect(x, by, (LORES_BLOCK_W / 2) * SCALE, 4 * SCALE)
+      }
+    }
   }
 }

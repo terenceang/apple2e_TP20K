@@ -922,7 +922,9 @@ module serial_debugger (
                 M_SCREEN: begin
                     case (seq_step)
                         5'd0: begin // "\r\n$SS"
-                            scr_flags <= {1'b0, (dhires && col80 && hires_mode && !text_mode),
+                            // DHIRES: AN3 off with 80COL in graphics, i.e. double
+                            // hi-res, or double lo-res when HIRES is off
+                            scr_flags <= {1'b0, (dhires && col80 && !text_mode),
                                           pll_locked, hires_mode, mixed_mode,
                                           page2, text_mode};
                             dbg_aux_read <= 1'b0;
@@ -943,6 +945,7 @@ module serial_debugger (
                         5'd3: begin
                             if (scr_left == 14'd0) begin
                                 if (hires_mode) seq_step <= 5'd11;
+                                else if (dhires && col80 && !text_mode) seq_step <= 5'd14;
                                 else if (mixed_mode) seq_step <= 5'd6;
                                 else seq_step <= 5'd9;
                             end else begin
@@ -1010,8 +1013,10 @@ module serial_debugger (
                         end
                         5'd14: if (!tx_fifo_full) begin // "\r\n$AX"
                             sub_say(STR_AX_START, STR_AX_LEN, 5'd15);
-                            scr_addr     <= page2 ? 16'h4000 : 16'h2000;
-                            scr_left     <= 14'd8192;
+                            // the aux half: the hi-res page, or for double
+                            // lo-res the 1 KB text page
+                            scr_addr     <= !hires_mode ? scr_page : page2 ? 16'h4000 : 16'h2000;
+                            scr_left     <= hires_mode ? 14'd8192 : 14'd1024;
                             scr_col      <= 6'd0;
                             scr_wait     <= 3'd0;
                             dbg_aux_read <= 1'b1;
@@ -1019,7 +1024,7 @@ module serial_debugger (
                         5'd15: begin
                             if (scr_left == 14'd0) begin
                                 dbg_aux_read <= 1'b0;
-                                seq_step     <= 5'd9;
+                                seq_step     <= (!hires_mode && mixed_mode) ? 5'd6 : 5'd9;
                             end else begin
                                 scr_read_byte(5'd16);
                             end

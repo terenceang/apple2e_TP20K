@@ -236,7 +236,7 @@ module top (
         .wp_hit(debug_wp_hit),
         .text_mode(text_mode),
         .mixed_mode(mixed_mode),
-        .page2(page2),
+        .page2(page2 && !store80),   // the page on screen: with 80STORE, PAGE2 selects aux
         .hires_mode(hires_mode),
         .dhires(dhires),
         .col80(col80),

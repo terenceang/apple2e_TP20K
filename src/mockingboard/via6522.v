@@ -5,7 +5,7 @@
 module via6522 (
     input  wire        clk,          // 27.0 MHz system clock
     input  wire        reset,        // Active-high reset
-    input  wire        ce_1m,        // 1.023 MHz clock enable
+    input  wire        ce_1m,        // the timers' tick: the 6502's bus step (see mockingboard_card)
     input  wire        bus_cycle,    // Valid CPU/debugger bus cycle
     input  wire        cs,           // Chip select (active high)
     input  wire        we,           // Write enable (active high)
@@ -146,9 +146,9 @@ module via6522 (
             end
 
             // -----------------------------------------------------------------
-            // Timer 1 and Timer 2 Countdown on ce_1m (1.023 MHz)
+            // Timer 1 and Timer 2 Countdown, one per CPU step
             // -----------------------------------------------------------------
-            // Both timers decrement continuously on ce_1m at all times, including
+            // Both timers decrement continuously on every step, including
             // immediately after reset before any configuration writes occur.
             // This enables Apple II Mockingboard detection routines (e.g. Skyfox)
             // to measure timer decrements across successive reads of T1C_L ($C404).

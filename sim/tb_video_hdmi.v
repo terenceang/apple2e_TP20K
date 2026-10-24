@@ -39,6 +39,8 @@ module tb_video_hdmi;
     reg [1:0] scanl = 2'd0;                 // scanlines: 0 off .. 3 75%
     reg col80 = 1'b0, store80 = 1'b0, dhires = 1'b0, altchar = 1'b0;
     reg dh_phase   = 1'b0;                  // expect double hi-res page 1
+    reg lr_phase   = 1'b0;                  // expect lo-res page 1
+    reg dl_phase   = 1'b0;                  // expect double lo-res page 1
     reg wide_phase = 1'b0;                  // expect 80-column text (aux char first)
     reg skip      = 1'b0;                   // frame in which the mode changes: not checked
     reg [15:0] txt_base = 16'h0400;         // text page the model reads
@@ -133,6 +135,64 @@ module tb_video_hdmi;
                 // web/test/charset.test.js pins the same convention against the
                 // real 342-0265-A dump.
                 expect_apple = ~g[dot] ? 24'h20E820 : 24'h020602;
+            end
+        end
+    endfunction
+
+    // The //e's 16 colours, as literals: lo-res colour n is the nibble n
+    // shifted out with bit k at subcarrier phase k. Hi-res violet/blue/
+    // orange/green are 3/6/9/C and double hi-res nibble v is colour ROL1(v)
+    // (checked below), so these pin all three modes to one table rather than
+    // to the decode formula the RTL and the models share.
+    function [23:0] pal(input [3:0] n);
+        case (n)
+            4'h0: pal = 24'h000000; 4'h1: pal = 24'h901740; 4'h2: pal = 24'h402CA5; 4'h3: pal = 24'hD043E5;
+            4'h4: pal = 24'h006940; 4'h5: pal = 24'h808080; 4'h6: pal = 24'h3095E5; 4'h7: pal = 24'hC0ACFF;
+            4'h8: pal = 24'h405400; 4'h9: pal = 24'hD06B1B; 4'hA: pal = 24'h808080; 4'hB: pal = 24'hFF97C0;
+            4'hC: pal = 24'h30BD1B; 4'hD: pal = 24'hC0D45B; 4'hE: pal = 24'h70E9C0; 4'hF: pal = 24'hFFFFFF;
+        endcase
+    endfunction
+
+    // A 7-dot byte of a double hi-res line that repeats nibble v, from dot x0.
+    function [7:0] dh_fill(input integer v, input integer x0);
+        integer d;
+        begin
+            dh_fill = 8'h00;
+            for (d = 0; d < 7; d = d + 1) dh_fill[d] = (v >> ((x0 + d) % 4)) & 1;
+        end
+    endfunction
+
+    // Lo-res page 1: a block per 14 x 8 cell, the low nibble on top.
+    function [23:0] expect_lores;
+        input integer x, y;
+        integer ay;
+        reg [7:0] c;
+        begin
+            if (x < 80 || x >= 640 || y < 48 || y >= 432) expect_lores = 24'h000000;
+            else begin
+                ay = (y - 48) / 2;
+                c  = ram[16'h0400 + row_base(ay / 8) + (x - 80) / 14];
+                expect_lores = pal((ay % 8) < 4 ? c[3:0] : c[7:4]);
+            end
+        end
+    endfunction
+
+    // Double lo-res page 1: aux block in the left 7 pixels of each cell, as
+    // colour ROL1 of its nibble (the double hi-res rule), main in the right 7.
+    function [23:0] expect_dlores;
+        input integer x, y;
+        integer ay, d;
+        reg [7:0] c;
+        reg [3:0] n;
+        begin
+            if (x < 80 || x >= 640 || y < 48 || y >= 432) expect_dlores = 24'h000000;
+            else begin
+                ay = (y - 48) / 2;
+                d  = (x - 80) % 14;
+                c  = (d < 7) ? aux_ram[16'h0400 + row_base(ay / 8) + (x - 80) / 14]
+                             : ram[16'h0400 + row_base(ay / 8) + (x - 80) / 14];
+                n  = (ay % 8) < 4 ? c[3:0] : c[7:4];
+                expect_dlores = pal((d < 7) ? {n[2:0], n[3]} : n);
             end
         end
     endfunction
@@ -324,7 +384,8 @@ module tb_video_hdmi;
         if (x >= 0) begin
             got  = {tmds_dec(s2), tmds_dec(s1), tmds_dec(s0)};
             want = bars ? expect_bars(x, y) : hgr_phase ? expect_hgr(x, y) :
-                   dh_phase ? expect_dhgr(x, y) :
+                   dh_phase ? expect_dhgr(x, y) : lr_phase ? expect_lores(x, y) :
+                   dl_phase ? expect_dlores(x, y) :
                    wide_phase ? expect_apple80(x, y) : expect_apple(x, y);
             if (frame >= 1 && !skip && want !== 24'hxxxxxx) begin
                 checked = checked + 1;
@@ -419,7 +480,7 @@ module tb_video_hdmi;
     reg [7:0] real_file [0:65535];
     integer   probe_fd;
     // Declared before any use (this iverilog rejects declaration-after-use)
-    integer i, frame_a_checked, bars_checked;
+    integer i, v, frame_a_checked, bars_checked;
     initial begin
         // $readmemh cannot report failure, so look for the file first.
         probe_fd = $fopen("roms/apple2e_char.hex", "r");
@@ -570,19 +631,20 @@ module tb_video_hdmi;
         $display("%0d Hi-Res pixels checked", checked - bars_checked);
         // Interior of each solid line, away from its ends: the palette.
         // (the model is exact per pixel; these pin its constants to real colours)
-        if (expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 3) !== 24'h30BD1B ||   // green
-            expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 5) !== 24'hD043E5 ||   // violet
-            expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 6) !== 24'hFFFFFF) begin
+        if (expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 3) !== pal(4'hC) ||   // green
+            expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 5) !== pal(4'h3) ||   // violet
+            expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 6) !== pal(4'hF)) begin
             $display("FAIL: solid HGR lines are %06h %06h %06h, expected 30BD1B D043E5 FFFFFF",
                      expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 3),
                      expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 5),
                      expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 6));
             errors = errors + 1;
         end
-        // bit 7 set: solid blue/orange, whichever sample phase the pixel is at
-        if (expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 4) !== 24'hD06B1B &&
-            expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 4) !== 24'h3095E5) begin
-            $display("FAIL: bit-7 HGR line is %06h", expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 4));
+        // bit 7 set: AA/D5 is orange (HCOLOR=5), not blue -- a delay applied
+        // the wrong way would turn it blue
+        if (expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 4) !== pal(4'h9)) begin
+            $display("FAIL: bit-7 HGR line is %06h, expected orange %06h",
+                     expect_hgr(80 + 14 * 10 + 4, 48 + 2 * 4), pal(4'h9));
             errors = errors + 1;
         end
         // Colour TV mode (key S3): the same screen through the softer decode.
@@ -597,7 +659,7 @@ module tb_video_hdmi;
         $display("colour TV: green %06h violet %06h white %06h bit-7 %06h; %0d pixels differ from the sharp decode",
                  tvpix[0], tvpix[2], tvpix[3], tvpix[1], tv_diff);
         if (!near(tvpix[0], 24'h30BD1B) || !near(tvpix[2], 24'hD043E5) || tvpix[3] !== 24'hFFFFFF ||
-            !(near(tvpix[1], 24'hD06B1B) || near(tvpix[1], 24'h3095E5)) || tv_diff < 1000) begin
+            !near(tvpix[1], pal(4'h9)) || tv_diff < 1000) begin
             $display("FAIL: colour TV mode's solid colours or its change to the picture");
             errors = errors + 1;
         end
@@ -628,6 +690,13 @@ module tb_video_hdmi;
             ram[16'h2000 + i]     = (i * 29) ^ (i >> 2) ^ 8'h31;
             aux_ram[16'h2000 + i] = (i * 53) ^ (i >> 3) ^ 8'h4B;
         end
+        // Lines 0..15 are solid fills of nibble v = line: the 560-dot stream
+        // repeats v's bits (bit 0 leftmost), aux byte then main byte per column.
+        for (v = 0; v < 16; v = v + 1)
+            for (i = 0; i < 40; i = i + 1) begin
+                aux_ram[16'h2000 + (v % 8) * 1024 + (v / 8) * 128 + i] = dh_fill(v, 14 * i);
+                ram[16'h2000 + (v % 8) * 1024 + (v / 8) * 128 + i]     = dh_fill(v, 14 * i + 7);
+            end
         skip = 1'b1; wide_phase = 1'b0; dh_phase = 1'b1;
         text_mode = 1'b0; mixed_mode = 1'b0; hires_mode = 1'b1;
         page2 = 1'b0; store80 = 1'b0; col80 = 1'b1; dhires = 1'b1;
@@ -640,6 +709,15 @@ module tb_video_hdmi;
             errors = errors + 1;
         end
         $display("%0d double hi-res pixels checked", checked - bars_checked);
+        // Double hi-res nibble v is lo-res colour ROL1(v): a lone first dot is
+        // dark blue (2), not magenta (1). Apple's DHGR table and AppleWin agree;
+        // decoded at the hi-res phase it was one step round (PoP's sky green).
+        for (v = 0; v < 16; v = v + 1)
+            if (expect_dhgr(80 + 14 * 10 + 4, 48 + 2 * v) !== pal({v[2:0], v[3]})) begin
+                $display("FAIL: double hi-res nibble %h is %06h, expected lo-res %h %06h", v[3:0],
+                         expect_dhgr(80 + 14 * 10 + 4, 48 + 2 * v), {v[2:0], v[3]}, pal({v[2:0], v[3]}));
+                errors = errors + 1;
+            end
         // ALTCHARSET on, 40 columns: $40-$7F read the $200 block instead of flashing.
         bars_checked = checked;
         skip = 1'b1; dh_phase = 1'b0; wide_phase = 1'b0;
@@ -654,6 +732,36 @@ module tb_video_hdmi;
             errors = errors + 1;
         end
         $display("%0d ALTCHARSET pixels checked", checked - bars_checked);
+        // Lo-res page 1, every colour in both halves of a block.
+        bars_checked = checked;
+        for (i = 0; i < 24 * 40; i = i + 1)
+            ram[16'h0400 + row_base(i / 40) + (i % 40)] = ((i % 16) << 4) | ((i / 16 + i) % 16);
+        skip = 1'b1; altchar = 1'b0; lr_phase = 1'b1;
+        text_mode = 1'b0; hires_mode = 1'b0; mixed_mode = 1'b0;
+        wait (frame == 15);
+        skip = 1'b0;
+        wait (frame == 16);
+        if (checked - bars_checked < 720 * 480 - 4 || checked - bars_checked > 720 * 480 + 4) begin
+            $display("FAIL: checked %0d lo-res pixels, expected about %0d",
+                     checked - bars_checked, 720 * 480);
+            errors = errors + 1;
+        end
+        $display("%0d lo-res pixels checked", checked - bars_checked);
+        // Double lo-res page 1: 80COL + AN3 off, lo-res; aux differs from main.
+        bars_checked = checked;
+        for (i = 0; i < 24 * 40; i = i + 1)
+            aux_ram[16'h0400 + row_base(i / 40) + (i % 40)] = ((i * 7 % 16) << 4) | ((i * 3 + 5) % 16);
+        skip = 1'b1; lr_phase = 1'b0; dl_phase = 1'b1;
+        col80 = 1'b1; dhires = 1'b1;
+        wait (frame == 17);
+        skip = 1'b0;
+        wait (frame == 18);
+        if (checked - bars_checked < 720 * 480 - 4 || checked - bars_checked > 720 * 480 + 4) begin
+            $display("FAIL: checked %0d double lo-res pixels, expected about %0d",
+                     checked - bars_checked, 720 * 480);
+            errors = errors + 1;
+        end
+        $display("%0d double lo-res pixels checked", checked - bars_checked);
         if (errors == 0) $display("tb_video_hdmi: PASS");
         else             $display("tb_video_hdmi: FAIL (%0d errors)", errors);
         $finish;

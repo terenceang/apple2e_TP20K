@@ -25,7 +25,7 @@ module video_generator (
     input  wire        page2,        // 1: Page 2, 0: Page 1
     input  wire        hires_mode,   // 1: Hi-Res, 0: Lo-Res
     input  wire        col80,        // 1: 80-column text (aux byte first, then main)
-    input  wire        dhires,       // 1: double hi-res (with col80 and HIRES): aux byte then main, 560 dots
+    input  wire        dhires,       // AN3 off: with col80, double hi-res (HIRES) or double lo-res
     input  wire        altchar,      // 1: alternate character set (MouseText, no flashing)
     input  wire        store80,      // 1: 80STORE, PAGE2 no longer selects the display page
     input  wire        color_tv,     // 1: hi-res as a composite colour TV shows it (softer; key S3)
@@ -232,7 +232,7 @@ module video_generator (
     // green, and the one-sample shift of a delayed byte turns them into blue
     // and orange; 1111 is white and a 0101 dot pattern fills solid, as on a TV.
     // The channel constants (64/unit of luma, then I and Q terms) put those
-    // four at D043E5 / 30BD1B / 3095E5 / D06B1B, within a few counts of the lo-res palette.
+    // four at D043E5 / 30BD1B / 3095E5 / D06B1B, lo-res colours 3, C, 6 and 9.
     wire       hgr_cur   = char_code_display[dot_index];
     wire       hgr_left  = (dot_index == 3'd0) ? prev_last : char_code_display[dot_index - 3'd1];
     wire       hgr_on_std = (char_code_display[7] && !sub_col[0]) ? hgr_left : hgr_cur;
@@ -312,43 +312,36 @@ module video_generator (
     endfunction
     wire [7:0] tv_r = sat8(tv_rs), tv_g = sat8(tv_gs), tv_b = sat8(tv_bs);
 
+    // Lo-res is the same signal: a block's nibble goes out at the dot clock,
+    // bit k at subcarrier phase k, so its colour is this decode of the
+    // nibble (no table of its own), and lo-res orange is hi-res orange as on
+    // a //e. Top half of a block is the low nibble.
+    // Double lo-res (80COL, AN3 off, lo-res graphics): an aux block in the
+    // left 7 dots of each cell, the main block in the right 7. The aux half
+    // runs at double hi-res's dot timing, one sample on, so its nibble n
+    // shows as colour ROL1(n), as in double hi-res; main is plain lo-res.
+    wire       dl      = col80 && dhires && !hires_mode && !is_text_line;
+    wire [3:0] lr_main = glyph_row[2] ? char_code_display[7:4] : char_code_display[3:0];
+    wire [3:0] lr_aux  = glyph_row[2] ? aux_disp[7:4] : aux_disp[3:0];
+    wire [3:0] lores_color_idx = (dl && !right_half) ? {lr_aux[2:0], lr_aux[3]} : lr_main;
+
     reg [7:0] hgr_r, hgr_g, hgr_b;
     integer   hgr_y, hgr_ci, hgr_cq;
     always @(*) begin
-        hgr_y  = hgr_hist[1] + hgr_hist[0] + hgr_on + hgr_next;
-        hgr_ci = chroma_i(hgr_hist[1], hgr_ph + 2'd2) + chroma_i(hgr_hist[0], hgr_ph + 2'd3)
-               + chroma_i(hgr_on,      hgr_ph)        + chroma_i(hgr_next,    hgr_ph + 2'd1);
-        hgr_cq = chroma_q(hgr_hist[1], hgr_ph + 2'd2) + chroma_q(hgr_hist[0], hgr_ph + 2'd3)
-               + chroma_q(hgr_on,      hgr_ph)        + chroma_q(hgr_next,    hgr_ph + 2'd1);
+        if (hires_mode) begin
+            hgr_y  = hgr_hist[1] + hgr_hist[0] + hgr_on + hgr_next;
+            hgr_ci = chroma_i(hgr_hist[1], hgr_ph + 2'd2) + chroma_i(hgr_hist[0], hgr_ph + 2'd3)
+                   + chroma_i(hgr_on,      hgr_ph)        + chroma_i(hgr_next,    hgr_ph + 2'd1);
+            hgr_cq = chroma_q(hgr_hist[1], hgr_ph + 2'd2) + chroma_q(hgr_hist[0], hgr_ph + 2'd3)
+                   + chroma_q(hgr_on,      hgr_ph)        + chroma_q(hgr_next,    hgr_ph + 2'd1);
+        end else begin
+            hgr_y  = lores_color_idx[0] + lores_color_idx[1] + lores_color_idx[2] + lores_color_idx[3];
+            hgr_ci = lores_color_idx[0] - lores_color_idx[2];
+            hgr_cq = lores_color_idx[1] - lores_color_idx[3];
+        end
         hgr_r  = clamp8(64 * hgr_y + 80 * hgr_ci);
         hgr_g  = clamp8(64 * hgr_y - 41 * hgr_ci - 20 * hgr_cq);
         hgr_b  = clamp8(64 * hgr_y + 101 * hgr_cq);
-    end
-
-    // Lo-Res graphics support:
-    wire [3:0] lores_color_idx = glyph_row[2] ? char_code_display[7:4] : char_code_display[3:0];
-
-    // Lo-Res 16-color RGB palette
-    reg [7:0] lores_r, lores_g, lores_b;
-    always @(*) begin
-        case (lores_color_idx)
-            4'h0: begin lores_r = 8'h00; lores_g = 8'h00; lores_b = 8'h00; end // Black
-            4'h1: begin lores_r = 8'h90; lores_g = 8'h17; lores_b = 8'h40; end // Magenta
-            4'h2: begin lores_r = 8'h40; lores_g = 8'h2C; lores_b = 8'hA5; end // Dark Blue
-            4'h3: begin lores_r = 8'hD0; lores_g = 8'h43; lores_b = 8'hE5; end // Purple
-            4'h4: begin lores_r = 8'h00; lores_g = 8'h69; lores_b = 8'h40; end // Dark Green
-            4'h5: begin lores_r = 8'h80; lores_g = 8'h80; lores_b = 8'h80; end // Gray 1
-            4'h6: begin lores_r = 8'h2F; lores_g = 8'h95; lores_b = 8'hE5; end // Medium Blue
-            4'h7: begin lores_r = 8'hBF; lores_g = 8'hAB; lores_b = 8'hFF; end // Light Blue
-            4'h8: begin lores_r = 8'h40; lores_g = 8'h54; lores_b = 8'h00; end // Brown
-            4'h9: begin lores_r = 8'hE0; lores_g = 8'h6A; lores_b = 8'h1A; end // Orange
-            4'hA: begin lores_r = 8'h80; lores_g = 8'h80; lores_b = 8'h80; end // Gray 2
-            4'hB: begin lores_r = 8'hFF; lores_g = 8'h96; lores_b = 8'hBF; end // Pink
-            4'hC: begin lores_r = 8'h30; lores_g = 8'hC0; lores_b = 8'h1A; end // Light Green
-            4'hD: begin lores_r = 8'hBF; lores_g = 8'hD3; lores_b = 8'h5A; end // Yellow
-            4'hE: begin lores_r = 8'h6F; lores_g = 8'hE8; lores_b = 8'hBF; end // Aquamarine
-            4'hF: begin lores_r = 8'hFF; lores_g = 8'hFF; lores_b = 8'hFF; end // White
-        endcase
     end
 
     // Output color assignment
@@ -362,13 +355,11 @@ module video_generator (
             pix_r = pixel_on ? 8'h20 : 8'h02;
             pix_g = pixel_on ? 8'hE8 : 8'h06;
             pix_b = pixel_on ? 8'h20 : 8'h02;
-        end else if (hires_mode) begin
-            pix_r = color_tv ? tv_r : hgr_r;
-            pix_g = color_tv ? tv_g : hgr_g;
-            pix_b = color_tv ? tv_b : hgr_b;
+        end else if (hires_mode && color_tv) begin
+            pix_r = tv_r; pix_g = tv_g; pix_b = tv_b;
         end else begin
-            // Lo-Res graphics color
-            pix_r = lores_r; pix_g = lores_g; pix_b = lores_b;
+            // Hi-res, double hi-res and lo-res: the NTSC decode above
+            pix_r = hgr_r; pix_g = hgr_g; pix_b = hgr_b;
         end
     end
 
