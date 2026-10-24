@@ -256,8 +256,10 @@ module video_generator (
         else       hgr_hist <= in_apple_x ? {hgr_hist[0], hgr_on} : 2'b00;
     end
 
-    // Phase of pixel n: 14 * col + sub_col mod 4.
-    wire [1:0] hgr_ph = {col_cnt[0], 1'b0} + sub_col[1:0];
+    // Phase of pixel n: 14 * col + sub_col mod 4, one sample on in double
+    // hi-res: a lone aux bit 0 is then dark blue, not magenta, and the
+    // colours match AppleWin's (Prince of Persia's sky was green, not orange).
+    wire [1:0] hgr_ph = {col_cnt[0], 1'b0} + sub_col[1:0] + {1'b0, dh};
     function integer chroma_i(input s, input [1:0] q);
         chroma_i = !s ? 0 : (q == 2'd0) ? 1 : (q == 2'd2) ? -1 : 0;
     endfunction

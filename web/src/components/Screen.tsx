@@ -447,7 +447,7 @@ function drawHires(
         const s_p1 = x < targetW - 1 ? samples[x + 1] : 0
 
         const yVal = s_m2 + s_m1 + s_0 + s_p1
-        const ph = x & 3
+        const ph = (x + (isDh ? 1 : 0)) & 3 // double hi-res is one sample on (video_generator.v)
 
         const ci =
           chromaI(s_m2, (ph + 2) & 3) +

@@ -259,7 +259,7 @@ module tb_video_hdmi;
                 yy = 0; ci = 0; cq = 0;
                 for (m = n - 2; m <= n + 1; m = m + 1) begin
                     s  = dhgr_sample(lbase, m);
-                    ph = (m + 4) % 4;
+                    ph = (m + 5) % 4;     // one sample on from hi-res
                     if (s) begin
                         yy = yy + 1;
                         case (ph)
