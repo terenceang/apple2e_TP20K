@@ -21,11 +21,15 @@ const rgb = (c: number[]) => `rgb(${c[0]},${c[1]},${c[2]})`
 // Precompute lo-res palette RGB strings once to avoid dynamic allocations during rendering.
 const LORES_PALETTE_RGB = LORES_PALETTE.map(rgb)
 
-export type PhosphorTheme = 'green' | 'amber' | 'white'
+export type PhosphorTheme = 'color' | 'green' | 'amber' | 'white'
 
 const PALETTES: Record<PhosphorTheme, { on: number[]; off: number[]; label: string; dot: string }> = {
-  // green.on/off are video_generator.v's text phosphor; the other themes are
-  // this pane's own cosmetic choices.
+  color: {
+    on: [0x20, 0xe8, 0x20],
+    off: [0x00, 0x00, 0x00],
+    label: 'Color (NTSC)',
+    dot: 'linear-gradient(135deg, #30bd1b 25%, #d043e5 50%, #d06b1b 75%, #3095e5 100%)',
+  },
   green: {
     on: [0x20, 0xe8, 0x20],
     off: [0x02, 0x06, 0x02],
@@ -72,8 +76,8 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
 
   // Persistent Display Options
   const [palette, setPaletteState] = useState<PhosphorTheme>(() => {
-    const saved = getSavedString(store, PREF_SCREEN_PALETTE, 'green')
-    return saved === 'amber' || saved === 'white' ? saved : 'green'
+    const saved = getSavedString(store, PREF_SCREEN_PALETTE, 'color')
+    return saved === 'color' || saved === 'green' || saved === 'amber' || saved === 'white' ? saved : 'color'
   })
   const [scanlines, setScanlinesState] = useState(() =>
     getSavedBool(store, PREF_SCREEN_SCANLINES, false),
@@ -157,7 +161,7 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
 
     // 1. If in Hi-Res mode, draw the 280x192 graphics scanlines
     if (screen.hires && screen.hgr && screen.hgr.length >= 8192) {
-      drawHires(ctx, screen, onRgb, offRgb)
+      drawHires(ctx, screen, palette, curPal)
     }
 
     // 2. Draw text or lo-res rows
@@ -233,8 +237,8 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
       {showOptions && (
         <div className="options-strip screen-options" role="region" aria-label="Screen Options">
           <div className="option-group">
-            <span className="opt-label">Phosphor:</span>
-            {(['green', 'amber', 'white'] as PhosphorTheme[]).map((p) => (
+            <span className="opt-label">Display:</span>
+            {(['color', 'green', 'amber', 'white'] as PhosphorTheme[]).map((p) => (
               <button
                 key={p}
                 type="button"
@@ -335,28 +339,123 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
   )
 }
 
-/** Hi-Res graphics renderer: 280x192 monochrome phosphor dots. */
+/** Hi-Res graphics renderer: full NTSC composite artifact color or monochrome phosphor. */
 function drawHires(
   ctx: CanvasRenderingContext2D,
   screen: ScreenFrame,
-  onRgb: string,
-  offRgb: string
+  theme: PhosphorTheme,
+  palette: { on: number[]; off: number[] }
 ) {
   if (!screen.hgr || screen.hgr.length < 8192) return
   const numScanlines = screen.mixed ? 160 : 192
-  for (let y = 0; y < numScanlines; y++) {
-    const offset = hgrScanlineOffset(y)
-    const canvasY = y * SCALE
-    for (let col = 0; col < 40; col++) {
-      const byte = screen.hgr[offset + col] ?? 0
-      const baseX = col * 7 * SCALE
-      for (let bit = 0; bit < 7; bit++) {
-        const lit = (byte >> bit) & 1
-        ctx.fillStyle = lit ? onRgb : offRgb
-        ctx.fillRect(baseX + bit * SCALE, canvasY, SCALE, SCALE)
+  const targetW = SCR_COLS * GLYPH_W * SCALE // 560
+  const targetH = numScanlines * SCALE        // 384 or 320
+  const img = ctx.createImageData(targetW, targetH)
+  const data = img.data
+
+  if (theme === 'color') {
+    // Authentic Apple II NTSC composite artifact color demodulation (matching video_generator.v)
+    const samples = new Uint8Array(targetW)
+    for (let y = 0; y < numScanlines; y++) {
+      const offset = hgrScanlineOffset(y)
+      let prevLast = 0
+      for (let col = 0; col < 40; col++) {
+        const byte = screen.hgr[offset + col] ?? 0
+        const delay = (byte >> 7) & 1
+        for (let dot = 0; dot < 7; dot++) {
+          const cur = (byte >> dot) & 1
+          const left = dot === 0 ? prevLast : (byte >> (dot - 1)) & 1
+          samples[col * 14 + dot * 2] = delay ? left : cur
+          samples[col * 14 + dot * 2 + 1] = cur
+        }
+        prevLast = (byte >> 6) & 1
+      }
+
+      for (let x = 0; x < targetW; x++) {
+        const s_m2 = x >= 2 ? samples[x - 2] : 0
+        const s_m1 = x >= 1 ? samples[x - 1] : 0
+        const s_0 = samples[x]
+        const s_p1 = x < targetW - 1 ? samples[x + 1] : 0
+
+        const yVal = s_m2 + s_m1 + s_0 + s_p1
+        const ph = x & 3
+
+        const ci =
+          chromaI(s_m2, (ph + 2) & 3) +
+          chromaI(s_m1, (ph + 3) & 3) +
+          chromaI(s_0, ph) +
+          chromaI(s_p1, (ph + 1) & 3)
+        const cq =
+          chromaQ(s_m2, (ph + 2) & 3) +
+          chromaQ(s_m1, (ph + 3) & 3) +
+          chromaQ(s_0, ph) +
+          chromaQ(s_p1, (ph + 1) & 3)
+
+        const r = Math.max(0, Math.min(255, 64 * yVal + 80 * ci))
+        const g = Math.max(0, Math.min(255, 64 * yVal - 41 * ci - 20 * cq))
+        const b = Math.max(0, Math.min(255, 64 * yVal + 101 * cq))
+
+        const idx0 = (y * 2 * targetW + x) * 4
+        const idx1 = ((y * 2 + 1) * targetW + x) * 4
+
+        data[idx0]     = r
+        data[idx0 + 1] = g
+        data[idx0 + 2] = b
+        data[idx0 + 3] = 255
+
+        data[idx1]     = r
+        data[idx1 + 1] = g
+        data[idx1 + 2] = b
+        data[idx1 + 3] = 255
+      }
+    }
+  } else {
+    // Monochrome phosphor dot rendering
+    const [onR, onG, onB] = palette.on
+    const [offR, offG, offB] = palette.off
+    for (let y = 0; y < numScanlines; y++) {
+      const offset = hgrScanlineOffset(y)
+      for (let col = 0; col < 40; col++) {
+        const byte = screen.hgr[offset + col] ?? 0
+        const baseX = col * 7 * SCALE
+        for (let dot = 0; dot < 7; dot++) {
+          const lit = (byte >> dot) & 1
+          const r = lit ? onR : offR
+          const g = lit ? onG : offG
+          const b = lit ? onB : offB
+          for (let dx = 0; dx < SCALE; dx++) {
+            const px = baseX + dot * SCALE + dx
+            const idx0 = (y * 2 * targetW + px) * 4
+            const idx1 = ((y * 2 + 1) * targetW + px) * 4
+            data[idx0]     = r
+            data[idx0 + 1] = g
+            data[idx0 + 2] = b
+            data[idx0 + 3] = 255
+            data[idx1]     = r
+            data[idx1 + 1] = g
+            data[idx1 + 2] = b
+            data[idx1 + 3] = 255
+          }
+        }
       }
     }
   }
+
+  ctx.putImageData(img, 0, 0)
+}
+
+function chromaI(s: number, q: number): number {
+  if (!s) return 0
+  if (q === 0) return 1
+  if (q === 2) return -1
+  return 0
+}
+
+function chromaQ(s: number, q: number): number {
+  if (!s) return 0
+  if (q === 1) return 1
+  if (q === 3) return -1
+  return 0
 }
 
 /** Lo-res: 40 blocks across, four scanlines from the high nibble and four from
