@@ -59,7 +59,7 @@ module video_generator (
 
     // VBL status for Apple II ($C019: bit 7 = 1 during vertical blanking)
     // Apple II active area: 560x384 centered in 720x480
-    // X: 80 .. 639 (560 pixels = 40 cols * 14 px)
+    // X: 80 .. 639 (560 pixels = 40 cols * 14 px) fetched; the decoder shows them at 84 .. 643
     // Y: 48 .. 431 (384 lines = 192 lines * 2)
     localparam [9:0] A2_X0 = 10'd80, A2_X1 = 10'd640; // first h_cnt in / past the Apple area
     localparam [9:0] A2_Y0 = 10'd48, A2_Y1 = 10'd432; // first v_cnt in / past the Apple area
@@ -69,7 +69,6 @@ module video_generator (
 
     wire in_apple_x = (h_cnt >= A2_X0) && (h_cnt < A2_X1);
     wire in_apple_y = (v_cnt >= A2_Y0) && (v_cnt < A2_Y1);
-    wire in_apple_screen = in_apple_x && in_apple_y;
 
     wire [8:0] a2_y = in_apple_y ? ((v_cnt - A2_Y0) >> 1) : 9'd0; // 0..191
 
@@ -219,147 +218,115 @@ module video_generator (
     wire [7:0] g80        = right_half ? glyph_byte : glyph_aux;
     wire pixel_on = wide ? ~g80[dot80[2:0]] : ~glyph_byte[dot_index];
 
-    // Hi-Res dot stream. char_code_display is the byte on screen (bit 0 is the
-    // leftmost dot, bit 7 the palette/delay bit); char_code already holds the
-    // next byte from sub_col 12, which is all dot 6's right neighbour needs.
-    // A delayed byte (bit 7) shifts its pixels right by one clock, half a dot.
+    // ------------------------------------------------------------------
+    // Colour: one NTSC decode for every mode, as on the machine
+    // ------------------------------------------------------------------
+    // A //e has no colour memory. Every mode sends one stream of dots at
+    // 14.318 MHz, four to a cycle of the colour subcarrier, and the set reads
+    // colour from where in the cycle the lit dots fall. Each mode below only
+    // makes that stream, one sample per pixel (s_now); a single decoder reads
+    // colour out of the last eight samples. The phase of sample m (pixel
+    // h_cnt = 80 + m) is m mod 4 = h_cnt[1:0].
     //
-    // Colour is what an NTSC set makes of that 560-sample stream. One colour
-    // subcarrier cycle is 4 samples, so the pixel is decoded from the window
-    // s[n-2..n+1]: luma is the number of lit samples, chroma is
-    //   I = s@phase0 - s@phase2,   Q = s@phase1 - s@phase3
-    // with the phase of sample m = m mod 4. 1100 (even dots) is violet, 0011
-    // green, and the one-sample shift of a delayed byte turns them into blue
-    // and orange; 1111 is white and a 0101 dot pattern fills solid, as on a TV.
-    // The channel constants (64/unit of luma, then I and Q terms) put those
-    // four at D043E5 / 30BD1B / 3095E5 / D06B1B, lo-res colours 3, C, 6 and 9.
-    wire       hgr_cur   = char_code_display[dot_index];
-    wire       hgr_left  = (dot_index == 3'd0) ? prev_last : char_code_display[dot_index - 3'd1];
-    wire       hgr_on_std = (char_code_display[7] && !sub_col[0]) ? hgr_left : hgr_cur;
-    // The sample one clock ahead: the next slot's first pixel at sub_col 13.
-    wire [3:0] hgr_npos  = sub_col + 4'd1;
-    wire       hgr_next_std = (sub_col == 4'd13)
-                         ? (col_cnt != 6'd39 && (char_code[7] ? char_code_display[6] : char_code[0]))
-                         : ((char_code_display[7] && !hgr_npos[0]) ? char_code_display[hgr_npos[3:1] - 3'd1]
-                                                                   : char_code_display[hgr_npos[3:1]]);
-    // Double hi-res: the dot stream is the bits themselves, one sample per clock
-    // (aux byte bits 0..6, then main byte bits 0..6), so the same NTSC window applies.
-    wire [3:0] dh_nk     = sub_col + 4'd1;
-    wire       dh_cur    = right_half ? char_code_display[dot80[2:0]] : aux_disp[dot80[2:0]];
-    wire       dh_next   = (sub_col == 4'd13) ? (col_cnt != 6'd39 && aux_code[0])
-                         : (dh_nk >= 4'd7) ? char_code_display[dh_nk - 4'd7] : aux_disp[dh_nk[2:0]];
-    wire       hgr_on    = dh ? dh_cur  : hgr_on_std;
-    wire       hgr_next  = dh ? dh_next : hgr_next_std;
-    reg  [1:0] hgr_hist; // s[n-1] in bit 0, s[n-2] in bit 1; zero outside the screen
+    // Hi-res: 7 dots a byte, 2 samples a dot, bit 0 leftmost. A byte with
+    // bit 7 set is delayed one sample, its first repeating the previous dot
+    // (the last of the byte before: prev_last, 0 at column 0). 1100 (even
+    // dots) is violet, 0011 green, and the delay makes them blue and orange.
+    wire       hgr_cur    = char_code_display[dot_index];
+    wire       hgr_left   = (dot_index == 3'd0) ? prev_last : char_code_display[dot_index - 3'd1];
+    wire       hgr_on     = (char_code_display[7] && !sub_col[0]) ? hgr_left : hgr_cur;
+    // Double hi-res: the bits themselves, one sample each, the aux byte's 7
+    // then the main byte's. It sits one dot later against the subcarrier
+    // (phase + 1): a lone aux bit 0 is dark blue, not magenta, and nibble v
+    // is lo-res colour ROL1(v), Apple's DHGR table and AppleWin (decoded at
+    // the hi-res phase, Prince of Persia's sky came out green, not orange).
+    wire       dh_on      = right_half ? char_code_display[dot80[2:0]] : aux_disp[dot80[2:0]];
+    wire [1:0] ph         = h_cnt[1:0] + {1'b0, dh};
+    // Lo-res: a block's nibble goes out at the dot clock, bit k at phase k,
+    // so the sample is the block colour's bit at the pixel's phase: inside a
+    // block the decoder reads that colour (lo-res orange is hi-res orange, as
+    // on a //e), at an edge a mix, the fringe a set shows. The top half of a
+    // block is the low nibble. Double lo-res (80COL, AN3 off): the aux block
+    // fills the left 7 dots of a cell at double hi-res's timing, so its
+    // nibble n shows as colour ROL1(n); main is plain lo-res.
+    function [3:0] rol1(input [3:0] v);
+        rol1 = {v[2:0], v[3]};
+    endfunction
+    wire       dl         = col80 && dhires && !hires_mode && !is_text_line;
+    wire [3:0] lr_main    = glyph_row[2] ? char_code_display[7:4] : char_code_display[3:0];
+    wire [3:0] lr_aux     = glyph_row[2] ? aux_disp[7:4]          : aux_disp[3:0];
+    wire [3:0] lr_c       = (dl && !right_half) ? rol1(lr_aux) : lr_main;
+    wire       lr_on      = lr_c[ph];
+    // Text is a dot stream too: 2 samples a dot, 1 in 80 columns.
+    wire       s_now      = is_text_line ? pixel_on : dh ? dh_on : hires_mode ? hgr_on : lr_on;
+
+    // The last eight samples, s[m-1] in bit 0 .. s[m-8] in bit 7. Zeros (the
+    // black border) shift in outside the picture, so its edges decode too.
+    reg  [7:0] hist;
     always @(posedge clk_pixel or posedge reset) begin
-        if (reset) hgr_hist <= 2'b00;
-        else       hgr_hist <= in_apple_x ? {hgr_hist[0], hgr_on} : 2'b00;
+        if (reset) hist <= 8'd0;
+        else       hist <= {hist[6:0], in_apple_x && s_now};
     end
 
-    // Phase of pixel n: 14 * col + sub_col mod 4, one sample on in double
-    // hi-res: a lone aux bit 0 is then dark blue, not magenta, and the
-    // colours match AppleWin's (Prince of Persia's sky was green, not orange).
-    wire [1:0] hgr_ph = {col_cnt[0], 1'b0} + sub_col[1:0] + {1'b0, dh};
-    function integer chroma_i(input s, input [1:0] q);
-        chroma_i = !s ? 0 : (q == 2'd0) ? 1 : (q == 2'd2) ? -1 : 0;
-    endfunction
-    function integer chroma_q(input s, input [1:0] q);
-        chroma_q = !s ? 0 : (q == 2'd1) ? 1 : (q == 2'd3) ? -1 : 0;
-    endfunction
-    function [7:0] clamp8(input integer v);
-        clamp8 = (v < 0) ? 8'd0 : (v > 255) ? 8'd255 : v[7:0];
-    endfunction
-
-    // Colour TV mode: the same decode over two subcarrier cycles, s[n-8..n-1],
-    // weighted 1 2 3 4 4 3 2 1, the way a set's chroma and luma filters smear a
-    // composite signal: fringes blend into their neighbours and colours bleed
-    // across edges, and a steady pattern comes out as before (each phase gets
-    // a total weight of 5, so the constants are today's over 5).  The window is
-    // all registered samples, so nothing is added to the path in front of the
-    // output register; the picture sits ~4 pixels further right in this mode.
-    reg  [7:0] tv_hist;  // s[n-1] in bit 0 .. s[n-8] in bit 7; zero outside the screen
-    always @(posedge clk_pixel or posedge reset) begin
-        if (reset) tv_hist <= 8'd0;
-        else       tv_hist <= in_apple_x ? {tv_hist[6:0], hgr_on} : 8'd0;
-    end
-    // Taps k and k+4 are the same subcarrier phase, so each residue r = 0..3
-    // is one 3-bit term, w_r s[r] + w_(r+4) s[r+4] (weights 1+4, 2+3, 3+2,
-    // 4+1); the pixel's phase only decides which residue is +I, +Q, -I, -Q.
-    // Tap k = s[n-1-k] is at phase hgr_ph - 1 - k.
-    wire [2:0] tv_h0 = (tv_hist[0] ? 3'd1 : 3'd0) + (tv_hist[4] ? 3'd4 : 3'd0);
-    wire [2:0] tv_h1 = (tv_hist[1] ? 3'd2 : 3'd0) + (tv_hist[5] ? 3'd3 : 3'd0);
-    wire [2:0] tv_h2 = (tv_hist[2] ? 3'd3 : 3'd0) + (tv_hist[6] ? 3'd2 : 3'd0);
-    wire [2:0] tv_h3 = (tv_hist[3] ? 3'd4 : 3'd0) + (tv_hist[7] ? 3'd1 : 3'd0);
-    // the residue at phase p is r = (hgr_ph - 1 - p) mod 4.  The terms are an
+    // The decoder, centred on s[m-4.5]: the picture sits 4 pixels right of
+    // its fetch (A2_X0 + 4 on), the same in every mode and both settings.
+    // Luma is the 4-sample box s[m-6..m-3], the notch that takes the
+    // subcarrier out, as in a set's luma path. Chroma, I = s@phase0 -
+    // s@phase2 and Q = s@phase1 - s@phase3, is read from one term per phase
+    // residue: taps k and k+4 (s[m-1-k], s[m-5-k]) share a phase, and tap k
+    // is at phase ph - 1 - k.
+    //   sharp (DIP 1 off): the same 4 samples, 5 each -- an ideal monitor
+    //   colour TV (DIP 1 on): all 8, weighted 1 2 3 4 4 3 2 1 -- a set's
+    //     ~1.3 MHz chroma filter: colour bleeds and fringes blend while the
+    //     luma detail stays
+    // Each residue weighs 5 in both, so a steady pattern decodes to the same
+    // colour either way, and one set of constants serves both.
+    // Colour killer (DIP 1 on): in TEXT mode a //e sends no colour burst, so
+    // the set shows no colour and, with no chroma trap, full luma detail;
+    // mixed mode keeps the burst and its text lines fringe, as on a real set.
+    // With DIP 1 off text is green phosphor, as before.
+    wire [2:0] c_0 = color_tv ? (hist[0] ? 3'd1 : 3'd0) + (hist[4] ? 3'd4 : 3'd0) : (hist[4] ? 3'd5 : 3'd0);
+    wire [2:0] c_1 = color_tv ? (hist[1] ? 3'd2 : 3'd0) + (hist[5] ? 3'd3 : 3'd0) : (hist[5] ? 3'd5 : 3'd0);
+    wire [2:0] c_2 = color_tv ? (hist[2] ? 3'd3 : 3'd0) + (hist[6] ? 3'd2 : 3'd0) : (hist[2] ? 3'd5 : 3'd0);
+    wire [2:0] c_3 = color_tv ? (hist[3] ? 3'd4 : 3'd0) + (hist[7] ? 3'd1 : 3'd0) : (hist[3] ? 3'd5 : 3'd0);
+    // The residue at phase p is r = ph - 1 - p. The terms go in as an
     // argument, not read from the module inside the function: a simulator
     // re-evaluates a continuous assign on its arguments only, and Icarus kept
     // the last clock's terms, which turned every colour 90 degrees.
-    wire [11:0] tv_hs = {tv_h3, tv_h2, tv_h1, tv_h0};
-    function [2:0] tv_at(input [11:0] h, input [1:0] r);
-        tv_at = (r == 2'd0) ? h[2:0] : (r == 2'd1) ? h[5:3] : (r == 2'd2) ? h[8:6] : h[11:9];
+    function [2:0] term(input [11:0] c, input [1:0] r);
+        term = (r == 2'd0) ? c[2:0] : (r == 2'd1) ? c[5:3] : (r == 2'd2) ? c[8:6] : c[11:9];
     endfunction
-    wire [2:0] tv_p0 = tv_at(tv_hs, hgr_ph - 2'd1), tv_p1 = tv_at(tv_hs, hgr_ph - 2'd2),
-               tv_p2 = tv_at(tv_hs, hgr_ph - 2'd3), tv_p3 = tv_at(tv_hs, hgr_ph);
-    wire [4:0] tv_y  = tv_h0 + tv_h1 + tv_h2 + tv_h3;                 // 0..20
-    wire signed [4:0] tv_ci = $signed({2'b00, tv_p0}) - $signed({2'b00, tv_p2});   // -5..5
-    wire signed [4:0] tv_cq = $signed({2'b00, tv_p1}) - $signed({2'b00, tv_p3});
-    // today's constants over 5 (each phase's taps weigh 5 in all)
-    wire signed [10:0] tv_rs = 13 * $signed({1'b0, tv_y}) + 16 * tv_ci;
-    wire signed [10:0] tv_gs = 13 * $signed({1'b0, tv_y}) - 8 * tv_ci - 4 * tv_cq;
-    wire signed [10:0] tv_bs = 13 * $signed({1'b0, tv_y}) + 20 * tv_cq;
+    wire [11:0] c_all = {c_3, c_2, c_1, c_0};
+    wire        kill  = color_tv && text_mode;
+    wire [2:0]  luma  = kill ? {{1'b0, hist[3]} + {1'b0, hist[4]}, 1'b0}  // full detail: 0, 2, 4
+                             : hist[2] + hist[3] + hist[4] + hist[5];    // 0..4
+    wire signed [4:0] ci = kill ? 5'sd0
+                         : $signed({2'b00, term(c_all, ph - 2'd1)}) - $signed({2'b00, term(c_all, ph - 2'd3)});
+    wire signed [4:0] cq = kill ? 5'sd0
+                         : $signed({2'b00, term(c_all, ph - 2'd2)}) - $signed({2'b00, term(c_all, ph)});
+    // 64 a unit of luma, chroma per 5: violet/green/blue/orange come out as
+    // lo-res colours 3, C, 6 and 9 (sim/tb_video_hdmi.v's pal() and
+    // web/src/ntsc.js hold the table)
+    wire signed [10:0] r_s = 64 * $signed({1'b0, luma}) + 16 * ci;
+    wire signed [10:0] g_s = 64 * $signed({1'b0, luma}) - 8 * ci - 4 * cq;
+    wire signed [10:0] b_s = 64 * $signed({1'b0, luma}) + 20 * cq;
     function [7:0] sat8(input signed [10:0] v);
         sat8 = v[10] ? 8'd0 : (v > 11'sd255) ? 8'd255 : v[7:0];
     endfunction
-    wire [7:0] tv_r = sat8(tv_rs), tv_g = sat8(tv_gs), tv_b = sat8(tv_bs);
 
-    // Lo-res is the same signal: a block's nibble goes out at the dot clock,
-    // bit k at subcarrier phase k, so its colour is this decode of the
-    // nibble (no table of its own), and lo-res orange is hi-res orange as on
-    // a //e. Top half of a block is the low nibble.
-    // Double lo-res (80COL, AN3 off, lo-res graphics): an aux block in the
-    // left 7 dots of each cell, the main block in the right 7. The aux half
-    // runs at double hi-res's dot timing, one sample on, so its nibble n
-    // shows as colour ROL1(n), as in double hi-res; main is plain lo-res.
-    wire       dl      = col80 && dhires && !hires_mode && !is_text_line;
-    wire [3:0] lr_main = glyph_row[2] ? char_code_display[7:4] : char_code_display[3:0];
-    wire [3:0] lr_aux  = glyph_row[2] ? aux_disp[7:4] : aux_disp[3:0];
-    wire [3:0] lores_color_idx = (dl && !right_half) ? {lr_aux[2:0], lr_aux[3]} : lr_main;
-
-    reg [7:0] hgr_r, hgr_g, hgr_b;
-    integer   hgr_y, hgr_ci, hgr_cq;
-    always @(*) begin
-        if (hires_mode) begin
-            hgr_y  = hgr_hist[1] + hgr_hist[0] + hgr_on + hgr_next;
-            hgr_ci = chroma_i(hgr_hist[1], hgr_ph + 2'd2) + chroma_i(hgr_hist[0], hgr_ph + 2'd3)
-                   + chroma_i(hgr_on,      hgr_ph)        + chroma_i(hgr_next,    hgr_ph + 2'd1);
-            hgr_cq = chroma_q(hgr_hist[1], hgr_ph + 2'd2) + chroma_q(hgr_hist[0], hgr_ph + 2'd3)
-                   + chroma_q(hgr_on,      hgr_ph)        + chroma_q(hgr_next,    hgr_ph + 2'd1);
-        end else begin
-            hgr_y  = lores_color_idx[0] + lores_color_idx[1] + lores_color_idx[2] + lores_color_idx[3];
-            hgr_ci = lores_color_idx[0] - lores_color_idx[2];
-            hgr_cq = lores_color_idx[1] - lores_color_idx[3];
-        end
-        hgr_r  = clamp8(64 * hgr_y + 80 * hgr_ci);
-        hgr_g  = clamp8(64 * hgr_y - 41 * hgr_ci - 20 * hgr_cq);
-        hgr_b  = clamp8(64 * hgr_y + 101 * hgr_cq);
-    end
-
-    // Output color assignment
+    // Output: the picture is 4 pixels on from the fetch, so its window is too
+    wire in_pic = (h_cnt >= A2_X0 + 10'd4) && (h_cnt < A2_X1 + 10'd4) && in_apple_y;
     reg [7:0] pix_r, pix_g, pix_b;
     always @(*) begin
-        if (!in_apple_screen) begin
-            // Border & blanking: black
+        if (!in_pic) begin
             pix_r = 8'h00; pix_g = 8'h00; pix_b = 8'h00;
-        end else if (is_text_line) begin
-            // Authentic Apple II Green Phosphor (or crisp monochrome)
-            pix_r = pixel_on ? 8'h20 : 8'h02;
-            pix_g = pixel_on ? 8'hE8 : 8'h06;
-            pix_b = pixel_on ? 8'h20 : 8'h02;
-        end else if (hires_mode && color_tv) begin
-            pix_r = tv_r; pix_g = tv_g; pix_b = tv_b;
+        end else if (is_text_line && !color_tv) begin
+            // green phosphor, the same 4 samples late as the decoder
+            pix_r = hist[3] ? 8'h20 : 8'h02;
+            pix_g = hist[3] ? 8'hE8 : 8'h06;
+            pix_b = hist[3] ? 8'h20 : 8'h02;
         end else begin
-            // Hi-res, double hi-res and lo-res: the NTSC decode above
-            pix_r = hgr_r; pix_g = hgr_g; pix_b = hgr_b;
+            pix_r = sat8(r_s); pix_g = sat8(g_s); pix_b = sat8(b_s);
         end
     end
 

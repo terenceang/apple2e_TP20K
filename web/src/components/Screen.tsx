@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { AppleStream, screenToText } from '../stream.js'
 import { dotRow, HAS_GLYPHS, GLYPH_W, GLYPH_H, hasGlyphs, parseCharRom, setUserCharRom } from '../charset.js'
 import { textPageIndex, SCR_COLS, SCR_TEXT_ROWS, SCR_GFX_ROWS, SCR_GFX_ROW_BYTES, hgrScanlineOffset, SCR_GFX_BYTES } from '../protocol.js'
-import { LORES_PALETTE, DHR_PHASE, loresNibble, rol1, hiresSamples, decodeLine } from '../ntsc.js'
+import { DHR_PHASE, loresSamples, hiresSamples, decodeLine } from '../ntsc.js'
 import {
   PREF_SCREEN_PALETTE,
   PREF_SCREEN_SCANLINES,
@@ -16,11 +16,8 @@ import type { Screen as ScreenFrame } from '../useApple'
 
 const SCALE = 2 // the Apple II raster is 560x384; double it
 const FLASH_MS = 620 // video_generator.v's flash_clk is about 1.6 Hz
-const LORES_BLOCK_W = 14 // a lo-res block is one 14-pixel character cell wide
 
 const rgb = (c: number[]) => `rgb(${c[0]},${c[1]},${c[2]})`
-// Precompute lo-res palette RGB strings once to avoid dynamic allocations during rendering.
-const LORES_PALETTE_RGB = LORES_PALETTE.map(rgb)
 
 export type PhosphorTheme = 'color' | 'green' | 'amber' | 'white'
 
@@ -491,9 +488,10 @@ function drawHires(
 }
 
 /** Lo-res: 40 blocks across, the low nibble's four scanlines on top and the
- *  high nibble's below, as video_generator.v does with glyph_row[2]. Double
- *  lo-res (AN3 off with 80COL, the aux text page in screen.aux): the aux
- *  block is the left half of each cell, as colour ROL1 of its nibble. */
+ *  high nibble's below, as a dot stream through the same decode as hi-res
+ *  (ntsc.js), so block edges fringe as on the HDMI output. Double lo-res (AN3
+ *  off with 80COL, the aux text page in screen.aux): the aux block is the
+ *  left half of each cell, as colour ROL1 of its nibble. */
 function drawLores(
   ctx: CanvasRenderingContext2D,
   row: number,
@@ -501,24 +499,30 @@ function drawLores(
   cells: Array<Array<{ code: number }>>
 ) {
   const dl = Boolean(screen.dhires && !screen.hires && screen.aux && screen.aux.length >= 1024)
+  const main = new Uint8Array(SCR_COLS)
+  const aux = dl ? new Uint8Array(SCR_COLS) : null
   for (let col = 0; col < SCR_COLS; col++) {
-    let byte = 0
     if (screen.mixed && row >= (SCR_TEXT_ROWS - SCR_GFX_ROWS) && screen.gfx && screen.gfx.length >= SCR_GFX_BYTES) {
       const gfxRow = row - (SCR_TEXT_ROWS - SCR_GFX_ROWS)
-      byte = screen.gfx[gfxRow * SCR_GFX_ROW_BYTES + col] ?? 0
+      main[col] = screen.gfx[gfxRow * SCR_GFX_ROW_BYTES + col] ?? 0
     } else {
-      byte = cells[row]?.[col]?.code ?? 0
+      main[col] = cells[row]?.[col]?.code ?? 0
     }
-    const x = col * LORES_BLOCK_W * SCALE
-    const y = row * GLYPH_H * SCALE
-    for (const bottom of [false, true]) {
-      const by = y + (bottom ? 4 * SCALE : 0)
-      ctx.fillStyle = LORES_PALETTE_RGB[loresNibble(byte, bottom)]
-      ctx.fillRect(x, by, LORES_BLOCK_W * SCALE, 4 * SCALE)
-      if (dl) {
-        ctx.fillStyle = LORES_PALETTE_RGB[rol1(loresNibble(screen.aux[textPageIndex(row, col)] ?? 0, bottom))]
-        ctx.fillRect(x, by, (LORES_BLOCK_W / 2) * SCALE, 4 * SCALE)
+    if (aux) aux[col] = screen.aux[textPageIndex(row, col)] ?? 0
+  }
+  const w = SCR_COLS * GLYPH_W * SCALE // 560
+  const img = ctx.createImageData(w, GLYPH_H * SCALE)
+  for (const bottom of [false, true]) {
+    const line = decodeLine(loresSamples(main, aux, bottom), 0)
+    for (let r = 0; r < 4 * SCALE; r++) {
+      const base = ((bottom ? 4 * SCALE : 0) + r) * w * 4
+      for (let x = 0; x < w; x++) {
+        img.data[base + x * 4] = line[x * 3]
+        img.data[base + x * 4 + 1] = line[x * 3 + 1]
+        img.data[base + x * 4 + 2] = line[x * 3 + 2]
+        img.data[base + x * 4 + 3] = 255
       }
     }
   }
+  ctx.putImageData(img, 0, row * GLYPH_H * SCALE)
 }

@@ -226,7 +226,18 @@ The screen renders both text and graphics modes. When in hi-res graphics mode,
 `w` dumps the full 8 KB graphics page (`$HR`, 8,192 bytes from `$2000` or `$4000`),
 which the browser renders directly on the phosphor canvas (280×192 dots).
 Mixed mode (160 graphics lines + 4 text rows) and Lo-Res (40×48 blocks) are
-likewise rendered accurately.
+likewise rendered accurately. With 80COL and AN3 off (double hi-res or double
+lo-res) the dump adds the aux half as `$AX`: the 8 KB hi-res page, or the 1 KB
+text page for double lo-res.
+
+Colour comes from `src/ntsc.js`, the same render engine as the HDMI output
+(`video_generator.v`): every graphics mode is turned into the //e's dot stream
+(`hiresSamples`, `loresSamples`) and decoded by one NTSC decoder
+(`decodeLine`), so fringes, the bit-7 shift, double hi-res's one-dot phase
+(`DHR_PHASE`) and the lo-res colours (`LORES_PALETTE`, the same decode) match
+the board pixel for pixel in its sharp setting. `test/ntsc.test.js` pins it to
+the //e's 16 colours, HCOLOR's bytes and the double hi-res table rather than
+to the formula itself.
 
 The dump is memory order, and the renderer mirrors `video_generator.v` exactly:
 
@@ -236,7 +247,7 @@ The dump is memory order, and the renderer mirrors `video_generator.v` exactly:
 - bit 7 of a cell is inverse video, and the //e draws flashing characters by
   toggling it, so one bit drives both
 - in mixed mode the bottom four lines are lo-res blocks from the `$GF` rows,
-  top four scanlines from the high nibble and four from the low one
+  the low nibble on top and the high nibble below
 - the glyph address is `{0, code[7]|(code[6]&flash), code[6]&code[7], code[5:0], row}` and
   **a set bit is a lit dot** -- the code field is 6 bits wide, so `$41` reads
   glyph 1. `test/charset.test.js` pins that down against glyphs whose shape is

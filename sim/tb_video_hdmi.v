@@ -146,10 +146,10 @@ module tb_video_hdmi;
     // to the decode formula the RTL and the models share.
     function [23:0] pal(input [3:0] n);
         case (n)
-            4'h0: pal = 24'h000000; 4'h1: pal = 24'h901740; 4'h2: pal = 24'h402CA5; 4'h3: pal = 24'hD043E5;
-            4'h4: pal = 24'h006940; 4'h5: pal = 24'h808080; 4'h6: pal = 24'h3095E5; 4'h7: pal = 24'hC0ACFF;
-            4'h8: pal = 24'h405400; 4'h9: pal = 24'hD06B1B; 4'hA: pal = 24'h808080; 4'hB: pal = 24'hFF97C0;
-            4'hC: pal = 24'h30BD1B; 4'hD: pal = 24'hC0D45B; 4'hE: pal = 24'h70E9C0; 4'hF: pal = 24'hFFFFFF;
+            4'h0: pal = 24'h000000; 4'h1: pal = 24'h901840; 4'h2: pal = 24'h402CA4; 4'h3: pal = 24'hD044E4;
+            4'h4: pal = 24'h006840; 4'h5: pal = 24'h808080; 4'h6: pal = 24'h3094E4; 4'h7: pal = 24'hC0ACFF;
+            4'h8: pal = 24'h405400; 4'h9: pal = 24'hD06C1C; 4'hA: pal = 24'h808080; 4'hB: pal = 24'hFF98C0;
+            4'hC: pal = 24'h30BC1C; 4'hD: pal = 24'hC0D45C; 4'hE: pal = 24'h70E8C0; 4'hF: pal = 24'hFFFFFF;
         endcase
     endfunction
 
@@ -162,37 +162,67 @@ module tb_video_hdmi;
         end
     endfunction
 
-    // Lo-res page 1: a block per 14 x 8 cell, the low nibble on top.
-    function [23:0] expect_lores;
-        input integer x, y;
-        integer ay;
+    // Lo-res page 1 as the dot stream a //e sends: the colour of the block a
+    // sample is in, read at the sample's phase (n mod 4). A block per 14 x 8
+    // cell, the low nibble on top. Double lo-res (dlm): the left 7 dots of a
+    // cell are the aux block as colour ROL1 of its nibble, the right 7 main.
+    function lr_sample;
+        input dlm;
+        input integer ay, n;
         reg [7:0] c;
+        reg [3:0] k;
+        integer d;
         begin
-            if (x < 80 || x >= 640 || y < 48 || y >= 432) expect_lores = 24'h000000;
+            if (n < 0 || n >= 560) lr_sample = 1'b0;
             else begin
-                ay = (y - 48) / 2;
-                c  = ram[16'h0400 + row_base(ay / 8) + (x - 80) / 14];
-                expect_lores = pal((ay % 8) < 4 ? c[3:0] : c[7:4]);
+                d = n % 14;
+                c = (dlm && d < 7) ? aux_ram[16'h0400 + row_base(ay / 8) + n / 14]
+                                   : ram[16'h0400 + row_base(ay / 8) + n / 14];
+                k = (ay % 8) < 4 ? c[3:0] : c[7:4];
+                if (dlm && d < 7) k = {k[2:0], k[3]};
+                lr_sample = k[n % 4];
             end
         end
     endfunction
 
-    // Double lo-res page 1: aux block in the left 7 pixels of each cell, as
-    // colour ROL1 of its nibble (the double hi-res rule), main in the right 7.
-    function [23:0] expect_dlores;
-        input integer x, y;
-        integer ay, d;
+    // The block colour itself, for the literal pins
+    function [3:0] lr_colour;
+        input dlm;
+        input integer ay, n;
         reg [7:0] c;
-        reg [3:0] n;
+        reg [3:0] k;
         begin
-            if (x < 80 || x >= 640 || y < 48 || y >= 432) expect_dlores = 24'h000000;
+            c = (dlm && n % 14 < 7) ? aux_ram[16'h0400 + row_base(ay / 8) + n / 14]
+                                    : ram[16'h0400 + row_base(ay / 8) + n / 14];
+            k = (ay % 8) < 4 ? c[3:0] : c[7:4];
+            lr_colour = (dlm && n % 14 < 7) ? {k[2:0], k[3]} : k;
+        end
+    endfunction
+
+    function [23:0] expect_lr;
+        input dlm;
+        input integer x, y;
+        integer ay, n, m, yy, ci, cq, cr, cg, cb;
+        begin
+            if (x < 80 || x >= 640 || y < 48 || y >= 432) expect_lr = 24'h000000;
             else begin
                 ay = (y - 48) / 2;
-                d  = (x - 80) % 14;
-                c  = (d < 7) ? aux_ram[16'h0400 + row_base(ay / 8) + (x - 80) / 14]
-                             : ram[16'h0400 + row_base(ay / 8) + (x - 80) / 14];
-                n  = (ay % 8) < 4 ? c[3:0] : c[7:4];
-                expect_dlores = pal((d < 7) ? {n[2:0], n[3]} : n);
+                n  = x - 80;
+                yy = 0; ci = 0; cq = 0;
+                for (m = n - 2; m <= n + 1; m = m + 1)
+                    if (lr_sample(dlm, ay, m)) begin
+                        yy = yy + 1;
+                        case ((m + 4) % 4)
+                            0: ci = ci + 1;
+                            1: cq = cq + 1;
+                            2: ci = ci - 1;
+                            3: cq = cq - 1;
+                        endcase
+                    end
+                cr = clamp255(64 * yy + 80 * ci);
+                cg = clamp255(64 * yy - 40 * ci - 20 * cq);
+                cb = clamp255(64 * yy + 100 * cq);
+                expect_lr = {cr[7:0], cg[7:0], cb[7:0]};
             end
         end
     endfunction
@@ -256,7 +286,8 @@ module tb_video_hdmi;
 
     // Expected colour: decode samples n-2..n+1 as an NTSC set would. Luma is
     // 64 per lit sample; chroma I = s@ph0 - s@ph2, Q = s@ph1 - s@ph3 (ph =
-    // sample index mod 4); channel weights per video_generator.v.
+    // sample index mod 4); channel weights per video_generator.v (16/8/4/20
+    // per fifth of a unit of chroma, i.e. 80/40/20/100 per unit).
     function [23:0] expect_hgr;
         input integer x, y;
         integer ay, lbase, n, m, ph, yy, ci, cq, cr, cg, cb;
@@ -283,8 +314,8 @@ module tb_video_hdmi;
                     end
                 end
                 cr = clamp255(64 * yy + 80 * ci);
-                cg = clamp255(64 * yy - 41 * ci - 20 * cq);
-                cb = clamp255(64 * yy + 101 * cq);
+                cg = clamp255(64 * yy - 40 * ci - 20 * cq);
+                cb = clamp255(64 * yy + 100 * cq);
                 expect_hgr = {cr[7:0], cg[7:0], cb[7:0]};
             end
         end
@@ -331,8 +362,8 @@ module tb_video_hdmi;
                     end
                 end
                 cr = clamp255(64 * yy + 80 * ci);
-                cg = clamp255(64 * yy - 41 * ci - 20 * cq);
-                cb = clamp255(64 * yy + 101 * cq);
+                cg = clamp255(64 * yy - 40 * ci - 20 * cq);
+                cb = clamp255(64 * yy + 100 * cq);
                 expect_dhgr = {cr[7:0], cg[7:0], cb[7:0]};
             end
         end
@@ -366,12 +397,9 @@ module tb_video_hdmi;
     integer x = -1, y = -1, gb_run = 0, frame = -1;
     integer k_tv, tv_diff = 0;
     reg [23:0] tvpix [0:3];
-    reg [23:0] scanpix;
-    function near(input [23:0] a, input [23:0] b);   // each channel within 12
-        near = (a[23:16] + 8'd12 >= b[23:16] && b[23:16] + 8'd12 >= a[23:16]) &&
-               (a[15:8]  + 8'd12 >= b[15:8]  && b[15:8]  + 8'd12 >= a[15:8]) &&
-               (a[7:0]   + 8'd12 >= b[7:0]   && b[7:0]   + 8'd12 >= a[7:0]);
-    endfunction
+    reg [23:0] scanpix, tvlr;
+    reg        tvtext = 1'b0;          // colour TV over TEXT mode: the colour killer
+    integer    tv_tinted = 0, tv_lit = 0;
     integer errors = 0, checked = 0;
     reg     in_vs = 1'b0, saw_vs = 1'b0;
     reg [23:0] got, want;
@@ -383,10 +411,12 @@ module tb_video_hdmi;
 
         if (x >= 0) begin
             got  = {tmds_dec(s2), tmds_dec(s1), tmds_dec(s0)};
-            want = bars ? expect_bars(x, y) : hgr_phase ? expect_hgr(x, y) :
-                   dh_phase ? expect_dhgr(x, y) : lr_phase ? expect_lores(x, y) :
-                   dl_phase ? expect_dlores(x, y) :
-                   wide_phase ? expect_apple80(x, y) : expect_apple(x, y);
+            // The decoder is centred 4.5 samples back, so the picture sits 4
+            // pixels right of where it is fetched: the models are asked for x - 4.
+            want = bars ? expect_bars(x, y) : hgr_phase ? expect_hgr(x - 4, y) :
+                   dh_phase ? expect_dhgr(x - 4, y) : lr_phase ? expect_lr(1'b0, x - 4, y) :
+                   dl_phase ? expect_lr(1'b1, x - 4, y) :
+                   wide_phase ? expect_apple80(x - 4, y) : expect_apple(x - 4, y);
             if (frame >= 1 && !skip && want !== 24'hxxxxxx) begin
                 checked = checked + 1;
                 if (got !== want) begin
@@ -401,7 +431,12 @@ module tb_video_hdmi;
                 for (k_tv = 0; k_tv < 4; k_tv = k_tv + 1)
                     if (x == 80 + 14 * 10 + 4 && y == 48 + 2 * (3 + k_tv)) tvpix[k_tv] = got;
                 if (x == 80 + 14 * 10 + 4 && y == 48 + 2 * 6 + 1) scanpix = got;   // the white line's second copy
-                if (frame == 6 && y >= 48 && y < 432 && got !== expect_hgr(x, y)) tv_diff = tv_diff + 1;
+                if (lr_phase && x == 80 + 14 * 9 + 7 + 4 && y == 48 + 2) tvlr = got;
+                if (tvtext && y >= 48 && y < 432) begin
+                    if (got[23:16] !== got[15:8] || got[15:8] !== got[7:0]) tv_tinted = tv_tinted + 1;
+                    if (got[15:8] >= 8'h80) tv_lit = tv_lit + 1;
+                end
+                if (frame == 6 && y >= 48 && y < 432 && got !== expect_hgr(x - 4, y)) tv_diff = tv_diff + 1;
             end
             x = (x == 719) ? -1 : x + 1;
         end
@@ -658,8 +693,9 @@ module tb_video_hdmi;
         end
         $display("colour TV: green %06h violet %06h white %06h bit-7 %06h; %0d pixels differ from the sharp decode",
                  tvpix[0], tvpix[2], tvpix[3], tvpix[1], tv_diff);
-        if (!near(tvpix[0], 24'h30BD1B) || !near(tvpix[2], 24'hD043E5) || tvpix[3] !== 24'hFFFFFF ||
-            !near(tvpix[1], pal(4'h9)) || tv_diff < 1000) begin
+        // a steady pattern decodes to the same colour in both settings, exactly
+        if (tvpix[0] !== pal(4'hC) || tvpix[2] !== pal(4'h3) || tvpix[3] !== pal(4'hF) ||
+            tvpix[1] !== pal(4'h9) || tv_diff < 1000) begin
             $display("FAIL: colour TV mode's solid colours or its change to the picture");
             errors = errors + 1;
         end
@@ -747,6 +783,15 @@ module tb_video_hdmi;
             errors = errors + 1;
         end
         $display("%0d lo-res pixels checked", checked - bars_checked);
+        // Inside a block (2 dots from each edge) the decode is the //e colour.
+        for (i = 0; i < 40 * 4; i = i + 1)
+            if (expect_lr(1'b0, 80 + 14 * (i % 40) + 7, 48 + 2 * (2 + 4 * (i / 40))) !==
+                pal(lr_colour(1'b0, 2 + 4 * (i / 40), 14 * (i % 40) + 7))) begin
+                if (errors < 10) $display("FAIL: lo-res block %0d is %06h, expected %06h", i,
+                    expect_lr(1'b0, 80 + 14 * (i % 40) + 7, 48 + 2 * (2 + 4 * (i / 40))),
+                    pal(lr_colour(1'b0, 2 + 4 * (i / 40), 14 * (i % 40) + 7)));
+                errors = errors + 1;
+            end
         // Double lo-res page 1: 80COL + AN3 off, lo-res; aux differs from main.
         bars_checked = checked;
         for (i = 0; i < 24 * 40; i = i + 1)
@@ -762,6 +807,37 @@ module tb_video_hdmi;
             errors = errors + 1;
         end
         $display("%0d double lo-res pixels checked", checked - bars_checked);
+        // The middle of each half block: aux at dot 3, main at dot 10.
+        for (i = 0; i < 80 * 2; i = i + 1)
+            if (expect_lr(1'b1, 80 + 7 * (i % 80) + 3, 48 + 2 * (2 + 4 * (i / 80))) !==
+                pal(lr_colour(1'b1, 2 + 4 * (i / 80), 7 * (i % 80) + 3))) begin
+                if (errors < 10) $display("FAIL: double lo-res half block %0d is %06h, expected %06h", i,
+                    expect_lr(1'b1, 80 + 7 * (i % 80) + 3, 48 + 2 * (2 + 4 * (i / 80))),
+                    pal(lr_colour(1'b1, 2 + 4 * (i / 80), 7 * (i % 80) + 3)));
+                errors = errors + 1;
+            end
+        // Colour TV mode over lo-res: a block's middle (4 pixels on, where
+        // this mode puts it) is still its colour, row 0 column 9 is orange.
+        skip = 1'b1; dl_phase = 1'b0; lr_phase = 1'b1; col80 = 1'b0; dhires = 1'b0; tv = 1'b1;
+        wait (frame == 20);
+        $display("colour TV lo-res: orange block %06h", tvlr);
+        if (tvlr !== pal(4'h9)) begin
+            $display("FAIL: colour TV lo-res orange block is %06h, expected %06h", tvlr, pal(4'h9));
+            errors = errors + 1;
+        end
+        // Colour TV, TEXT mode: a //e sends no colour burst, so the set shows
+        // grey levels only (the colour killer), and the text is lit.
+        lr_phase = 1'b0; text_mode = 1'b1;
+        wait (frame == 21);
+        tvtext = 1'b1;
+        wait (frame == 22);
+        tvtext = 1'b0;
+        $display("colour TV text: %0d tinted pixels, %0d lit", tv_tinted, tv_lit);
+        if (tv_tinted != 0 || tv_lit < 1000) begin
+            $display("FAIL: colour TV text mode should be untinted and lit");
+            errors = errors + 1;
+        end
+        tv = 1'b0;
         if (errors == 0) $display("tb_video_hdmi: PASS");
         else             $display("tb_video_hdmi: FAIL (%0d errors)", errors);
         $finish;

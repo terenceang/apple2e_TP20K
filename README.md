@@ -37,14 +37,18 @@ The companion web application connects directly to the Tang Primer 20K over USB-
 
 ### Display & Video
 * **HDMI 720×480p60 Output** (CEA-861 VIC 2) with the active 560×384 Apple raster centered.
-* **Authentic NTSC Color Decoding**: Dot-stream composite artifact decoding reproduces natural color fills, fringe transitions, and the hi-res palette bit without artificial lookup tables.
+* **NTSC Colour Render Engine**: An Apple //e has no colour memory. Every mode sends one stream of dots at 14.318 MHz, four to a cycle of the colour subcarrier, and the TV reads colour from where in that cycle the lit dots fall. The engine works the same way, with no palette tables:
+  * **One dot stream for every mode.** Text, lo-res, double lo-res, hi-res (with the bit-7 half-dot delay) and double hi-res each only produce samples, one per pixel, into a single 8-sample history.
+  * **One decoder, modelled on a TV.** Brightness comes from a 4-dot window (the TV's filter that removes the colour carrier); colour from the subcarrier phase of the lit dots. So hi-res fringes, white where dots touch, solid fills from dot patterns and the blue/orange shift of bit 7 all come out of the signal, as on a real machine.
+  * **One set of colours.** Lo-res, hi-res and double hi-res share the decode, so lo-res orange is hi-res orange, as on a //e. Double hi-res sits one dot later against the subcarrier (nibble *v* shows as lo-res colour ROL1(*v*), Apple's DHGR table, checked against AppleWin), and double lo-res aux blocks follow the same rule.
+  * **Pinned to the //e's colours.** `tb_video_hdmi` checks every mode pixel for pixel against independent models, and holds all colours to a literal 16-colour table, so the RTL and its model cannot drift together.
 * **All Video Modes Supported**:
   * 40-Column & 80-Column Text (with MouseText and alternate character set support)
-  * Standard Lo-Res & Hi-Res Graphics
-  * Double Hi-Res Graphics (560×192, 16 colors)
-  * Mixed Graphics/Text and Page 1 / Page 2 flipping
-* **Color TV Filter (DIP 1)**: Hardware multi-tap filter softens edge transitions and blends color fringes just like a composite CRT.
-* **CRT Scanlines (DIP 2 & 3)**: Selectable line darkening (Off, 25%, 50%, 75%) applied across scanlines.
+  * Lo-Res and Double Lo-Res (80-column lo-res) Graphics
+  * Hi-Res and Double Hi-Res Graphics (560×192, 16 colors)
+  * Mixed Graphics/Text and Page 1 / Page 2 flipping (80STORE respected)
+* **Color TV Mode (DIP 1)**: The same decoder with a TV's narrow colour filter: colour is read over 8 dots (weighted 1-2-3-4-4-3-2-1) instead of 4, so colour bleeds across edges and fringes blend while brightness detail stays sharp. Solid colours are identical with it on or off, and the picture does not move. It also adds the set's colour killer: in TEXT mode a //e sends no colour burst, so text is white with no colour, while mixed-mode text lines fringe as they did on a real TV. Off: an ideal monitor with sharp colour and green text.
+* **CRT Scanlines (DIP 2 & 3)**: Selectable line darkening (Off, 25%, 50%, 75%) of the second copy of each doubled Apple line, in every mode.
 * **Full-Range RGB**: Declares full-range color (0–255) in the AVI InfoFrame so modern TVs and monitors do not crush deep blacks.
 
 ### Sound Subsystem
@@ -84,7 +88,7 @@ The companion web application connects directly to the Tang Primer 20K over USB-
 |---|---|---|
 | **Button S0 (Key 1)** | System Reset | Resets the Apple //e and reloads card configuration. |
 | **Button S1 (Key 2)** | HDMI Test Pattern | Overrides display with SMPTE color bars and 1 kHz tone (bypasses core for display diagnostics). |
-| **DIP Switch 1** | Color TV Mode | **ON**: Blends composite fringes and softens edges. **OFF**: Sharp RGB pixel rendering. |
+| **DIP Switch 1** | Color TV Mode | **ON**: Composite colour TV: colour bleeds and fringes blend (detail stays sharp), white text with no colour in TEXT mode. **OFF**: Ideal monitor: sharp colour, green text. Solid colours are the same either way. |
 | **DIP Switch 2 & 3** | Scanline Intensity | Sets scanline darkening: `00` = Off, `01` = 25%, `10` = 50%, `11` = 75%. |
 
 ### Status LEDs
@@ -149,7 +153,7 @@ When paused in debugger mode (`Ctrl+B` or via serial):
 | `m` | Memory Dump | Dumps 16 bytes of memory (subsequent `m` commands page forward). |
 | `@hhhh` | Set Address | Sets the active memory dump pointer (e.g. `@0400` or `@c0f0`). |
 | `0`, `1`, `4`, `8`, `f`, `v` | Quick Address | Jump presets for `$0000`, `$0100`, `$0400`, `$0800`, `$FA60`, and `$FFF0`. |
-| `w` | Screen Dump | Captures live display framebuffer: 1 KB text/lo-res page ($0400–$07FF), 8 KB hi-res graphics page ($2000/$4000), plus auxiliary 8 KB RAM for Double Hi-Res when active. |
+| `w` | Screen Dump | Captures the displayed framebuffer: 1 KB text/lo-res page ($0400/$0800), 8 KB hi-res page ($2000/$4000), plus the aux half when active (8 KB for Double Hi-Res, the 1 KB text page for Double Lo-Res). With 80STORE on it dumps the page on screen, not the one PAGE2 selects for writing. |
 | `t` | Diagnostic Status | Displays video mode (`VID:T`/`VID:G`), PLL lock status, and DDR3 calibration. |
 | `i` | Drive Info | Displays Disk II head track (`H:hh`) and TF card status word (`S:ssss`). |
 | `y1`–`y4` | Reload Drive | Hot-reloads drive image 1–4 from `A2CONFIG.TXT` on the TF card. |
@@ -217,7 +221,7 @@ src/top.v               Top-level integration, clocks, HDMI serializers, DDR3 & 
 src/apple2_core.v       65C02 CPU integration, bus multiplexing, softswitches, language card
 src/apple2_mem.v        BSRAM memory buffers for main 48 KB RAM and 16 KB system ROM
 src/aux_ram.v           Auxiliary 64 KB RAM, language card, Disk II & hard-disk buffer in DDR3
-src/video_generator.v   Apple display generator and CEA-861 720x480 raster alignment
+src/video_generator.v   Apple display generator and the NTSC colour render engine (all modes)
 src/hdmi/               HDMI transmitter: TMDS encoders, data islands, audio/AVI InfoFrames
 src/sound_generator.v   Speaker logic and Mockingboard audio mixing to the PT8211 DAC
 src/audio_filter.v      48 kHz resampler (CIC in DSP blocks, 47-tap halfband FIR filter)
@@ -234,6 +238,7 @@ src/serial_debugger.v   1 Mbps serial TX, console mirror, and hardware debugger
 src/cpu/                65C02 processor core
 constraints/top.cst     Tang Primer 20K Dock pin assignments
 web/                    Browser front-end (React, TypeScript, Web Serial)
+web/src/ntsc.js         The page's copy of the colour render engine, matching the HDMI output
 scripts/                Build, programming, and diagnostic utility scripts
 ```
 

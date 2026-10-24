@@ -17,9 +17,10 @@ export const DHR_PHASE = 1
 
 const clamp = (v) => (v < 0 ? 0 : v > 255 ? 255 : v)
 
-/** RGB for luma y (lit samples of 4) and chroma i, q: video_generator.v's constants. */
+/** RGB for luma y (lit samples of 4) and chroma i, q: video_generator.v's constants
+ *  (its 16/8/4/20 per fifth of a unit of chroma). */
 export function ntscRgb(y, i, q) {
-  return [clamp(64 * y + 80 * i), clamp(64 * y - 41 * i - 20 * q), clamp(64 * y + 101 * q)]
+  return [clamp(64 * y + 80 * i), clamp(64 * y - 40 * i - 20 * q), clamp(64 * y + 100 * q)]
 }
 
 /** The 16 lo-res colours: nibble bit k goes out at subcarrier phase k. */
@@ -61,6 +62,23 @@ export function hiresSamples(main, aux, offset, out = new Uint8Array(560)) {
       }
       prev = (m >> 6) & 1
     }
+  }
+  return out
+}
+
+/**
+ * One lo-res scanline's 560-sample stream: each sample is its block colour's
+ * bit at the sample's phase, so a block decodes to its colour and its edges
+ * fringe as on a TV. `main` and `aux` are the 40 bytes of the text row;
+ * `bottom` picks the high nibble (the lower half of a block). With `aux`
+ * (double lo-res) the left 7 dots of a cell are the aux block, colour ROL1.
+ * @param {ArrayLike<number>} main @param {ArrayLike<number>|null} aux @param {boolean} bottom
+ */
+export function loresSamples(main, aux, bottom, out = new Uint8Array(560)) {
+  for (let x = 0; x < 560; x++) {
+    const col = (x / 14) | 0
+    const c = aux && x % 14 < 7 ? rol1(loresNibble(aux[col] ?? 0, bottom)) : loresNibble(main[col] ?? 0, bottom)
+    out[x] = (c >> (x & 3)) & 1
   }
   return out
 }

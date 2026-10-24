@@ -12,11 +12,11 @@
 // ============================================================================
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { LORES_PALETTE, DHR_PHASE, loresNibble, rol1, hiresSamples, decodeLine } from '../src/ntsc.js'
+import { LORES_PALETTE, DHR_PHASE, loresNibble, rol1, hiresSamples, loresSamples, decodeLine } from '../src/ntsc.js'
 
 const PAL = [
-  0x000000, 0x901740, 0x402ca5, 0xd043e5, 0x006940, 0x808080, 0x3095e5, 0xc0acff,
-  0x405400, 0xd06b1b, 0x808080, 0xff97c0, 0x30bd1b, 0xc0d45b, 0x70e9c0, 0xffffff,
+  0x000000, 0x901840, 0x402ca4, 0xd044e4, 0x006840, 0x808080, 0x3094e4, 0xc0acff,
+  0x405400, 0xd06c1c, 0x808080, 0xff98c0, 0x30bc1c, 0xc0d45c, 0x70e8c0, 0xffffff,
 ]
 const hex = (c) => (c[0] << 16) | (c[1] << 8) | c[2]
 const MID = 280 // well inside the line, away from its black ends
@@ -63,4 +63,27 @@ test('rol1 is a one-bit left rotate of a nibble (double lo-res aux colour)', () 
 test('a lo-res block is its low nibble on top', () => {
   assert.equal(loresNibble(0x9c, false), 0xc)
   assert.equal(loresNibble(0x9c, true), 0x9)
+})
+
+const loresAt = (main, aux, bottom, x) => hex(decodeLine(loresSamples(main, aux, bottom), 0).subarray(x * 3, x * 3 + 3))
+
+test('a lo-res block decodes to its colour, and its edges fringe', () => {
+  const main = Uint8Array.from({ length: 40 }, (_, c) => ((c % 16) << 4) | (15 - (c % 16)))
+  for (let c = 0; c < 40; c++) {
+    assert.equal(loresAt(main, null, false, 14 * c + 7), PAL[15 - (c % 16)], `top of block ${c}`)
+    assert.equal(loresAt(main, null, true, 14 * c + 7), PAL[c % 16], `bottom of block ${c}`)
+  }
+  // orange next to blue: the pixel on the boundary is neither, as on a TV
+  const edge = loresAt(Uint8Array.from({ length: 40 }, (_, c) => (c < 20 ? 0x09 : 0x06)), null, false, 280)
+  assert.notEqual(edge, PAL[9])
+  assert.notEqual(edge, PAL[6])
+})
+
+test('double lo-res: the aux half block is colour ROL1 of its nibble', () => {
+  const main = new Uint8Array(40).fill(0x0c)
+  for (let v = 0; v < 16; v++) {
+    const aux = new Uint8Array(40).fill(v)
+    assert.equal(loresAt(main, aux, false, 14 * 20 + 3), PAL[rol1(v)], `aux ${v.toString(16)}`)
+    assert.equal(loresAt(main, aux, false, 14 * 20 + 10), PAL[0xc], 'main half')
+  }
 })
