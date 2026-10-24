@@ -117,6 +117,8 @@ wire [7:0] PCH = PC[15:8];
 wire [7:0] PCL = PC[7:0];
 
 reg NMI_edge = 0;       // captured NMI edge
+reg [2:0] IRQ_q = 0;    // IRQ three steps back, as polled (below)
+wire IRQ_poll = IRQ_q[2];
 
 reg [1:0] regsel;                       // Select A, X, Y or S register
 wire [7:0] regfile = AXYS[regsel];      // Selected register output
@@ -363,7 +365,7 @@ always @*
  */
 always @*
     case( state )
-        DECODE:         if( (~I & IRQ) | NMI_edge )
+        DECODE:         if( (~I & IRQ_poll) | NMI_edge )
                             PC_temp = { ABH, ABL };
                         else
                             PC_temp = PC;
@@ -392,7 +394,7 @@ always @*
  */
 always @*
     case( state )
-        DECODE:         if( (~I & IRQ) | NMI_edge )
+        DECODE:         if( (~I & IRQ_poll) | NMI_edge )
                             PC_inc = 0;
                         else
                             PC_inc = 1;
@@ -510,7 +512,7 @@ always @*
 
         PUSH1:   DO = php ? P : ADD;
 
-        BRK2:    DO = (IRQ | NMI_edge) ? (P & 8'b1110_1111) : P;
+        BRK2:    DO = (IRQ_poll | NMI_edge) ? (P & 8'b1110_1111) : P;
 
         default: DO = store_zero ? 8'b0 : regfile;
     endcase
@@ -960,7 +962,7 @@ always @(posedge clk )
             IRHOLD_valid <= 0;
     end
 
-assign IR = (IRQ & ~I) | NMI_edge ? 8'h00 :
+assign IR = (IRQ_poll & ~I) | NMI_edge ? 8'h00 :
                      IRHOLD_valid ? IRHOLD : DIMUX;
 
 //assign DIMUX = ~RDY1 ? DIHOLD : DI;
@@ -1429,6 +1431,18 @@ always @*
             default: cond_true = 1; // BRA is 80
     endcase
 
+
+/*
+ * IRQ as a 6502 polls it: on the penultimate cycle of the previous
+ * instruction, two steps before the opcode fetch and so three before
+ * DECODE, which decides. Taken live, an IRQ raised as late as the fetch
+ * preempted that opcode and the handler could start 2 cycles early
+ * (French Touch's OldSkool times its raster IRQ off the 6522's T1 and
+ * crashed on it). WAI still wakes on the live line.
+ */
+always @(posedge clk)
+    if( RDY )
+        IRQ_q <= { IRQ_q[1:0], IRQ };
 
 reg NMI_1 = 0;          // delayed NMI signal
 

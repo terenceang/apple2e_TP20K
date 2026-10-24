@@ -25,6 +25,7 @@ module tb_mockingboard;
         .clk(clk),
         .reset(reset),
         .ce_1m(ce_1m),
+        .step(ce_1m),
         .bus_cycle(bus_cycle),
         .cpu_we(cpu_we),
         .addr(addr),

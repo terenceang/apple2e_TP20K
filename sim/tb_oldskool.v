@@ -129,6 +129,32 @@ module tb_oldskool;
         $fflush();
     end
 
+    // INT_ROUT's computed jitter, written into its BVC offset at $8301 (0..3 is safe)
+    integer nint = 0;
+    always @(posedge clk) if (dut.c02_go && debug_cpu_we && debug_cpu_addr == 16'h8301) begin
+        nint = nint + 1;
+        if (debug_cpu_dout > 8'd3 || nint < 20)
+            $display("INT %0d: BVC offset %0d%s  py=%0d px=%0d", nint, debug_cpu_dout,
+                     debug_cpu_dout > 8'd3 ? "  <-- CRASH" : "", py, px);
+        if (debug_cpu_dout > 8'd3) begin $display("FAIL: jitter out of range"); $finish; end
+        if (nint == 40) begin $display("PASS: 40 interrupts in range"); $finish; end
+    end
+
+    // cycle-level timeline around the first interrupts, in 6502 steps
+    integer cyc = 0, t_flag = 0, nlog = 0;
+    always @(posedge clk) if (dut.c02_go) begin
+        cyc = cyc + 1;
+        if (!dut.mock_irq_n && t_flag == 0) t_flag = cyc;
+        if (dut.mock_irq_n) t_flag = 0;
+        if (t_flag != 0 && nlog < 0) begin
+            nlog = nlog + 1;
+            $display("  +%0d addr=%04X we=%b sync=%b pc=%04X t1c=%04X din=%02X", cyc - t_flag, debug_cpu_addr,
+                     debug_cpu_we, debug_cpu_sync, debug_cpu_pc, dut.u_mockingboard.u_via1.t1c, dut.cpu_din);
+        end
+    end
+    always @(posedge clk) if (dut.c02_go && debug_cpu_addr == 16'hC405 && debug_cpu_we)
+        $display("STY $C405 at cyc %0d", cyc);
+
     // Instruction trace
     reg [15:0] last_pc = 16'hFFFF;
     integer step_count = 0;
@@ -140,13 +166,11 @@ module tb_oldskool;
                 last_pc = debug_cpu_pc;
                 // Log key milestones
                 if (debug_cpu_pc == 16'h817E || // Entering SYNC
-                    debug_cpu_pc == 16'h8183 || // SYNC wait VBL
                     debug_cpu_pc == 16'h8199 || // SYNC LDA $C019 check
                     debug_cpu_pc == 16'h819C || // SYNC BMI $8189
                     debug_cpu_pc == 16'h819E || // SYNC passed (first NOP)!
                     debug_cpu_pc == 16'h81B5 || // STY $C405 (Timer 1 launched)
                     debug_cpu_pc == 16'h81B8 || // CLI
-                    debug_cpu_pc == 16'h81B9 || // Loop1 (LDA $92)
                     debug_cpu_pc == 16'h82EF) begin // IRQ handler INT_ROUT reached!
                     $display("Step %0d: PC=$%04X OP=$%02X A=$%02X X=$%02X Y=$%02X SP=$%02X P=$%02X py=%0d vbl=%b mock_irq=%b",
                         step_count, debug_cpu_pc, debug_cpu_ir, debug_cpu_a, debug_cpu_x, debug_cpu_y,
@@ -158,7 +182,7 @@ module tb_oldskool;
                 $display("Heartbeat: step %0d, PC=$%04X, py=%0d, vbl=%b, mock_irq=%b", step_count, debug_cpu_pc, py, vbl, dut.mock_irq_n);
                 $fflush();
             end
-            if (step_count > 150000) begin
+            if (step_count > 5000000) begin
                 $display("Finished successfully after %0d steps", step_count);
                 $finish;
             end

@@ -711,6 +711,10 @@ module apple2_core (
         .clk(clk),
         .reset(reset),
         .ce_1m(ce_1m),
+        // the timers count the 6502's steps, not ce_1m: a step lands up to
+        // 3 clocks after its ce_1m, and a T1 read then saw the next cycle's
+        // count (French Touch's OldSkool turns that count into a branch)
+        .step(z80_on ? ce_1m : c02_go),
         .bus_cycle(bus_cycle),
         .cpu_we(cpu_we),
         .addr(effective_cpu_addr),

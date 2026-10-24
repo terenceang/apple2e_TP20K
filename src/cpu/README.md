@@ -14,6 +14,8 @@ any use, commercial or not, as long as the message and the copyright notice
 are kept. Keep those headers intact.
 
 **Local change:** `cpu_65c02.v` exposes the `debug_*` register ports (PC, A,
-X, Y, S, P, IR) that `serial_debugger.v` prints. Which upstream commit it was
-taken from was not recorded, so diff against the fork before assuming
+X, Y, S, P, IR) that `serial_debugger.v` prints, and polls IRQ three steps
+before DECODE (`IRQ_poll`), on the previous instruction's penultimate cycle as
+a 6502 does; upstream takes it live and can enter the handler 2 cycles early.
+Which upstream commit it was taken from was not recorded, so diff against the fork before assuming
 anything else matches it.

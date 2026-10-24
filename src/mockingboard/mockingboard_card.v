@@ -7,7 +7,8 @@
 module mockingboard_card (
     input  wire        clk,         // 27.0 MHz system clock
     input  wire        reset,       // Active-high reset
-    input  wire        ce_1m,       // 1.023 MHz clock enable
+    input  wire        ce_1m,       // 1.023 MHz clock enable (the AYs)
+    input  wire        step,        // the 6502's bus step (the VIA timers)
     input  wire        bus_cycle,   // CPU/debugger bus cycle
     input  wire        cpu_we,      // CPU write enable
     input  wire [15:0] addr,        // Effective CPU address
@@ -57,7 +58,7 @@ module mockingboard_card (
     via6522 u_via1 (
         .clk(clk),
         .reset(reset),
-        .ce_1m(ce_1m),
+        .ce_1m(step),
         .bus_cycle(bus_cycle),
         .cs(via1_sel),
         .we(cpu_we),
@@ -114,7 +115,7 @@ module mockingboard_card (
     via6522 u_via2 (
         .clk(clk),
         .reset(reset),
-        .ce_1m(ce_1m),
+        .ce_1m(step),
         .bus_cycle(bus_cycle),
         .cs(via2_sel),
         .we(cpu_we),
