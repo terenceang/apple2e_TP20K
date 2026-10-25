@@ -56,6 +56,7 @@ export function FlashBar({
 
   return (
     <div className="flashbar">
+      <div className="flashbar-conn">
       <span className={'dot ' + (up ? 'open' : conn.state)} aria-hidden />
       <span className="state">{formatConnState(conn, baud)}</span>
       {conn.transport && <span className="tag">USB serial</span>}
@@ -122,6 +123,8 @@ export function FlashBar({
       ) : (
         <button type="button" onClick={onDisconnect}>Disconnect</button>
       )}
+
+      </div>
 
       <span className="spacer" />
 

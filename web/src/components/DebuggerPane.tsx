@@ -32,22 +32,30 @@ export function DebuggerPane({
   return (
     <section className="pane debug-pane">
       <header>
-        <h2>Debugger</h2>
-        <span className="hint">Ctrl+B</span>
-        <button type="button" onClick={onToggle}>
-          {mode === 'debugger' ? 'Resume' : 'Enter'}
-        </button>
-        {onClose && (
+        <div className="pane-title-group">
+          <h2>Debugger</h2>
+          <span className="hint">Ctrl+B</span>
+        </div>
+        <div className="pane-header-actions">
           <button
             type="button"
-            className="pane-close-btn"
-            onClick={onClose}
-            title="Hide Debugger"
-            aria-label="Close Debugger"
+            onClick={onToggle}
+            title={mode === 'debugger' ? 'Resume CPU execution' : 'Pause CPU and enter debugger'}
           >
-            &times;
+            {mode === 'debugger' ? 'Resume' : 'Enter'}
           </button>
-        )}
+          {onClose && (
+            <button
+              type="button"
+              className="pane-close-btn"
+              onClick={onClose}
+              title="Hide Debugger"
+              aria-label="Close Debugger"
+            >
+              &times;
+            </button>
+          )}
+        </div>
       </header>
 
       <div className="debug-grid">

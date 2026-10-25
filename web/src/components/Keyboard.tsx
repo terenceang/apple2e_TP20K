@@ -107,10 +107,12 @@ export function Keyboard({ mode, onPress, onReset, onRelease, held, conn }: Prop
       const w = el.clientWidth
       if (w > 0) {
         // Total key units across: the board width plus the 0.5-unit left
-        // margin every cap is drawn at. Bezel padding is 12px on each side.
-        const available = w - 24
-        // Calculate unit to fill available width: minimum 34px, up to 70px
-        const computed = Math.min(70, Math.max(34, Math.floor(available / (boardBox().width + 0.5))))
+        // margin every cap is drawn at.
+        // Bezel padding is 12px each side on desktop, 6px each side on small screens.
+        const padding = w < 540 ? 12 : 24
+        const available = w - padding
+        // Scale unit smoothly: allow down to 18px on mobile, up to 70px on large displays
+        const computed = Math.min(70, Math.max(18, Math.floor(available / (boardBox().width + 0.5))))
         setUnit(computed)
       }
     }

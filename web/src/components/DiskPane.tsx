@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DiskProgress, CardState, CardFile } from '../useApple'
 import { fitsDrive } from '../card.js'
 import { from83 } from '../fat32.js'
 import { blankWoz } from '../woz.js'
+import { PREF_DISK_SORT, getSavedString, setSavedString } from '../prefs.js'
 
 // Every drive's disk is a file on the TF card: LOAD picks one (or copies one
 // from this computer onto the card first), EJECT empties the drive.  There is
@@ -35,6 +36,8 @@ type Ask =
   | { kind: 'delete'; file: CardFile }
   | { kind: 'post_upload_mount'; file: CardFile; targetDrive?: number | null }
 
+export type DiskSortMode = 'name-asc' | 'name-desc' | 'size-asc' | 'size-desc' | 'type' | 'mounted' | 'card'
+
 export function DiskPane(p: Props) {
   const { card, cardBusy, disabled = false } = p
   const busy = disabled || cardBusy
@@ -43,6 +46,17 @@ export function DiskPane(p: Props) {
   const dlg = useRef<HTMLDialogElement>(null)
   const pickFile = useRef<HTMLInputElement>(null)
   const pickFor = useRef<number | null>(null) // drive the next picked file goes into (null: the shelf)
+
+  const store = typeof localStorage !== 'undefined' ? localStorage : null
+  const [sortMode, setSortMode] = useState<DiskSortMode>(() =>
+    (getSavedString(store, PREF_DISK_SORT, 'name-asc') as DiskSortMode)
+  )
+  const [filterQuery, setFilterQuery] = useState('')
+
+  const changeSortMode = (m: DiskSortMode) => {
+    setSortMode(m)
+    setSavedString(store, PREF_DISK_SORT, m)
+  }
 
   useEffect(() => {
     const el = dlg.current
@@ -83,6 +97,42 @@ export function DiskPane(p: Props) {
       `Status: ${mountStatus}`,
     ].join('\n')
   }
+
+  const sortedFiles = useMemo(() => {
+    if (!card?.files) return []
+    let list = [...card.files]
+    if (filterQuery.trim()) {
+      const q = filterQuery.trim().toLowerCase()
+      list = list.filter((f) => f.name.toLowerCase().includes(q) || from83(f.short).toLowerCase().includes(q))
+    }
+    switch (sortMode) {
+      case 'name-asc':
+        return list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
+      case 'name-desc':
+        return list.sort((a, b) => b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' }))
+      case 'size-asc':
+        return list.sort((a, b) => a.size - b.size || a.name.localeCompare(b.name))
+      case 'size-desc':
+        return list.sort((a, b) => b.size - a.size || a.name.localeCompare(b.name))
+      case 'type':
+        return list.sort((a, b) => {
+          const aFloppy = fitsDrive(a, 0) ? 0 : 1
+          const bFloppy = fitsDrive(b, 0) ? 0 : 1
+          if (aFloppy !== bFloppy) return aFloppy - bFloppy
+          return a.name.localeCompare(b.name)
+        })
+      case 'mounted':
+        return list.sort((a, b) => {
+          const aMounted = mountedOn(a).length > 0 ? 0 : 1
+          const bMounted = mountedOn(b).length > 0 ? 0 : 1
+          if (aMounted !== bMounted) return aMounted - bMounted
+          return a.name.localeCompare(b.name)
+        })
+      case 'card':
+      default:
+        return list
+    }
+  }, [card?.files, sortMode, filterQuery, card?.status.present, card?.drives])
 
   const load = (d: number) => setAsk({ kind: 'drive', d })
   const replace = (d: number) => setAsk({ kind: 'drive', d })
@@ -483,13 +533,19 @@ export function DiskPane(p: Props) {
     }
     const cur = inDrive(ask.d)
     const fit = card?.files.filter((f) => fitsDrive(f, ask.d)) ?? []
+    const sortedFit = [...fit].sort((a, b) => {
+      if (sortMode === 'name-desc') return b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: 'base' })
+      if (sortMode === 'size-asc') return a.size - b.size || a.name.localeCompare(b.name)
+      if (sortMode === 'size-desc') return b.size - a.size || a.name.localeCompare(b.name)
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    })
     return (
       <>
         <h3>{cur ? `Replace disk in ${LABEL[ask.d]}` : `Load into ${LABEL[ask.d]}`}</h3>
         {cur && <p className="disk-meta">Current disk: <strong>{cur.name}</strong></p>}
         <div className="dlg-list">
-          {fit.length === 0 && <span className="disk-meta">No image on the card fits this drive.</span>}
-          {fit.map((f) => (
+          {sortedFit.length === 0 && <span className="disk-meta">No image on the card fits this drive.</span>}
+          {sortedFit.map((f) => (
             <button key={f.short} type="button" className="dlg-file" onClick={() => setAsk({ ...ask, file: f })} title={diskTooltip(f)}>
               <span>{f.name}</span><span className="disk-meta">{kb(f.size)}</span>
             </button>
@@ -507,19 +563,23 @@ export function DiskPane(p: Props) {
   return (
     <section className="pane disk-pane" aria-label="Disks">
       <header>
-        <h2>Disks</h2>
-        <span className="hint" title="Manage 5.25&quot; floppy disks (Slot 6) and ProDOS hard disks (Slot 7)">
-          Slot 6 Floppy &amp; Slot 7 SmartPort
-        </span>
-        <button
-          type="button"
-          className="pane-close-btn"
-          onClick={p.onClose}
-          aria-label="Close disks"
-          title="Close disks"
-        >
-          &times;
-        </button>
+        <div className="pane-title-group">
+          <h2>Disks</h2>
+          <span className="hint" title="Manage 5.25&quot; floppy disks (Slot 6) and ProDOS hard disks (Slot 7)">
+            Slot 6 Floppy &amp; Slot 7 SmartPort
+          </span>
+        </div>
+        <div className="pane-header-actions">
+          <button
+            type="button"
+            className="pane-close-btn"
+            onClick={p.onClose}
+            aria-label="Close disks"
+            title="Close disks"
+          >
+            &times;
+          </button>
+        </div>
       </header>
 
       {p.error && (
@@ -555,37 +615,81 @@ export function DiskPane(p: Props) {
 
       <div className="shelf">
         <div className="shelf-head">
-          <span className="io-card-title" title="Disk Library: Stored disk images on the TF card">
-            DISK LIBRARY · TF CARD
-          </span>
-          <span
-            className="shelf-info-icon"
-            tabIndex={0}
-            role="note"
-            aria-label="Disk library information"
-            title={
-              'Disk Library (FAT32 TF Card)\n\n' +
-              'Supported Formats:\n' +
-              '• Slot 6 (Disk II 5.25" Floppy):\n' +
-              '   .woz, .dsk, .do, .po, .nib (converted to WOZ)\n' +
-              '• Slot 7 (SmartPort Hard Disk):\n' +
-              '   .hdv, .po, .2mg (up to 32 MB)\n\n' +
-              'Requirements:\n' +
-              '• FAT32 formatted TF/microSD card (32 GB or smaller)\n' +
-              '• Images must be contiguous (unfragmented) on card\n\n' +
-              'Usage:\n' +
-              '• Click any disk tile to mount into a drive\n' +
-              '• "＋ Add disk" to upload from computer\n' +
-              '• "＋ New blank" to create a fresh floppy'
-            }
-          >
-            ⓘ
-          </span>
-          <span className="disk-meta">
-            {!status ? 'not read yet' : status.fsOk ? `${card!.files.length} image${card!.files.length === 1 ? '' : 's'}`
-              : 'no FAT32 card'}
-          </span>
+          <div className="shelf-title-wrap">
+            <span className="io-card-title" title="Disk Library: Stored disk images on the TF card">
+              DISK LIBRARY · TF CARD
+            </span>
+            <span
+              className="shelf-info-icon"
+              tabIndex={0}
+              role="note"
+              aria-label="Disk library information"
+              title={
+                'Disk Library (FAT32 TF Card)\n\n' +
+                'Supported Formats:\n' +
+                '• Slot 6 (Disk II 5.25" Floppy):\n' +
+                '   .woz, .dsk, .do, .po, .nib (converted to WOZ)\n' +
+                '• Slot 7 (SmartPort Hard Disk):\n' +
+                '   .hdv, .po, .2mg (up to 32 MB)\n\n' +
+                'Requirements:\n' +
+                '• FAT32 formatted TF/microSD card (32 GB or smaller)\n' +
+                '• Images must be contiguous (unfragmented) on card\n\n' +
+                'Usage:\n' +
+                '• Click any disk tile to mount into a drive\n' +
+                '• "＋ Add disk" to upload from computer\n' +
+                '• "＋ New blank" to create a fresh floppy'
+              }
+            >
+              ⓘ
+            </span>
+            <span className="disk-meta">
+              {!status ? 'not read yet' : status.fsOk ? `${card!.files.length} image${card!.files.length === 1 ? '' : 's'}${filterQuery ? ` (${sortedFiles.length} shown)` : ''}`
+                : 'no FAT32 card'}
+            </span>
+          </div>
           <div className="shelf-actions">
+            {card?.files && card.files.length > 1 && (
+              <label className="shelf-sort-label" title="Sort disk library">
+                <span className="sort-icon" aria-hidden>↕</span>
+                <select
+                  className="shelf-sort-select"
+                  value={sortMode}
+                  onChange={(e) => changeSortMode(e.target.value as DiskSortMode)}
+                  aria-label="Sort disks by"
+                >
+                  <option value="name-asc">Name (A–Z)</option>
+                  <option value="name-desc">Name (Z–A)</option>
+                  <option value="size-asc">Size (Smallest)</option>
+                  <option value="size-desc">Size (Largest)</option>
+                  <option value="type">Type (Floppy first)</option>
+                  <option value="mounted">Mounted first</option>
+                  <option value="card">Card order</option>
+                </select>
+              </label>
+            )}
+            {card?.files && card.files.length > 4 && (
+              <div className="shelf-search-wrap">
+                <input
+                  type="search"
+                  className="shelf-search-input"
+                  placeholder="Filter..."
+                  value={filterQuery}
+                  onChange={(e) => setFilterQuery(e.target.value)}
+                  aria-label="Filter disk images"
+                />
+                {filterQuery && (
+                  <button
+                    type="button"
+                    className="shelf-search-clear"
+                    onClick={() => setFilterQuery('')}
+                    title="Clear filter"
+                    aria-label="Clear filter"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            )}
             <button
               type="button"
               className="shelf-btn-icon"
@@ -619,8 +723,8 @@ export function DiskPane(p: Props) {
           </div>
         </div>
         <div className="shelf-tiles">
-          {card?.files && card.files.length > 0 ? (
-            card.files.map((f) => {
+          {sortedFiles.length > 0 ? (
+            sortedFiles.map((f) => {
               const on = mountedOn(f)
               return (
                 <div key={f.short} className={'tile' + (on.length ? ' mounted' : '')} title={diskTooltip(f)}>
@@ -652,6 +756,18 @@ export function DiskPane(p: Props) {
                 </div>
               )
             })
+          ) : filterQuery ? (
+            <div className="shelf-empty">
+              <span>No disk images match &ldquo;{filterQuery}&rdquo;.</span>
+              <button
+                type="button"
+                className="btn-disk-action secondary"
+                onClick={() => setFilterQuery('')}
+                style={{ marginTop: '8px' }}
+              >
+                Clear filter
+              </button>
+            </div>
           ) : (
             <div className="shelf-empty" title="Insert a FAT32 card or upload images to populate the disk library">
               <span>{onCard ? 'No disk images found on card. Click "＋ Add disk" above to upload.' : 'Insert FAT32 card to view images.'}</span>

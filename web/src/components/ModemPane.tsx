@@ -29,22 +29,26 @@ export function ModemPane({ status, log, gateway, onGateway, onHangup, onClose }
   return (
     <section className="pane console-pane modem-pane">
       <header>
-        <h2>Modem</h2>
-        <span className="hint">slot 1 Super Serial Card</span>
-        <button type="button" onClick={onHangup} disabled={status === 'on hook'} title="Hang up (as ATH)">
-          Hang up
-        </button>
-        {onClose && (
-          <button
-            type="button"
-            className="pane-close-btn"
-            onClick={onClose}
-            aria-label="Close modem"
-            title="Close modem"
-          >
-            &times;
+        <div className="pane-title-group">
+          <h2>Modem</h2>
+          <span className="hint">slot 1 Super Serial Card</span>
+        </div>
+        <div className="pane-header-actions">
+          <button type="button" onClick={onHangup} disabled={status === 'on hook'} title="Hang up (as ATH)">
+            Hang up
           </button>
-        )}
+          {onClose && (
+            <button
+              type="button"
+              className="pane-close-btn"
+              onClick={onClose}
+              aria-label="Close modem"
+              title="Close modem"
+            >
+              &times;
+            </button>
+          )}
+        </div>
       </header>
       <div className="modem-status">{status}</div>
       <label className="modem-gateway">

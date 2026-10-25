@@ -10,6 +10,7 @@ import {
   PREF_DEBUGGER,
   PREF_SCREEN,
   PREF_PADDLES,
+  PREF_DISK_SORT,
   getSavedBool,
   setSavedBool,
   getSavedString,
@@ -70,6 +71,10 @@ test('string preferences save and retrieve correctly', () => {
   setSavedString(store, 'test.key', 'amber')
   assert.equal(getSavedString(store, 'test.key', 'defaultVal'), 'amber')
   assert.equal(getSavedString(null, 'test.key', 'fallback'), 'fallback')
+
+  assert.equal(getSavedString(store, PREF_DISK_SORT, 'name-asc'), 'name-asc')
+  setSavedString(store, PREF_DISK_SORT, 'size-desc')
+  assert.equal(getSavedString(store, PREF_DISK_SORT, 'name-asc'), 'size-desc')
 })
 
 test('storage exceptions do not throw and fall back to default', () => {

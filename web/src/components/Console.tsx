@@ -31,27 +31,32 @@ export function Console({ lines, onClear, onClose }: Props) {
   return (
     <section className="pane console-pane">
       <header>
-        <h2>Console</h2>
-        <span className="hint">COUT, $FDED</span>
-        <button
-          type="button"
-          onClick={onClear}
-          onMouseEnter={() => (stick.current = false)}
-          onMouseLeave={() => (stick.current = true)}
-        >
-          Clear
-        </button>
-        {onClose && (
+        <div className="pane-title-group">
+          <h2>Console</h2>
+          <span className="hint">COUT, $FDED</span>
+        </div>
+        <div className="pane-header-actions">
           <button
             type="button"
-            className="pane-close-btn"
-            onClick={onClose}
-            title="Hide Console"
-            aria-label="Close Console"
+            onClick={onClear}
+            onMouseEnter={() => (stick.current = false)}
+            onMouseLeave={() => (stick.current = true)}
+            title="Clear console output"
           >
-            &times;
+            Clear
           </button>
-        )}
+          {onClose && (
+            <button
+              type="button"
+              className="pane-close-btn"
+              onClick={onClose}
+              title="Hide Console"
+              aria-label="Close Console"
+            >
+              &times;
+            </button>
+          )}
+        </div>
       </header>
       <pre
         ref={box}

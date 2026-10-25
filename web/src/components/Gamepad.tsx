@@ -127,28 +127,31 @@ export function Gamepad({ buttons, x, y, onChange, onClose }: Props) {
   return (
     <section className="pane gamepad-pane">
       <header>
-        <h2>Paddles</h2>
-        <span className="hint">$C061, $C062, $C064, $C065</span>
-        <span className="spacer" />
-        <button
-          type="button"
-          className="opt-pill"
-          onClick={onCenter}
-          title={`Reset both paddles to center (${PADDLE_CENTER}, ${PADDLE_CENTER})`}
-        >
-          ⌖ Center
-        </button>
-        {onClose && (
+        <div className="pane-title-group">
+          <h2>Paddles</h2>
+          <span className="hint">$C061, $C062, $C064, $C065</span>
+        </div>
+        <div className="pane-header-actions">
           <button
             type="button"
-            className="pane-close-btn"
-            onClick={onClose}
-            title="Hide paddles pane"
-            aria-label="Close paddles"
+            className="opt-pill"
+            onClick={onCenter}
+            title={`Reset both paddles to center (${PADDLE_CENTER}, ${PADDLE_CENTER})`}
           >
-            &times;
+            ⌖ Center
           </button>
-        )}
+          {onClose && (
+            <button
+              type="button"
+              className="pane-close-btn"
+              onClick={onClose}
+              title="Hide paddles pane"
+              aria-label="Close paddles"
+            >
+              &times;
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Options Strip */}

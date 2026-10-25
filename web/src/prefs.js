@@ -16,6 +16,7 @@ export const PREF_AUTOCONNECT = 'a2e.autoConnect'
 export const PREF_SCREEN_PALETTE = 'a2e.screenPalette'
 export const PREF_SCREEN_SCANLINES = 'a2e.screenScanlines'
 export const PREF_SCREEN_AUTOREFRESH = 'a2e.screenAutoRefresh'
+export const PREF_DISK_SORT = 'a2e.diskSort'
 
 /**
  * Read a boolean setting from localStorage with a fallback default.

@@ -241,66 +241,69 @@ export function Screen({ screen, onCapture, busy, onClose }: Props) {
   return (
     <section className="pane screen-pane">
       <header>
-        <h2>Screen</h2>
-        <span className="hint">Live Framebuffer Capture</span>
-        <span className="spacer" />
-        <button
-          type="button"
-          className="btn-capture"
-          onClick={onCapture}
-          disabled={busy}
-          title="Pause Apple //e momentarily, read text framebuffer, and resume"
-        >
-          {busy ? 'Capturing...' : 'Freeze & capture'}
-        </button>
-        {screen && (
-          <>
-            <button
-              type="button"
-              className="btn-screen-action"
-              onClick={onSaveScreenshot}
-              title="Save current screen capture as PNG image"
-            >
-              📷 PNG
-            </button>
-            <button
-              type="button"
-              className="btn-screen-action"
-              onClick={onCopyImage}
-              title="Copy screen capture image to clipboard"
-            >
-              {copiedImage ? '✓ Copied' : '🖼️ Copy Image'}
-            </button>
-            <button
-              type="button"
-              className="btn-screen-action"
-              onClick={onCopyText}
-              title="Copy screen text characters to clipboard"
-            >
-              {copiedText ? '✓ Copied' : '📋 Copy Text'}
-            </button>
-          </>
-        )}
-        <button
-          type="button"
-          className={'btn-options-toggle' + (showOptions ? ' active' : '')}
-          onClick={() => setShowOptions((o) => !o)}
-          title="Toggle display options (Phosphor color, CRT scanlines, Auto-refresh)"
-          aria-pressed={showOptions}
-        >
-          ⚙ Options
-        </button>
-        {onClose && (
+        <div className="pane-title-group">
+          <h2>Screen</h2>
+          <span className="hint">Live Framebuffer Capture</span>
+        </div>
+        <div className="pane-header-actions">
           <button
             type="button"
-            className="pane-close-btn"
-            onClick={onClose}
-            title="Hide screen pane"
-            aria-label="Close screen"
+            className="btn-capture"
+            onClick={onCapture}
+            disabled={busy}
+            title="Pause Apple //e momentarily, read text framebuffer, and resume"
           >
-            &times;
+            {busy ? 'Capturing...' : 'Freeze & capture'}
           </button>
-        )}
+          {screen && (
+            <>
+              <button
+                type="button"
+                className="btn-screen-action"
+                onClick={onSaveScreenshot}
+                title="Save current screen capture as PNG image"
+              >
+                📷 PNG
+              </button>
+              <button
+                type="button"
+                className="btn-screen-action"
+                onClick={onCopyImage}
+                title="Copy screen capture image to clipboard"
+              >
+                {copiedImage ? '✓ Copied' : '🖼️ Copy Image'}
+              </button>
+              <button
+                type="button"
+                className="btn-screen-action"
+                onClick={onCopyText}
+                title="Copy screen text characters to clipboard"
+              >
+                {copiedText ? '✓ Copied' : '📋 Copy Text'}
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            className={'btn-options-toggle' + (showOptions ? ' active' : '')}
+            onClick={() => setShowOptions((o) => !o)}
+            title="Toggle display options (Phosphor color, CRT scanlines, Auto-refresh)"
+            aria-pressed={showOptions}
+          >
+            ⚙ Options
+          </button>
+          {onClose && (
+            <button
+              type="button"
+              className="pane-close-btn"
+              onClick={onClose}
+              title="Hide screen pane"
+              aria-label="Close screen"
+            >
+              &times;
+            </button>
+          )}
+        </div>
       </header>
 
       {showOptions && (
