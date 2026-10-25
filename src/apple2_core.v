@@ -257,7 +257,6 @@ module apple2_core (
     assign debug_cpu_sync = cpu_sync;
     assign debug_z80_on   = z80_on;
     assign debug_irq_n      = slot_irq_n;
-    assign debug_card_irq_n = card_irq_n;
 
     // 65C02 CPU Core
     cpu_65c02 u_cpu (
@@ -411,11 +410,50 @@ module apple2_core (
     wire        ssc_irq_n;
     wire        d2_any_disk;    // a Disk ][ drive holds an image (gates the $C600 ROM)
     wire [6:0]  card_present;
+    // ==================================================================
+    // Authentic 65-cycle Apple II Video Scanner for Floating Bus
+    // ==================================================================
+    reg [6:0] scan_col = 7'd0;    // 0..64 (65 CPU cycles per line)
+    reg [8:0] scan_line = 9'd0;   // 0..261 (262 lines per NTSC field)
+
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            scan_col  <= 7'd0;
+            scan_line <= 9'd0;
+        end else if (ce_1m) begin
+            if (scan_col == 7'd64) begin
+                scan_col  <= 7'd0;
+                scan_line <= (scan_line == 9'd261) ? 9'd0 : scan_line + 9'd1;
+            end else begin
+                scan_col <= scan_col + 7'd1;
+            end
+        end
+    end
+
+    // Canonical Apple II interleaved display row addressing
+    wire [4:0] fb_text_row  = scan_line[7:3];  // scan_line / 8
+    wire [2:0] fb_glyph_row = scan_line[2:0];  // scan_line % 8
+    wire [6:0] fb_rgo = (fb_text_row[4:3] == 2'd1) ? 7'd40 :
+                        (fb_text_row[4:3] == 2'd2) ? 7'd80 : 7'd0;
+    wire [9:0] fb_row_offset = {fb_text_row[2:0], 7'd0} + {3'd0, fb_rgo};
+    wire       fb_page2 = page2 && !store80;
+    wire [15:0] fb_text_base = fb_page2 ? 16'h0800 : 16'h0400;
+    wire [15:0] fb_hgr_base  = fb_page2 ? 16'h4000 : 16'h2000;
+    wire fb_is_text = text_mode || (mixed_mode && (fb_text_row >= 5'd20));
+
+    wire [15:0] fb_scan_addr = (hires_mode && !fb_is_text) ?
+        (fb_hgr_base + {3'd0, fb_glyph_row, 10'd0} + {6'd0, fb_row_offset} + {9'd0, scan_col}) :
+        (fb_text_base + {6'd0, fb_row_offset} + {9'd0, scan_col});
+
+    wire [7:0] ram_dout_b;
+    wire [7:0] float_bus_data = ram_dout_b;
+    wire       vbl_status = (scan_line >= 9'd192);
+
     // A byte per slot, 7 down to 1.  With no disk in either drive slot 6 reads
     // as empty (the floating bus), so the Autostart scan passes it by and
     // falls into BASIC.
     wire [55:0] card_data = {hd_rom_data,                          // 7 ProDOS hard disk
-                             d2_any_disk ? d2_rom_data : vram_data, // 6 Disk ][
+                             d2_any_disk ? d2_rom_data : float_bus_data, // 6 Disk ][
                              tc_rom_data,                          // 5 clock
                              mock_rom_data,                        // 4 Mockingboard
                              16'd0,                                // 3, 2 (SoftCard: no ROM)
@@ -439,6 +477,7 @@ module apple2_core (
     wire        mock_devsel_n = !(is_io && (effective_cpu_addr[7:4] == 4'hC));
 
     wire [6:0]  card_irq_n = {1'b1, 1'b1, tc_irq_n, mock_irq_n, 1'b1, 1'b1, ssc_irq_n};
+    assign debug_card_irq_n = card_irq_n;
 
     slot_bus u_slot_bus (
         .clk(clk),
@@ -460,7 +499,7 @@ module apple2_core (
         .iosel_n(iosel_n),       // ...and /IOSEL, to answer $C600-$C6FF
         .irq_out_n(),
         .iostrobe_n(),           // $CFFF releases the expansion space
-        .float_data(vram_data),          // the floating bus: the video's last byte
+        .float_data(float_bus_data),          // the floating bus: the video's last byte
         .int_rom_sel(slot_int_rom),
         .slot_dout(slot_dout),
         .irq_n(slot_irq_n),
@@ -545,7 +584,9 @@ module apple2_core (
         .addr(ram_addr),
         .din(cpu_dout),
         .we(ram_we),
-        .dout(ram_dout)
+        .dout(ram_dout),
+        .addr_b(fb_scan_addr),
+        .dout_b(ram_dout_b)
     );
 
     // Latch Video RAM output when vram_req_d is active
@@ -594,7 +635,7 @@ module apple2_core (
             4'h6:    sw_bit = altzp;          // $C016 RDALTZP
             4'h7:    sw_bit = slotc3rom;      // $C017 RDC3ROM
             4'h8:    sw_bit = store80;        // $C018 RD80STORE
-            4'h9:    sw_bit = ~vbl;           // $C019 RDVBLBAR
+            4'h9:    sw_bit = ~vbl_status;    // $C019 RDVBLBAR
             4'hA:    sw_bit = text_mode;      // $C01A RDTEXT
             4'hB:    sw_bit = mixed_mode;     // $C01B RDMIXED
             4'hC:    sw_bit = page2;          // $C01C RDPAGE2
@@ -634,7 +675,7 @@ module apple2_core (
                 // Mockingboard alternate I/O registers at $C0C0-$C0CF
                 cpu_din_comb = mock_rom_data;
             end else begin
-                cpu_din_comb = vram_data;       // nothing answers: the floating bus
+                cpu_din_comb = float_bus_data;  // authentic floating bus
             end
         end else if (is_slot_rom) begin
             cpu_din_comb = slot_int_rom ? rom_dout : slot_dout;

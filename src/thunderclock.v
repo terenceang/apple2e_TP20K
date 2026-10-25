@@ -130,14 +130,14 @@ module thunderclock #(
             5'd17: ch = 8'h8D;                                  // CR ends it
             default: ch = 8'hAC;                                // ","
         endcase
-    assign io_data = (addr[3:0] == 4'h0) ? ch :
-                     (addr[3:0] == 4'h2) ? {irq_flag, 7'b0000000} :
-                     (addr[3:0] == 4'h3) ? {irq_en, 7'b0000000} : 8'h00;
-
     localparam [24:0] TICK_64HZ = (TICKS >= 25'd64) ? (TICKS / 25'd64) : 25'd1;
     reg [24:0] tick_64_cnt = 25'd0;
     reg        irq_en      = 1'b0;
     reg        irq_flag    = 1'b0;
+
+    assign io_data = (addr[3:0] == 4'h0) ? ch :
+                     (addr[3:0] == 4'h2) ? {irq_flag, 7'b0000000} :
+                     (addr[3:0] == 4'h3) ? {irq_en, 7'b0000000} : 8'h00;
 
     assign irq_n = !(irq_en && irq_flag);
 

@@ -229,7 +229,7 @@ module sd_vol #(
     reg        walk_ok = 1'b0;
     reg [31:0] fstart [0:3];
     reg [16:0] fnsec [0:3];
-    reg        hdr_ok = 1'b0;           // the floppy being loaded is WOZ2, 5.25 inch
+    reg        hdr_ok = 1'b0;           // the floppy being loaded is WOZ 1/2, 5.25 inch
     // the config parser
     reg [2:0]  ps = P_K0;
     reg [1:0]  pkey = 2'd0;
@@ -509,8 +509,10 @@ module sd_vol #(
                               f_up_addr <= {blk[10:0], bcnt};
                               f_up_last <= blk == jlast && bcnt == 9'd511 && hdr_ok;
                               if (blk == 16'd0) begin
-                                  if (bcnt <= 9'd3)
-                                      hdr_ok <= (bcnt == 9'd0 || hdr_ok) && rxv == nbyte({"WOZ2", 56'h0}, bcnt[3:0]);
+                                      if (bcnt <= 9'd2)
+                                          hdr_ok <= (bcnt == 9'd0 || hdr_ok) && rxv == nbyte({"WOZ", 64'h0}, bcnt[3:0]);
+                                      if (bcnt == 9'd3)
+                                          hdr_ok <= hdr_ok && (rxv == "1" || rxv == "2");
                                   if (bcnt == 9'd21 && rxv != 8'd1) hdr_ok <= 1'b0;
                                   if (bcnt == 9'd22) f_up_ro <= rxv == 8'd1;
                               end

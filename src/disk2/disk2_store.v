@@ -71,6 +71,7 @@ module disk2_store (
 );
 
     reg [1:0] present = 2'b00, writable = 2'b00;
+    reg [1:0] is_woz1 = 2'b00;
     assign drv_present  = present;
     assign drv_writable = present & writable;
 
@@ -86,7 +87,7 @@ module disk2_store (
     reg [7:0]  lk_q   = 8'hFF;
     reg        lk_ok  = 1'b0;          // the lookup is done (and still the head's)
     reg        tv     = 1'b0;          // ...and there is a track
-    reg [10:0] t_blk  = 11'd0;         // its first block
+    reg [18:0] t_base = 19'd0;         // its first word
     reg [19:0] t_bits = 20'd0;         // its length in bits
     reg [7:0]  t_idx  = 8'd0;          // TRKS index, during the lookup
     reg [1:0]  lk_st  = 2'd0;          // 0 TMAP, 2 bits lo, 3 bits hi, 1 start
@@ -112,7 +113,7 @@ module disk2_store (
     reg        wb_pend = 1'b0;
     reg [21:0] wb_addr = 22'd0;
     reg [15:0] wb_data = 16'd0;
-    wire [18:0] w0_word = {t_blk, 8'd0} + {3'd0, w0};
+    wire [18:0] w0_word = t_base + {3'd0, w0};
 
     // ------------------------------------------------------------------
     // The DDR3 engine: one word at a time
@@ -129,8 +130,12 @@ module disk2_store (
     wire       dn_hit  = dn_ok && dn_at[19:1] == down_addr[19:1];
     assign     up_busy = busy_q || up_done;
 
-    // the lookup's word: TMAP byte 88 + q is word 44 + q/2; TRKS entry i is words 128 + 4i ..
+    // the lookup's word: TMAP byte 88 + q is word 44 + q/2;
+    // WOZ2: TRKS entry i is words 128 + 4i ..
+    // WOZ1: track i is words 128 + 3328*i, bit count at word + 3324
+    wire [18:0] woz1_track_word = 19'd128 + {t_idx[6:0], 11'd0} + {1'b0, t_idx[6:0], 10'd0} + {3'b000, t_idx[6:0], 8'd0};
     wire [18:0] lk_word = (lk_st == 2'd0) ? 19'd44 + {12'd0, qtr[7:1]} :
+                          is_woz1[lk_drv] ? (woz1_track_word + 19'd3324) :
                           19'd128 + {9'd0, t_idx, 2'b00} + {17'd0, lk_st == 2'd1 ? 2'd0 : lk_st};
 
     always @(posedge clk) begin
@@ -167,7 +172,7 @@ module disk2_store (
             lk_ok <= 1'b0; ok0 <= 1'b0; ok1 <= 1'b0; lk_st <= 2'd0;
         end
 
-        if (up_bad) begin present[up_drive] <= 1'b0; up_have <= 1'b0; lk_ok <= 1'b0; lk_st <= 2'd0; ok0 <= 1'b0; ok1 <= 1'b0; end
+        if (up_bad) begin present[up_drive] <= 1'b0; is_woz1[up_drive] <= 1'b0; up_have <= 1'b0; lk_ok <= 1'b0; lk_st <= 2'd0; ok0 <= 1'b0; ok1 <= 1'b0; end
 
         if (!busy_q) begin
             if (wb_pend) begin
@@ -176,6 +181,7 @@ module disk2_store (
             end else if (up_go && !up_done) begin
                 // a byte of a file being loaded: two make a word
                 up_done <= 1'b1;
+                if (up_addr == 20'd3) is_woz1[up_drive] <= (up_data == "1");
                 if (up_last) begin
                     present[up_drive] <= 1'b1; writable[up_drive] <= !up_ro;
                     if (up_drive == lk_drv) begin lk_ok <= 1'b0; lk_st <= 2'd0; ok0 <= 1'b0; ok1 <= 1'b0; end
@@ -208,11 +214,11 @@ module disk2_store (
             end else if (lk_ok && tv && !ok0) begin
                 busy_q <= 1'b1; kind <= K_F0; dsk_go <= 1'b1; dsk_we <= 1'b0;
                 f_w <= pos[19:4];
-                dsk_addr <= waddr(lk_drv, {t_blk, 8'd0} + {3'd0, pos[19:4]});
+                dsk_addr <= waddr(lk_drv, t_base + {3'd0, pos[19:4]});
             end else if (lk_ok && tv && ok0 && !ok1) begin
                 busy_q <= 1'b1; kind <= K_F1; dsk_go <= 1'b1; dsk_we <= 1'b0;
                 f_w <= w0_nx;
-                dsk_addr <= waddr(lk_drv, {t_blk, 8'd0} + {3'd0, w0_nx});
+                dsk_addr <= waddr(lk_drv, t_base + {3'd0, w0_nx});
             end
         end else if (dsk_ack) begin
             busy_q <= 1'b0;
@@ -225,18 +231,26 @@ module disk2_store (
                 K_LK: if (lk_drv == drive && lk_q == qtr) case (lk_st)
                     2'd0: begin
                         t_idx <= qtr[0] ? dsk_rdata[15:8] : dsk_rdata[7:0];
-                        if ((qtr[0] ? dsk_rdata[15:8] : dsk_rdata[7:0]) >= 8'd160) begin
+                        if ((qtr[0] ? dsk_rdata[15:8] : dsk_rdata[7:0]) >= (is_woz1[lk_drv] ? 8'd80 : 8'd160)) begin
                             tv <= 1'b0; lk_ok <= 1'b1;            // 0xFF: no track here
-                        end else lk_st <= 2'd2;
+                        end else lk_st <= is_woz1[lk_drv] ? 2'd1 : 2'd2;
                     end
                     2'd2: begin t_bits[15:0] <= dsk_rdata; lk_st <= 2'd3; end
                     2'd3: begin t_bits[19:16] <= dsk_rdata[3:0]; lk_st <= 2'd1;
                                 if (dsk_rdata[15:4] != 12'd0) begin tv <= 1'b0; lk_ok <= 1'b1; end end
-                    default: begin                                // the start block, last
-                        t_blk <= dsk_rdata[10:0];
-                        tv    <= t_bits != 20'd0 && dsk_rdata[15:11] == 5'd0;
-                        lk_ok <= 1'b1;
-                        if (pos >= t_bits) pos <= 20'd0;          // a shorter track
+                    default: begin                                // state 1: start block (WOZ2) or bit count (WOZ1)
+                        if (is_woz1[lk_drv]) begin
+                            t_bits <= {4'd0, dsk_rdata};
+                            t_base <= woz1_track_word;
+                            tv     <= (dsk_rdata != 16'd0);
+                            lk_ok  <= 1'b1;
+                            if (pos >= {4'd0, dsk_rdata}) pos <= 20'd0;
+                        end else begin
+                            t_base <= {dsk_rdata[10:0], 8'd0};
+                            tv     <= t_bits != 20'd0 && dsk_rdata[15:11] == 5'd0;
+                            lk_ok  <= 1'b1;
+                            if (pos >= t_bits) pos <= 20'd0;          // a shorter track
+                        end
                     end
                 endcase
                 // a fetch the head has moved away from (lk_ok or ok0 cleared) is dropped

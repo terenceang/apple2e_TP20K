@@ -46,7 +46,11 @@ module apple2_ram_48k (   // $0000-$BFFF; addresses above are never written or u
     input  wire [15:0] addr,
     input  wire [7:0]  din,
     input  wire        we,
-    output reg  [7:0]  dout
+    output reg  [7:0]  dout,
+
+    // Port B: read-only for authentic video floating bus scanner
+    input  wire [15:0] addr_b,
+    output reg  [7:0]  dout_b
 );
     reg [7:0] mem [0:49151];
     // Simulation only (Gowin defines no SYNTHESIS macro, and loops past 2000
@@ -62,6 +66,11 @@ module apple2_ram_48k (   // $0000-$BFFF; addresses above are never written or u
     always @(posedge clk) begin
         if (we)
             mem[addr] <= din;
-        dout <= mem[addr];
+        else
+            dout <= mem[addr];
+    end
+
+    always @(posedge clk) begin
+        dout_b <= mem[addr_b];
     end
 endmodule

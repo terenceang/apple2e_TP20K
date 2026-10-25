@@ -77,7 +77,7 @@ module tb_auxsw;
         // Internal ROM gating.  Reset state: INTCXROM off, as on a //e, so the
         // slot scan boots the card and not the self-test at $C600.
         status(16'hC015, "INTCXROM reset", 0);
-        rd(16'hC200); check("C200 floats at reset (slot 2's SoftCard has no ROM)", dut.cpu_din === dut.vram_data);
+        rd(16'hC200); check("C200 floats at reset (slot 2's SoftCard has no ROM)", dut.cpu_din === dut.float_bus_data);
         rd(16'hC100); check("C100 is the Super Serial Card's", dut.cpu_din === dut.ssc_rom_data);
         // ...and the card has claimed $C800 for its firmware, as an SSC does;
         // $CFFF lets it go again
@@ -86,17 +86,17 @@ module tb_auxsw;
         wr(16'hC007);
         rd(16'hC200); check("C200 ROM when INTCXROM", dut.cpu_din === dut.u_rom.mem[16'h0200]);
         wr(16'hC006);
-        rd(16'hC200); check("C200 floats when INTCXROM off", dut.cpu_din === dut.vram_data);
+        rd(16'hC200); check("C200 floats when INTCXROM off", dut.cpu_din === dut.float_bus_data);
         // $C3xx is internal with SLOTC3ROM off, and turns on INTC8ROM
-        rd(16'hC800); check("C800 floats before C3xx", dut.cpu_din === dut.vram_data);
+        rd(16'hC800); check("C800 floats before C3xx", dut.cpu_din === dut.float_bus_data);
         rd(16'hC300); check("C300 ROM with SLOTC3ROM off", dut.cpu_din === dut.u_rom.mem[16'h0300]);
         rd(16'hC800); check("C800 ROM after C3xx", dut.cpu_din === dut.u_rom.mem[16'h0800]);
         rd(16'hCFFF);
-        rd(16'hC800); check("C800 floats after CFFF", dut.cpu_din === dut.vram_data);
+        rd(16'hC800); check("C800 floats after CFFF", dut.cpu_din === dut.float_bus_data);
         // SLOTC3ROM on: $C3xx belongs to the (empty) slot
         wr(16'hC00B);
-        rd(16'hC300); check("C300 floats with SLOTC3ROM on", dut.cpu_din === dut.vram_data);
-        rd(16'hC800); check("C800 stays off", dut.cpu_din === dut.vram_data);
+        rd(16'hC300); check("C300 floats with SLOTC3ROM on", dut.cpu_din === dut.float_bus_data);
+        rd(16'hC800); check("C800 stays off", dut.cpu_din === dut.float_bus_data);
 
         if (fails == 0) $display("tb_auxsw: PASS");
         else            $display("FAIL: tb_auxsw %0d checks", fails);

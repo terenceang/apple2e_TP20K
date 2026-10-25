@@ -110,6 +110,7 @@ $core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v',
            'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v', 'src/thunderclock.v', 'src/ssc.v') + $disk2 + $mockingboard + $softcard
 Run-Tb 'tb_thunderclock' @('src/thunderclock.v')
 Run-Tb 'tb_ssc'          @('src/ssc.v') -Gen '2012' -Defines $disk2Defines
+Run-Tb 'tb_floatbus'     $core -Defines $disk2Defines
 # slot 7's firmware: the included .vh must match src/prodos_hd_rom.s, and the
 # firmware is run against a model of its registers (py65; the system Python,
 # not the OSS CAD Suite's, which has no py65).  Judged by exit code alone.
@@ -130,6 +131,8 @@ if (-not $Target -or $Target -in @('tb_sdvol', 'tb_sdcopy', 'tb_disk2', 'tb_p6bo
     if ($LASTEXITCODE -ne 0) { throw 'FAILED: web/scripts/simcard.mjs' }
 }
 Run-Tb 'tb_disk2'        $disk2 -Gen '2012' -Defines $disk2Defines
+Run-Tb 'tb_woz1'         @('src/disk2/disk2_store.v') -Gen '2012'
+Run-Tb 'tb_floatbus'     $core -Gen '2012' -Defines $disk2Defines
 Run-Tb 'tb_sdvol'        @('sim/models/sdcard.v', 'src/sd_vol.v', 'src/spi_byte.v') -Gen '2012'
 Run-Tb 'tb_sdcopy'       @('sim/models/sdcard.v', 'src/sd_vol.v', 'src/spi_byte.v', 'src/serial_debugger.v') -Gen '2012'
 Run-Tb 'tb_video_hdmi'   (@('src/video_generator.v', 'src/colorbar_gen.v') + $hdmi)

@@ -136,7 +136,7 @@ module tb_ssc;
         acc(4'h8, 1'b0, 8'h00, v);
         // a status read in the very clock a byte lands must not lose its IRQ
         send(8'h6A);
-        @(negedge clk); while (!dut.f_take) @(negedge clk);
+        @(posedge clk); while (!dut.rdrf) @(posedge clk);
         addr = 16'hC099; we = 1'b0; devsel_n = 1'b0; bus_cycle = 1'b1;
         @(negedge clk); devsel_n = 1'b1; bus_cycle = 1'b0;
         check("a status read as a byte lands keeps its IRQ", irq_n == 1'b0);
