@@ -102,7 +102,7 @@ Implemented in [`src/aux_ram.v`](../src/aux_ram.v):
 | :--- | :--- | :---: | :---: | :--- |
 | **Region 0 (Lower)** | `0x000000`–`0x00FFFF` | 64 KB | 64 KB | **Auxiliary RAM:** 80-column text, Double Hi-Res, aux zero page |
 | **Region 0 (Upper)** | `0x010000`–`0x01FFFF` | 64 KB | 16 KB | **Main Language Card:** RAM `$D000`–`$FFFF` + Bank 2 `$D000`–`$DFFF` |
-| **Region 1** | `0x1000000`–`0x13FFFFF` | 4 MB | ~460 KB | **Disk II Storage:** Drive 1 & 2 `.woz` files byte for byte (1 MB each at most, word `{drive, byte[19:1]}`), loaded from the TF card (`src/sd_vol.v`), played bit by bit (`src/disk2/disk2_store.v`), written blocks copied back to the file |
+| **Region 1** | `0x1000000`–`0x13FFFFF` | 4 MB | ~460 KB | **Disk II Storage:** Drive 1 & 2 `.woz` files byte for byte (WOZ 1 and WOZ 2, up to 1 MB each at most, word `{drive, byte[19:1]}`), loaded from the TF card (`src/sd_vol.v`), played bit by bit (`src/disk2/disk2_store.v`), written blocks copied back to the file |
 | **Region 3** | `0x3000000`+ | 128 B | 128 B | **Power-On Self-Test (POST):** Memory calibration pattern |
 | **Upper half** | `0x2000000`–`0x3FFFFFF` (words) | 64 MB | 64 MB | **Slot 7 ProDOS volumes:** two drives x 65,536 blocks, two bytes per 16-bit word, read from their `.hdv`/`.po` files on the TF card a block at a time as ProDOS asks and written back block by block (`src/prodos_hd.v`, `src/sd_vol.v`) |
 | **Free / Unused** | Remaining space | **~59.8 MB** | — | Unallocated DDR3 space |

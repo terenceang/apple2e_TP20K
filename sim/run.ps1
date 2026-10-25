@@ -78,6 +78,7 @@ Run-Tb 'tb_data_island'  $island
 Run-Tb 'tb_sound'        @('src/sound_generator.v', 'src/audio_filter.v', 'sim/models/gowin_prims.v')
 Run-Tb 'tb_audio_filter' @('src/audio_filter.v', 'sim/models/gowin_prims.v')
 Run-Tb 'tb_input'        @('src/input_controller.v')
+Run-Tb 'tb_ulpi_keyboard' @('src/usb_host/ulpi_keyboard_host.v') -Gen '2012'
 Run-Tb 'tb_slots'        @('src/slot_bus.v')
 Run-Tb 'tb_ay8910'       @('src/mockingboard/ay8910.v')
 Run-Tb 'tb_via6522'      @('src/mockingboard/via6522.v')
@@ -110,7 +111,7 @@ $core  = @('src/apple2_core.v', 'src/apple2_mem.v', 'src/slot_bus.v',
            'src/cpu/cpu_65c02.v', 'src/cpu/ALU.v', 'src/prodos_hd.v', 'src/thunderclock.v', 'src/ssc.v') + $disk2 + $mockingboard + $softcard
 Run-Tb 'tb_thunderclock' @('src/thunderclock.v')
 Run-Tb 'tb_ssc'          @('src/ssc.v') -Gen '2012' -Defines $disk2Defines
-Run-Tb 'tb_floatbus'     $core -Defines $disk2Defines
+Run-Tb 'tb_irq_system'   @('src/cpu/cpu_65c02.v', 'src/cpu/ALU.v') -Gen '2012'
 # slot 7's firmware: the included .vh must match src/prodos_hd_rom.s, and the
 # firmware is run against a model of its registers (py65; the system Python,
 # not the OSS CAD Suite's, which has no py65).  Judged by exit code alone.

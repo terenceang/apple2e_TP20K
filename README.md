@@ -65,8 +65,9 @@ The companion web application connects directly to the Tang Primer 20K over USB-
 
 ### Storage & Expansion Slots
 * **Slot 6 — Dual Disk II Controller**:
-  * Reads and writes authentic [WOZ 2](https://applesaucefdc.com/woz/reference2/) bitstream images byte-for-byte from the TF card.
-  * Cycle-synced sequencer controller with an MC3470 read amplifier model handles 13-sector disks, standard 16-sector disks, quarter-tracks, and copy-protected originals.
+  * Reads and writes authentic [WOZ 1](https://applesaucefdc.com/woz/reference1/) and [WOZ 2](https://applesaucefdc.com/woz/reference2/) bitstream images byte-for-byte from the TF card.
+  * Cycle-synced sequencer controller with an MC3470 read amplifier model handles 13-sector disks, standard 16-sector disks, quarter-tracks, fast loaders (e.g. French Touch's 8-cycle page-crossing poll), and copy-protected originals.
+  * Fractional-rate NCO bit cell timing with spindle speed scaling and hardware DSP acceleration for track indexing.
   * Modified floppy sectors are automatically synced back to the TF card image ~1 second after drive activity ceases.
 * **Slot 7 — ProDOS Block Device & SmartPort**:
   * Provides two 32 MB hard disk volumes (`.hdv` or `.po` raw block format) streaming on demand from the TF card.
