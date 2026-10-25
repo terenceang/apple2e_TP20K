@@ -835,6 +835,7 @@ module apple2_core (
         .reset(reset),
         .ce_1m(ce_1m),
         .step(z80_on ? ce_1m : c02_go),   // the disk turns on the 6502's clock
+        .speed_ratio(8'd128),              // 1.0x nominal (300 RPM)
         .devsel_n(devsel_n[5]),
         .iosel_n(iosel_n[5]),
         .bus_cycle(cpu_go),

@@ -28,11 +28,14 @@
 // Read (Q7 low): each bit goes through an MC3470 model -- more than three
 // zero bits in a row read as random bits, as the real amplifier's noise does
 // (WOZ reference, "emulating fake bits") -- and is shifted into the register;
-// when bit 7 is set the byte is in the data latch for 7 CPU cycles (long
-// enough for a 7-cycle LDA/BPL poll to see it, short enough that RWTS's next
-// read does not see it twice), and the register starts again from zero, so the
-// zero bits after a sync byte are absorbed (self-sync).  After those 7 cycles
-// the latch reads the register as it fills, bit 7 clear.
+// when bit 7 is set the byte is in the data latch for 8 CPU cycles, and the
+// register starts again from zero, so the zero bits after a sync byte are
+// absorbed (self-sync).  After those 8 cycles the latch reads the register as
+// it fills, bit 7 clear.  8 is the real P6 sequencer's shortest hold (8-9
+// cycles back to back, Understanding the Apple IIe fig. 9.11): an LDA/BPL poll
+// that branches across a page is 8 cycles, and French Touch's fast loader has
+// one; at 7 it locked onto the wrong phase and never saw the byte.  Two reads
+// 8 cycles apart (RWTS's quickest) still cannot both land in it.
 //
 // Write (Q7 high): the register shifts its top bit onto the disk every bit
 // cell, a 1 as a flux transition, and zeros in behind it, so a byte loaded
@@ -54,6 +57,7 @@ module disk2_card (
     input  wire        reset,         // Active-high reset
     input  wire        ce_1m,         // 1.023 MHz clock enable
     input  wire        step,          // a CPU cycle: the 6502's step (ce_1m while the Z80 runs)
+    input  wire [7:0]  speed_ratio,   // Spindle motor speed ratio: 8'd128 = 1.0x (300 RPM); 0 defaults to 128
 
     // Slot bus strobes, from slot_bus (src/slot_bus.v)
     input  wire        devsel_n,      // a $C0E0-$C0EF access is on the bus
@@ -171,9 +175,28 @@ module disk2_card (
     // ------------------------------------------------------------------
     // The bit cell, and the sequencer
     // ------------------------------------------------------------------
-    reg [1:0] bcell = 2'd0;             // ce_1m within the 4-cycle bit cell
-    always @(posedge clk) if (step) bcell <= bcell + 2'd1;
-    assign bit_tick = step && bcell == 2'd3 && motor_running;
+    // A standard bit cell is 4 CPU cycles (~4 us, 300 RPM).
+    // Fractional-rate NCO using hardware DSP multiplier:
+    // Phase accumulator modulus is 4096 (12-bit). Nominal step is 1024 (4096 / 4).
+    // The hardware multiplier scales nominal step by speed_ratio (8'd128 = 1.0x).
+    wire [7:0]  eff_speed  = (speed_ratio == 8'd0) ? 8'd128 : speed_ratio;
+    wire [18:0] step_prod  = 12'd1024 * eff_speed;  // DSP multiplier
+    wire [11:0] phase_inc  = step_prod[18:7];
+    reg  [11:0] phase      = 12'd0;
+    wire [12:0] phase_next = {1'b0, phase} + {1'b0, phase_inc};
+    wire        phase_wrap = phase_next[12];
+    assign bit_tick = step && phase_wrap && motor_running;
+
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            phase <= 12'd0;
+        end else if (step) begin
+            if (motor_running)
+                phase <= phase_next[11:0];
+            else
+                phase <= 12'd0;
+        end
+    end
 
     // The MC3470: four zero bits in a row (one bit late) read as noise, ~25% ones
     reg [3:0]  win = 4'd0;
@@ -184,19 +207,19 @@ module disk2_card (
 
     reg  [7:0] sr = 8'd0;              // the shift register
     reg  [7:0] latch = 8'd0;           // the byte last completed
-    reg  [2:0] hold = 3'd0;            // CPU cycles the latch shows it for
+    reg  [3:0] hold = 4'd0;            // CPU cycles the latch shows it for
     wire [7:0] sr_in = {sr[6:0], bit_in};
 
     reg  [7:0] wsr = 8'd0;             // write mode: the byte going out
     wire       w_load = io_sel && cpu_we && q6_nx && q7_nx;
 
     always @(posedge clk) begin
-        if (step && hold != 3'd0) hold <= hold - 3'd1;
+        if (step && hold != 4'd0) hold <= hold - 4'd1;
         if (bit_tick) begin
             lfsr <= {lfsr[0] ^ lfsr[2] ^ lfsr[3] ^ lfsr[5], lfsr[15:1]};
             if (!q7) begin
                 win <= win_nx;
-                if (sr_in[7]) begin latch <= sr_in; sr <= 8'd0; hold <= 3'd7; end
+                if (sr_in[7]) begin latch <= sr_in; sr <= 8'd0; hold <= 4'd8; end
                 else sr <= sr_in;
             end else
                 wsr <= {wsr[6:0], 1'b0};
@@ -216,7 +239,7 @@ module disk2_card (
     // mode a read gives the same.
     wire wr_protected = !drv_writable[drive_q];
     wire [7:0] data_rd = (q6 || q7) ? (wr_protected ? 8'h80 : 8'h00) :
-                         (hold != 3'd0) ? latch : sr;
+                         (hold != 4'd0) ? latch : sr;
 
     // What the card drives onto $C0E0-$C0EF: the data register at the even
     // addresses (the ROM reads $C0EC and $C0EE), the floating bus elsewhere.

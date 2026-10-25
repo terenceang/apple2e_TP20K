@@ -54,6 +54,7 @@ module tb_disk2;
 
     disk2_card card (
         .clk(clk), .reset(reset), .ce_1m(ce_1m), .step(bus_cycle),
+        .speed_ratio(8'd128),
         .devsel_n(devsel_n), .iosel_n(1'b1), .bus_cycle(bus_cycle), .cpu_we(we),
         .addr(addr), .cpu_di(di), .rom_data(rom_data), .io_data(io_data),
         .drive(drive), .qtr(qtr), .bit_tick(bit_tick), .wr_en(wr_en), .wr_bit(wr_bit),
@@ -147,15 +148,18 @@ module tb_disk2;
     task idle(input integer n); repeat (n) tick; endtask
 
     // RD: LDA $C08C,X / BPL RD (7 cycles a pass), then BPL not taken and a
-    // compare (4) before the caller's next read
+    // compare (4) before the caller's next read.  poll_gap 4 is a BPL taken
+    // across a page (8 cycles a pass) and post 6 a CMP/BNE as well, as French
+    // Touch's fast loader reads its D5 AA AD (it locked out with a 7-cycle latch).
+    integer poll_gap = 3, post = 4;   // 3 ticks + the read + poll_gap = a pass
     task rdnib(output [7:0] b);
         begin
             b = 8'h00;
             while (!b[7]) begin
                 tick; tick; tick; acc(4'hC, 1'b0, 8'h00, b);
-                if (!b[7]) begin tick; tick; end
+                if (!b[7]) repeat (poll_gap) tick;
             end
-            tick; tick; tick; tick;
+            repeat (post) tick;
         end
     endtask
 
@@ -379,6 +383,10 @@ module tb_disk2;
         seek(17);
         read_track(17, 14000);
         check("track 17: all 16 sectors decode to the .dsk", seen == 16'hFFFF && bad == 0);
+        poll_gap = 4; post = 6;
+        read_track(17, 14000);
+        check("track 17 with an 8-cycle poll (the latch holds 8 cycles)", seen == 16'hFFFF && bad == 0);
+        poll_gap = 3; post = 4;
 
         // ---- a quarter track beside track 17 reads it; one between tracks is noise ----
         sw(4'h5); sw(4'h7); idle(20);       // track 17 is phase 2's: phases 2 and 3, 17.25

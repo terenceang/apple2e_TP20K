@@ -133,7 +133,8 @@ module disk2_store (
     // the lookup's word: TMAP byte 88 + q is word 44 + q/2;
     // WOZ2: TRKS entry i is words 128 + 4i ..
     // WOZ1: track i is words 128 + 3328*i, bit count at word + 3324
-    wire [18:0] woz1_track_word = 19'd128 + {t_idx[6:0], 11'd0} + {1'b0, t_idx[6:0], 10'd0} + {3'b000, t_idx[6:0], 8'd0};
+    // Implemented via hardware DSP multiplier (3328 words = 6656 bytes per track)
+    wire [18:0] woz1_track_word = 19'd128 + ({11'd0, t_idx} * 19'd3328);
     wire [18:0] lk_word = (lk_st == 2'd0) ? 19'd44 + {12'd0, qtr[7:1]} :
                           is_woz1[lk_drv] ? (woz1_track_word + 19'd3324) :
                           19'd128 + {9'd0, t_idx, 2'b00} + {17'd0, lk_st == 2'd1 ? 2'd0 : lk_st};
