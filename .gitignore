@@ -49,3 +49,6 @@ CLAUDE.md
 .claude/
 .agents/
 .jules/
+
+# Scratch directory
+/scratch/
