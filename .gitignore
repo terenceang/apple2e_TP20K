@@ -54,3 +54,6 @@ CLAUDE.md
 /scratch/
 # Archive directory
 /archive/
+# Disk images (may contain copyrighted material)
+/Disk/
+/disk/
