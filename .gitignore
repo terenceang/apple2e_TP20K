@@ -28,6 +28,7 @@ obj_dir/
 /web/src/generated/charset.json
 
 # Dev screenshots (they render the Apple character set)
+*.png
 /web/*.png
 # Third-party vendor PDFs (datasheet, schematic) are not ours to redistribute
 /Documents/*.pdf
