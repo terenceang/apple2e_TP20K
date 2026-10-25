@@ -422,8 +422,9 @@ export function useApple() {
     if (conn.state !== 'open' || !link.current) return
     setFirmwareVersion(null)
 
-    const wasConsole = modeRef.current === 'console'
-    if (wasConsole) {
+    // Check both synchronous stream mode and React modeRef in case render hasn't caught up
+    const isConsole = stream.current.mode === 'console' || modeRef.current === 'console'
+    if (isConsole) {
       link.current.write([CTRL_B])
       // Give the FPGA time to output banner and regs
       await new Promise((r) => setTimeout(r, 250))
@@ -434,7 +435,7 @@ export function useApple() {
     await new Promise((r) => setTimeout(r, 250))
 
     // Resume execution if we paused it
-    if (wasConsole) {
+    if (isConsole) {
       link.current.write([CTRL_B])
     }
 
@@ -447,7 +448,8 @@ export function useApple() {
   // When connected, query the firmware version from the board
   useEffect(() => {
     if (conn.state !== 'open') return
-    const timer = setTimeout(queryFirmware, 300)
+    // Allow connection handshake and resume notice to fully settle before querying
+    const timer = setTimeout(queryFirmware, 800)
     return () => clearTimeout(timer)
   }, [conn.state, queryFirmware])
 
