@@ -10,6 +10,7 @@ import { Gamepad } from './components/Gamepad'
 import { FlashBar } from './components/FlashBar'
 import { DiskPane } from './components/DiskPane'
 import { ModemPane } from './components/ModemPane'
+import versionInfo from './version.json'
 
 import {
   PREF_CONSOLE,
@@ -226,6 +227,25 @@ export default function App() {
           />
         </div>
       </main>
+
+      <footer className="app-footer">
+        <div className="footer-item">
+          <span className="footer-label">Web Companion:</span>
+          <strong className="footer-val">{versionInfo.display}</strong>
+        </div>
+        <div className="footer-item">
+          <span
+            className={`footer-status-dot ${apple.conn.state === 'open' ? 'connected' : ''}`}
+            title={apple.conn.state === 'open' ? 'Connected' : 'Disconnected'}
+          />
+          <span className="footer-label">Firmware:</span>
+          <strong className="footer-val">
+            {apple.conn.state === 'open'
+              ? (apple.firmwareVersion ?? 'Detecting...')
+              : 'Not connected'}
+          </strong>
+        </div>
+      </footer>
     </div>
   )
 }

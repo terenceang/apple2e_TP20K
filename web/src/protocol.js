@@ -148,6 +148,7 @@ export const CMD = {
   mem: 'm',
   status: 't',
   screen: 'w',
+  version: 'v',
   help: '?',
   reset: 'x',
 }
@@ -160,7 +161,7 @@ export const MEM_JUMPS = [
   { key: '4', label: '$0400 text', addr: 0x0400 },
   { key: '8', label: '$0800', addr: 0x0800 },
   { key: 'f', label: '$FA60 input', addr: 0xfa60 },
-  { key: 'v', label: '$FFF0 ROM', addr: 0xfff0 },
+
 ]
 
 // ---------------------------------------------------------------------------

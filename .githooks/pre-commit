@@ -1,0 +1,4 @@
+#!/bin/sh
+# Auto-update version on every commit
+node scripts/update-version.mjs
+git add web/src/version.json src/version.vh web/package.json 2>/dev/null || true

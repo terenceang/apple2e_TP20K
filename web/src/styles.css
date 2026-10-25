@@ -1681,3 +1681,49 @@ button.opt-pill.selected {
 .modem-gateway { display: flex; flex-direction: column; gap: 2px; padding: 0 8px 6px; font-size: 0.85em; }
 .modem-gateway input { font-family: var(--mono, monospace); width: 100%; box-sizing: border-box; }
 .modem-log { max-height: 10em; }
+
+
+/* App Footer: version & connection state */
+.app-footer {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(18, 16, 14, 0.85);
+  border-top: 1px solid var(--rim, #332d24);
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  color: var(--dim, #8c8273);
+}
+
+.footer-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.footer-label {
+  color: var(--dim, #8c8273);
+}
+
+.footer-val {
+  color: var(--ink, #e6ded3);
+  font-weight: normal;
+}
+
+.footer-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #665f55;
+  display: inline-block;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.footer-status-dot.connected {
+  background: #4ade80;
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.7);
+}

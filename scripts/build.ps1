@@ -25,6 +25,7 @@ Set-Location $root
 . (Join-Path $PSScriptRoot 'toolchain.ps1')
 
 $name = Get-FpgaName
+& node (Join-Path $root 'scripts\update-version.mjs')
 $gwSh = 'C:\Gowin\Gowin_V1.9.12.04_x64\IDE\bin\gw_sh.exe'
 if (-not (Test-Path $gwSh)) { throw "Gowin EDA not found at $gwSh" }
 

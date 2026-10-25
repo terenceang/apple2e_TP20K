@@ -69,6 +69,7 @@ type AppleEvent =
   | ({ t: 'regs' } & Regs)
   | ({ t: 'mem' } & MemLine)
   | ({ t: 'status' } & Status)
+  | { t: 'fw_version'; version: string }
   | {
       t: 'screen'
       text: boolean
@@ -204,6 +205,7 @@ export function useApple() {
   const [regs, setRegs] = useState<Regs | null>(null)
   const [mem, setMem] = useState<MemLine[]>([])
   const [status, setStatus] = useState<Status | null>(null)
+  const [firmwareVersion, setFirmwareVersion] = useState<string | null>(null)
   const [screen, setScreen] = useState<Screen | null>(null)
   const [busy, setBusy] = useState(false)
   const [canSerial, setCanSerial] = useState(false)
@@ -259,6 +261,9 @@ export function useApple() {
             break
           case 'status':
             setStatus({ video: e.video, pll: e.pll })
+            break
+          case 'fw_version':
+            setFirmwareVersion(e.version)
             break
           case 'screen':
             setScreen({
@@ -398,6 +403,7 @@ export function useApple() {
   }, [connectSerial])
 
   const disconnect = useCallback(async () => {
+    setFirmwareVersion(null)
     setSavedBool(store, PREF_AUTOCONNECT, false) // an explicit Disconnect sticks across refresh
     await link.current?.close()
     link.current = null
@@ -405,6 +411,13 @@ export function useApple() {
   }, [store])
 
   const send = useCallback((bytes: number[] | Uint8Array) => link.current?.write(bytes), [])
+
+  // When connected, query the firmware version from the board
+  useEffect(() => {
+    if (conn.state === 'open') {
+      send([CTRL_B, CMD.version.charCodeAt(0), CTRL_B])
+    }
+  }, [conn.state, send])
 
   /** A keypress. In console mode it goes straight out; in debugger mode the
    *  machine is paused and drops ordinary keystrokes, so letters are commands. */
@@ -629,6 +642,7 @@ export function useApple() {
       regs,
       mem,
       status,
+      firmwareVersion,
       screen,
       busy,
       diskProgress,
@@ -669,6 +683,7 @@ export function useApple() {
       regs,
       mem,
       status,
+      firmwareVersion,
       screen,
       busy,
       diskProgress,

@@ -53,6 +53,7 @@ const log = (...a) => console.log('[pages]', ...a)
 // ---------------------------------------------------------------------------
 
 log('building for Pages (no character ROM, relative asset paths)')
+spawnSync('node', [resolve(REPO, 'scripts/update-version.mjs')], { stdio: 'inherit' })
 // On Windows npx is npx.cmd, which spawnSync cannot exec without a shell.
 const build = spawnSync('npx', ['vite', 'build'], {
   cwd: WEB,

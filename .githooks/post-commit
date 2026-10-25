@@ -1,0 +1,3 @@
+#!/bin/sh
+# Refresh version metadata with the newly minted commit hash
+node scripts/update-version.mjs

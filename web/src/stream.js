@@ -39,6 +39,7 @@ const REGS_RE =
 const MEM_RE = /^\$([0-9A-F]{4}): (.*)\|([\x20-\x7e.]*)\|$/
 // serial_debugger.v M_STATUS: VID:T PLL:1 D:<eight hex digits of DDR3 diagnostics>
 export const STATUS_RE = /^VID:([TG]) PLL:([01])(?: D:[0-9A-F]{8})?$/
+export const FW_VER_RE = /^FW:(.+)$/
 
 /**
  * $SS <flags> then the 1 KB text page; $GF then 4 rows of 40; $SEND ends it.
@@ -275,6 +276,11 @@ export class AppleStream {
     const status = STATUS_RE.exec(s)
     if (status) {
       this.emit({ t: 'status', video: status[1] === 'T' ? 'text' : 'graphics', pll: status[2] === '1' })
+      return
+    }
+    const fw = FW_VER_RE.exec(s)
+    if (fw) {
+      this.emit({ t: 'fw_version', version: fw[1].trim() })
       return
     }
 

@@ -26,6 +26,7 @@
 //   Every drive's disk is a file on the TF card; there is no other way in.
 
 `include "src/uart_defs.vh"
+`include "src/version.vh"
 
 module serial_debugger (
     input  wire        clk,            // 27.0 MHz
@@ -260,7 +261,9 @@ module serial_debugger (
     localparam [7:0] STR_PLL_LEN   = 8'd5;
     localparam [8:0] STR_DDR_START = STR_PLL_START + STR_PLL_LEN;
     localparam [7:0] STR_DDR_LEN   = 8'd3;
-    localparam integer STR_BYTES = 240;
+    localparam [8:0] STR_VER_START = STR_DDR_START + STR_DDR_LEN;
+    localparam [7:0] STR_VER_LEN   = `FW_VER_LEN;
+    localparam integer STR_BYTES = 240 + `FW_VER_LEN;
     // \015\012 is CR LF: Verilog-2001 has no \r escape.
     localparam [8*STR_BYTES-1:0] STR_TEXT = {
         "\015\012[ Apple //e Debugger ] (h=Help, c=Cont)\015\012> ",  // BANNER
@@ -287,7 +290,8 @@ module serial_debugger (
         "\015\012SECTORS\015\012",  // SECS
         "VID:",  // VID
         " PLL:",  // PLL
-        " D:"   // DDR
+        " D:",   // DDR
+        `FW_VER_TEXT  // VER
     };
     reg [7:0] str_rom [0:STR_BYTES-1];
     integer si;
@@ -296,7 +300,7 @@ module serial_debugger (
             str_rom[si] = STR_TEXT[8 * (STR_BYTES - 1 - si) +: 8];
         // synthesis translate_off
         // a length that does not match its text leaves a NUL or cuts one off
-        if (STR_DDR_START + STR_DDR_LEN != STR_BYTES || str_rom[0] == 8'h00)
+        if (STR_VER_START + STR_VER_LEN != STR_BYTES || str_rom[0] == 8'h00)
             $display("FAIL: serial_debugger string table lengths do not add up");
         // synthesis translate_on
     end
@@ -689,7 +693,7 @@ module serial_debugger (
                     "4":       mem_dump(16'h0400);
                     "8":       mem_dump(16'h0800);
                     "f", "F":  mem_dump(16'hFA60);
-                    "v", "V":  mem_dump(16'hFFF0);
+                    "v", "V":  say(STR_VER_START, STR_VER_LEN, M_IDLE);
 
                     "x", "X": begin
                         reset_timer <= 8'd255;
