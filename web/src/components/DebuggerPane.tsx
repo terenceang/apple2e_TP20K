@@ -124,6 +124,9 @@ export function DebuggerPane({
             <button onClick={onColdBoot} title="Ctrl+Open-Apple+RESET: reboot from slot 6">
               Cold boot
             </button>
+            <button onClick={() => onCommand(CMD.version)} disabled={mode !== 'debugger'} title="Query firmware version">
+              Ver <kbd>v</kbd>
+            </button>
             <button onClick={() => onCommand(CMD.help)} disabled={mode !== 'debugger'}>
               Help <kbd>?</kbd>
             </button>

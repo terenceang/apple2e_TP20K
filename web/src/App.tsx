@@ -239,11 +239,27 @@ export default function App() {
             title={apple.conn.state === 'open' ? 'Connected' : 'Disconnected'}
           />
           <span className="footer-label">Firmware:</span>
-          <strong className="footer-val">
+          <strong
+            className={`footer-val ${apple.conn.state === 'open' ? 'clickable' : ''}`}
+            onClick={apple.conn.state === 'open' ? () => apple.queryFirmware() : undefined}
+            title={apple.conn.state === 'open' ? 'Click to re-query firmware version from board' : undefined}
+          >
             {apple.conn.state === 'open'
               ? (apple.firmwareVersion ?? 'Detecting...')
               : 'Not connected'}
           </strong>
+          {apple.conn.state === 'open' && (
+            <button
+              type="button"
+              className="shelf-btn-icon"
+              style={{ fontSize: '0.75rem', padding: '1px 4px', marginLeft: '4px', verticalAlign: 'middle' }}
+              onClick={() => apple.queryFirmware()}
+              title="Re-query firmware version from board"
+              aria-label="Refresh firmware version"
+            >
+              ↻
+            </button>
+          )}
         </div>
       </footer>
     </div>
