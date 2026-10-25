@@ -1538,6 +1538,31 @@ button.opt-pill.selected {
 }
 .shelf-head .io-card-title { margin: 0; color: var(--legend-dim); }
 
+.shelf-info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--dim);
+  border: 1px solid var(--dim);
+  cursor: help;
+  user-select: none;
+  opacity: 0.8;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.shelf-info-icon:hover,
+.shelf-info-icon:focus-visible {
+  opacity: 1;
+  color: var(--ink);
+  border-color: var(--ink);
+  outline: none;
+}
+
 .shelf-actions {
   display: flex;
   align-items: center;

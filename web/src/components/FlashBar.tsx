@@ -166,7 +166,7 @@ export function FlashBar({
           type="button"
           className={'toggle-btn' + (showDisks ? ' active' : '')}
           onClick={onToggleDisks}
-          title={showDisks ? 'Hide Disk II Manager' : 'Show Disk II Manager'}
+          title={showDisks ? 'Hide Disk Library & Drives' : 'Show Disk Library & Drives (Slot 6 & Slot 7)'}
           aria-pressed={showDisks}
         >
           Disks

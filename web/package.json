@@ -1,6 +1,6 @@
 {
   "name": "apple2e-keyboard",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "author": "Terence Ang / motionfxdesign",
   "license": "MIT",
   "private": true,
@@ -26,7 +26,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.1.0",
-    "playwright": "^1.63.0",
+    "playwright": "^1.64.1",
     "typescript": "^5.9.0",
     "vite": "^7.1.0"
   }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DiskProgress, CardState, CardFile } from '../useApple'
 import { fitsDrive } from '../card.js'
+import { from83 } from '../fat32.js'
 import { blankWoz } from '../woz.js'
 
 // Every drive's disk is a file on the TF card: LOAD picks one (or copies one
@@ -32,6 +33,7 @@ type Ask =
   | { kind: 'confirm_replace'; d: number; file: CardFile; currentName: string }
   | { kind: 'file'; file: CardFile }               // pick a drive for this file
   | { kind: 'delete'; file: CardFile }
+  | { kind: 'post_upload_mount'; file: CardFile; targetDrive?: number | null }
 
 export function DiskPane(p: Props) {
   const { card, cardBusy, disabled = false } = p
@@ -59,6 +61,29 @@ export function DiskPane(p: Props) {
   const mountedOn = (f: CardFile) =>
     [0, 1, 2, 3].filter((d) => card?.status.present[d] && card?.drives[d]?.short === f.short)
 
+  const diskTooltip = (f: CardFile) => {
+    const isFloppy = fitsDrive(f, 0)
+    const isHd = fitsDrive(f, 2)
+    const typeLabel = isFloppy
+      ? '5.25" Floppy Disk II (Slot 6)'
+      : isHd
+      ? 'SmartPort ProDOS Hard Disk (Slot 7)'
+      : 'Disk Image'
+    const on = mountedOn(f)
+    const mountStatus = on.length > 0
+      ? `Mounted in: ${on.map((d) => LABEL[d]).join(', ')}`
+      : 'Not mounted (click to load into a drive)'
+    const shortName = from83(f.short)
+
+    return [
+      `Disk: ${f.name}`,
+      `FAT 8.3: ${shortName}`,
+      `Size: ${kb(f.size)} (${f.size.toLocaleString()} bytes)`,
+      `Type: ${typeLabel}`,
+      `Status: ${mountStatus}`,
+    ].join('\n')
+  }
+
   const load = (d: number) => setAsk({ kind: 'drive', d })
   const replace = (d: number) => setAsk({ kind: 'drive', d })
   const eject = (d: number) => quiet(p.onCardMount(d, null))
@@ -70,13 +95,15 @@ export function DiskPane(p: Props) {
   const picked = async (file: File) => {
     const d = pickFor.current
     const f = await p.onCardUpload(file)
-    if (f && d !== null) {
-      const cur = inDrive(d)
-      if (cur) {
-        setAsk({ kind: 'confirm_replace', d, file: f, currentName: cur.name })
-      } else {
-        await p.onCardMount(d, f)
-      }
+    if (f) {
+      setAsk({ kind: 'post_upload_mount', file: f, targetDrive: d })
+    }
+  }
+  const createBlank = async () => {
+    const file = new File([blankWoz() as unknown as BlobPart], `New disk ${Date.now() % 10000}.woz`)
+    const f = await p.onCardUpload(file)
+    if (f) {
+      setAsk({ kind: 'post_upload_mount', file: f, targetDrive: null })
     }
   }
 
@@ -97,7 +124,7 @@ export function DiskPane(p: Props) {
         </div>
         <div className="dd-slot">
           {h && (
-            <span className={'dd-label' + (h.failed ? ' failed' : '')} title={h.name}>
+            <span className={'dd-label' + (h.failed ? ' failed' : '')} title={h.file ? diskTooltip(h.file) : h.name}>
               <span className="dd-label-text">{h.name}</span>
               <button
                 type="button"
@@ -177,7 +204,7 @@ export function DiskPane(p: Props) {
           <span className={led(d)} title="IN USE" />
           <span className="hd-name">PRODOS {LABEL[d]}</span>
         </div>
-        <div className={'hd-volume' + (h?.failed ? ' failed' : '')} title={h?.name}>
+        <div className={'hd-volume' + (h?.failed ? ' failed' : '')} title={h?.file ? diskTooltip(h.file) : h?.name}>
           <span className="hd-volume-text">{h ? h.name : 'empty'}</span>
           {h && (
             <button
@@ -251,6 +278,90 @@ export function DiskPane(p: Props) {
   const dialog = () => {
     if (!ask) return null
     const cancel = <button type="button" className="btn-disk-action secondary" onClick={() => setAsk(null)}>Cancel</button>
+    if (ask.kind === 'post_upload_mount') {
+      const { file, targetDrive } = ask
+      if (targetDrive !== null && targetDrive !== undefined) {
+        const cur = inDrive(targetDrive)
+        return (
+          <>
+            <h3>Mount uploaded disk?</h3>
+            <p className="disk-meta">
+              <strong>{file.name}</strong> ({kb(file.size)}) was uploaded to the TF card.
+            </p>
+            <p className="disk-meta">
+              Mount it into <strong>{LABEL[targetDrive]}</strong>
+              {cur ? ` (replacing ${cur.name})` : ''}?
+            </p>
+            {cur && (
+              <p className="disk-meta" style={{ color: '#d08c2a', marginTop: '6px' }}>
+                The current disk will be unmounted and replaced.
+              </p>
+            )}
+            <div className="dlg-actions">
+              <button
+                type="button"
+                className="btn-disk-action"
+                onClick={() => {
+                  setAsk(null)
+                  quiet(p.onCardMount(targetDrive, file))
+                }}
+              >
+                {cur ? 'Replace and mount' : `Mount into ${LABEL[targetDrive]}`}
+              </button>
+              <button
+                type="button"
+                className="btn-disk-action secondary"
+                onClick={() => setAsk(null)}
+              >
+                Don't mount (keep in library)
+              </button>
+            </div>
+          </>
+        )
+      }
+
+      const fit = [0, 1, 2, 3].filter((d) => fitsDrive(file, d))
+      return (
+        <>
+          <h3>Mount uploaded disk?</h3>
+          <p className="disk-meta">
+            <strong>{file.name}</strong> ({kb(file.size)}) was uploaded to the TF card library.
+          </p>
+          <p className="disk-meta">
+            {fit.length > 0 ? 'Would you like to mount it into a drive now?' : 'No compatible drive fits this disk image.'}
+          </p>
+          <div className="dlg-actions">
+            {fit.map((d) => {
+              const cur = inDrive(d)
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  className="btn-disk-action"
+                  onClick={() => {
+                    if (cur) {
+                      setAsk({ kind: 'confirm_replace', d, file, currentName: cur.name })
+                    } else {
+                      setAsk(null)
+                      quiet(p.onCardMount(d, file))
+                    }
+                  }}
+                >
+                  Mount into {LABEL[d]}{cur ? ` (replace ${cur.name})` : ''}
+                </button>
+              )
+            })}
+            <button
+              type="button"
+              className="btn-disk-action secondary"
+              onClick={() => setAsk(null)}
+            >
+              Don't mount
+            </button>
+          </div>
+        </>
+      )
+    }
     if (ask.kind === 'delete') {
       return (
         <>
@@ -379,7 +490,7 @@ export function DiskPane(p: Props) {
         <div className="dlg-list">
           {fit.length === 0 && <span className="disk-meta">No image on the card fits this drive.</span>}
           {fit.map((f) => (
-            <button key={f.short} type="button" className="dlg-file" onClick={() => setAsk({ ...ask, file: f })}>
+            <button key={f.short} type="button" className="dlg-file" onClick={() => setAsk({ ...ask, file: f })} title={diskTooltip(f)}>
               <span>{f.name}</span><span className="disk-meta">{kb(f.size)}</span>
             </button>
           ))}
@@ -397,7 +508,9 @@ export function DiskPane(p: Props) {
     <section className="pane disk-pane" aria-label="Disks">
       <header>
         <h2>Disks</h2>
-        <span className="hint">Slot 6 Floppy &amp; Slot 7 SmartPort</span>
+        <span className="hint" title="Manage 5.25&quot; floppy disks (Slot 6) and ProDOS hard disks (Slot 7)">
+          Slot 6 Floppy &amp; Slot 7 SmartPort
+        </span>
         <button
           type="button"
           className="pane-close-btn"
@@ -442,7 +555,32 @@ export function DiskPane(p: Props) {
 
       <div className="shelf">
         <div className="shelf-head">
-          <span className="io-card-title">TF CARD</span>
+          <span className="io-card-title" title="Disk Library: Stored disk images on the TF card">
+            DISK LIBRARY · TF CARD
+          </span>
+          <span
+            className="shelf-info-icon"
+            tabIndex={0}
+            role="note"
+            aria-label="Disk library information"
+            title={
+              'Disk Library (FAT32 TF Card)\n\n' +
+              'Supported Formats:\n' +
+              '• Slot 6 (Disk II 5.25" Floppy):\n' +
+              '   .woz, .dsk, .do, .po, .nib (converted to WOZ)\n' +
+              '• Slot 7 (SmartPort Hard Disk):\n' +
+              '   .hdv, .po, .2mg (up to 32 MB)\n\n' +
+              'Requirements:\n' +
+              '• FAT32 formatted TF/microSD card (32 GB or smaller)\n' +
+              '• Images must be contiguous (unfragmented) on card\n\n' +
+              'Usage:\n' +
+              '• Click any disk tile to mount into a drive\n' +
+              '• "＋ Add disk" to upload from computer\n' +
+              '• "＋ New blank" to create a fresh floppy'
+            }
+          >
+            ⓘ
+          </span>
           <span className="disk-meta">
             {!status ? 'not read yet' : status.fsOk ? `${card!.files.length} image${card!.files.length === 1 ? '' : 's'}`
               : 'no FAT32 card'}
@@ -453,7 +591,7 @@ export function DiskPane(p: Props) {
               className="shelf-btn-icon"
               onClick={() => fromComputer(null)}
               disabled={busy || !onCard}
-              title="Add disk image from computer (.dsk, .po, .nib, .woz, .hdv, .2mg)"
+              title="Add disk image from computer (.dsk, .do, .po, .nib, .woz, .hdv, .2mg) to TF card library"
               aria-label="Add disk"
             >
               <span className="icon">＋</span> Add disk
@@ -462,8 +600,8 @@ export function DiskPane(p: Props) {
               type="button"
               className="shelf-btn-icon"
               disabled={busy || !onCard}
-              onClick={() => quiet(p.onCardUpload(new File([blankWoz() as unknown as BlobPart], `New disk ${Date.now() % 10000}.woz`)))}
-              title="Create new blank floppy (.woz) on TF card"
+              onClick={() => quiet(createBlank())}
+              title="Create new blank 140K floppy (.woz) in TF card library"
               aria-label="New blank floppy"
             >
               <span className="icon">＋</span> New blank
@@ -473,7 +611,7 @@ export function DiskPane(p: Props) {
               className="shelf-btn-icon refresh"
               onClick={() => quiet(p.onCardRefresh())}
               disabled={busy}
-              title="Refresh card file list"
+              title="Refresh TF card disk library"
               aria-label="Refresh files"
             >
               ↻
@@ -485,30 +623,37 @@ export function DiskPane(p: Props) {
             card.files.map((f) => {
               const on = mountedOn(f)
               return (
-                <div key={f.short} className={'tile' + (on.length ? ' mounted' : '')}>
+                <div key={f.short} className={'tile' + (on.length ? ' mounted' : '')} title={diskTooltip(f)}>
                   <button type="button" className="tile-main" onClick={() => setAsk({ kind: 'file', file: f })} disabled={busy}
-                    title={`Load ${f.name}`}>
+                    title={diskTooltip(f)}>
                     <span className="tile-icon" aria-hidden>{fitsDrive(f, 0) ? '💾' : '🗄️'}</span>
                     <span className="tile-name">{f.name}</span>
                     <span className="disk-meta">{kb(f.size)}{on.length ? ` · in ${on.map((d) => LABEL[d]).join(', ')}` : ''}</span>
                   </button>
                   <details className="dd-more tile-more">
-                    <summary title="More">⋯</summary>
+                    <summary title="More options">⋯</summary>
                     <div className="dd-menu">
-                      <button type="button" onClick={() => quiet(p.onCardDownload(f))} disabled={busy}>Download</button>
+                      <button type="button" onClick={() => quiet(p.onCardDownload(f))} disabled={busy}
+                        title={`Download copy of ${f.name}`}>
+                        Download
+                      </button>
                       {/\.woz$/i.test(f.name) && (
                         <button type="button" onClick={() => quiet(p.onCardDownload(f, true))} disabled={busy}
-                          title="Decoded to DOS-order sectors; only a standard (unprotected) disk decodes">Download as .dsk</button>
+                          title="Decoded to DOS-order sectors; only a standard (unprotected) disk decodes">
+                          Download as .dsk
+                        </button>
                       )}
                       <button type="button" onClick={() => setAsk({ kind: 'delete', file: f })} disabled={busy || on.length > 0}
-                        title={on.length ? 'Eject it first' : undefined}>Delete</button>
+                        title={on.length ? `Mounted in ${on.map((d) => LABEL[d]).join(', ')}. Eject it first before deleting.` : `Delete ${f.name} from TF card`}>
+                        Delete
+                      </button>
                     </div>
                   </details>
                 </div>
               )
             })
           ) : (
-            <div className="shelf-empty">
+            <div className="shelf-empty" title="Insert a FAT32 card or upload images to populate the disk library">
               <span>{onCard ? 'No disk images found on card. Click "＋ Add disk" above to upload.' : 'Insert FAT32 card to view images.'}</span>
             </div>
           )}
