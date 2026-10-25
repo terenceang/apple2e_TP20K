@@ -57,3 +57,21 @@ CLAUDE.md
 # Disk images (may contain copyrighted material)
 /Disk/
 /disk/
+
+# Disk image formats anywhere in repository
+*.woz
+*.dsk
+*.2mg
+*.po
+*.do
+*.nib
+*.raw
+
+# Gowin logic analyzer / bitstreams / temporary files
+*.rao
+*.rso
+*.fs
+
+# Test and report artifacts
+test-results/
+playwright-report/
