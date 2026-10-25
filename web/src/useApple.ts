@@ -412,12 +412,53 @@ export function useApple() {
 
   const send = useCallback((bytes: number[] | Uint8Array) => link.current?.write(bytes), [])
 
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+
   // When connected, query the firmware version from the board
   useEffect(() => {
-    if (conn.state === 'open') {
-      send([CTRL_B, CMD.version.charCodeAt(0), CTRL_B])
+    if (conn.state !== 'open') return
+    let active = true
+
+    const queryFw = async () => {
+      // Small pause after connection opens to ensure link is settled
+      await new Promise((r) => setTimeout(r, 100))
+      if (!active) return
+
+      const wasConsole = modeRef.current === 'console'
+      if (wasConsole) {
+        link.current?.write([CTRL_B])
+        // Wait for banner and register dump to finish transmitting
+        await new Promise((r) => setTimeout(r, QUIET_MS))
+        if (!active) return
+      }
+
+      // Query version with 'v' command
+      link.current?.write([CMD.version.charCodeAt(0)])
+      await new Promise((r) => setTimeout(r, QUIET_MS))
+      if (!active) return
+
+      // Resume execution if we paused it
+      if (wasConsole) {
+        link.current?.write([CTRL_B])
+      }
     }
-  }, [conn.state, send])
+
+    const timer = setTimeout(queryFw, 200)
+
+    // Fallback if firmware doesn't answer after 3.5s (e.g. older bitstream without 'v' command)
+    const fallbackTimer = setTimeout(() => {
+      if (active) {
+        setFirmwareVersion((v) => v ?? 'Legacy')
+      }
+    }, 3500)
+
+    return () => {
+      active = false
+      clearTimeout(timer)
+      clearTimeout(fallbackTimer)
+    }
+  }, [conn.state])
 
   /** A keypress. In console mode it goes straight out; in debugger mode the
    *  machine is paused and drops ordinary keystrokes, so letters are commands. */
