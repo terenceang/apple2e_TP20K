@@ -29,6 +29,44 @@ export function fitsDrive(file, d) {
     file.size <= HD_MAX_BLOCKS * HD_BLOCK_BYTES
 }
 
+/**
+ * Format human-readable tooltip details for a card file.
+ * Includes disk name, FAT 8.3 name, exact size, type, format (e.g. WOZ 1, WOZ 2, HDV),
+ * mount status, and fragmentation status if fragmented.
+ *
+ * @param {{ name: string, short: string, size: number, wozVersion?: number, fragmented?: boolean }} file
+ * @param {string[]} [mountedIn] Array of drive labels where mounted (e.g. ['S6,D1'])
+ */
+export function formatDiskTooltip(file, mountedIn = []) {
+  const isFloppy = fitsDrive(file, 0)
+  const isHd = fitsDrive(file, 2)
+  const formatLabel = isFloppy
+    ? (file.wozVersion ? `WOZ ${file.wozVersion}` : 'WOZ')
+    : isHd
+    ? (file.name.toLowerCase().endsWith('.2mg') ? '2IMG' : file.name.toLowerCase().endsWith('.hdv') ? 'HDV' : 'ProDOS PO')
+    : 'Disk Image'
+  const typeLabel = isFloppy
+    ? `5.25" Floppy Disk II (${formatLabel}, Slot 6)`
+    : isHd
+    ? `SmartPort ProDOS Hard Disk (${formatLabel}, Slot 7)`
+    : 'Disk Image'
+  const mountStatus = mountedIn.length > 0
+    ? `Mounted in: ${mountedIn.join(', ')}`
+    : 'Not mounted (click to load into a drive)'
+  const shortName = from83(file.short)
+  const extFrag = file.fragmented ? '\nStatus: Fragmented (cannot be streamed by FPGA)' : ''
+
+  const lines = [
+    `Disk: ${file.name}`,
+    `FAT 8.3: ${shortName}`,
+    `Size: ${file.size >= 1 << 20 ? (file.size / (1 << 20)).toFixed(1) + ' MB' : Math.round(file.size / 1024) + ' KB'} (${file.size.toLocaleString()} bytes)`,
+    `Type: ${typeLabel}`,
+    `Format: ${formatLabel}`,
+    `Status: ${mountStatus}`,
+  ]
+  return lines.join('\n') + extFrag
+}
+
 /** A file the page lists: a disk image of some kind, not the config or a directory. */
 const isImage = (f) => !f.dir && f.name.toUpperCase() !== CONFIG_NAME && (fitsDrive(f, 0) || fitsDrive(f, 2))
 
@@ -82,6 +120,25 @@ export class Card {
         configError = e.message
       }
     }
+    if (!this._wozCache) this._wozCache = new Map()
+    for (const f of files) {
+      if (ext(from83(f.short)) === 'woz' && f.cluster >= 2 && f.size >= 4) {
+        const cacheKey = `${from83(f.short)}:${f.cluster}:${f.size}`
+        if (this._wozCache.has(cacheKey)) {
+          f.wozVersion = this._wozCache.get(cacheKey)
+        } else {
+          try {
+            const sec = await this.fs.dev.read(this.fs.clusterLba(f.cluster), 1)
+            const magic = String.fromCharCode(...sec.subarray(0, 4))
+            if (magic === 'WOZ1') f.wozVersion = 1
+            else if (magic === 'WOZ2') f.wozVersion = 2
+            if (f.wozVersion) this._wozCache.set(cacheKey, f.wozVersion)
+          } catch {
+            // ignore read error
+          }
+        }
+      }
+    }
     // the file each drive names, if it is on the card
     const byShort = new Map(files.map((f) => [from83(f.short), f]))
     const drives = DRIVES.map((k) => (config[k] ? byShort.get(config[k]) ?? null : null))
@@ -90,7 +147,13 @@ export class Card {
 
   async upload(name, data, onProgress) {
     const f = prepareCardFile(name, data)
-    return this.fs.create(f.name, f.data, onProgress)
+    const entry = await this.fs.create(f.name, f.data, onProgress)
+    if (f.version) {
+      entry.wozVersion = f.version
+      if (!this._wozCache) this._wozCache = new Map()
+      this._wozCache.set(`${from83(entry.short)}:${entry.cluster}:${entry.size}`, f.version)
+    }
+    return entry
   }
 
   async download(file, onProgress) {

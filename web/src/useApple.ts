@@ -11,7 +11,10 @@ import { Card } from './card.js'
 import type { DirEntry } from './fat32.js'
 
 /** A file on the TF card, as src/fat32.js lists it. */
-export type CardFile = DirEntry
+export type CardFile = DirEntry & {
+  wozVersion?: 1 | 2
+  fragmented?: boolean
+}
 
 export interface CardState {
   files: CardFile[]

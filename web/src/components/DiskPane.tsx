@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DiskProgress, CardState, CardFile } from '../useApple'
-import { fitsDrive } from '../card.js'
+import { fitsDrive, formatDiskTooltip } from '../card.js'
 import { from83 } from '../fat32.js'
 import { blankWoz } from '../woz.js'
 import { PREF_DISK_SORT, getSavedString, setSavedString } from '../prefs.js'
@@ -76,26 +76,8 @@ export function DiskPane(p: Props) {
     [0, 1, 2, 3].filter((d) => card?.status.present[d] && card?.drives[d]?.short === f.short)
 
   const diskTooltip = (f: CardFile) => {
-    const isFloppy = fitsDrive(f, 0)
-    const isHd = fitsDrive(f, 2)
-    const typeLabel = isFloppy
-      ? '5.25" Floppy Disk II (Slot 6)'
-      : isHd
-      ? 'SmartPort ProDOS Hard Disk (Slot 7)'
-      : 'Disk Image'
-    const on = mountedOn(f)
-    const mountStatus = on.length > 0
-      ? `Mounted in: ${on.map((d) => LABEL[d]).join(', ')}`
-      : 'Not mounted (click to load into a drive)'
-    const shortName = from83(f.short)
-
-    return [
-      `Disk: ${f.name}`,
-      `FAT 8.3: ${shortName}`,
-      `Size: ${kb(f.size)} (${f.size.toLocaleString()} bytes)`,
-      `Type: ${typeLabel}`,
-      `Status: ${mountStatus}`,
-    ].join('\n')
+    const on = mountedOn(f).map((d) => LABEL[d])
+    return formatDiskTooltip(f, on)
   }
 
   const sortedFiles = useMemo(() => {
@@ -116,8 +98,8 @@ export function DiskPane(p: Props) {
         return list.sort((a, b) => b.size - a.size || a.name.localeCompare(b.name))
       case 'type':
         return list.sort((a, b) => {
-          const aFloppy = fitsDrive(a, 0) ? 0 : 1
-          const bFloppy = fitsDrive(b, 0) ? 0 : 1
+          const aFloppy = fitsDrive(a, 0) ? (a.wozVersion ?? 2) : 10
+          const bFloppy = fitsDrive(b, 0) ? (b.wozVersion ?? 2) : 10
           if (aFloppy !== bFloppy) return aFloppy - bFloppy
           return a.name.localeCompare(b.name)
         })
@@ -547,7 +529,7 @@ export function DiskPane(p: Props) {
           {sortedFit.length === 0 && <span className="disk-meta">No image on the card fits this drive.</span>}
           {sortedFit.map((f) => (
             <button key={f.short} type="button" className="dlg-file" onClick={() => setAsk({ ...ask, file: f })} title={diskTooltip(f)}>
-              <span>{f.name}</span><span className="disk-meta">{kb(f.size)}</span>
+              <span>{f.name}</span><span className="disk-meta">{kb(f.size)}{f.wozVersion ? ` · WOZ ${f.wozVersion}` : ''}</span>
             </button>
           ))}
         </div>
@@ -628,7 +610,7 @@ export function DiskPane(p: Props) {
                 'Disk Library (FAT32 TF Card)\n\n' +
                 'Supported Formats:\n' +
                 '• Slot 6 (Disk II 5.25" Floppy):\n' +
-                '   .woz, .dsk, .do, .po, .nib (converted to WOZ)\n' +
+                '   .woz (WOZ 1 / WOZ 2), .dsk, .do, .po, .nib (converted to WOZ 2)\n' +
                 '• Slot 7 (SmartPort Hard Disk):\n' +
                 '   .hdv, .po, .2mg (up to 32 MB)\n\n' +
                 'Requirements:\n' +
@@ -732,7 +714,7 @@ export function DiskPane(p: Props) {
                     title={diskTooltip(f)}>
                     <span className="tile-icon" aria-hidden>{fitsDrive(f, 0) ? '💾' : '🗄️'}</span>
                     <span className="tile-name">{f.name}</span>
-                    <span className="disk-meta">{kb(f.size)}{on.length ? ` · in ${on.map((d) => LABEL[d]).join(', ')}` : ''}</span>
+                    <span className="disk-meta">{kb(f.size)}{f.wozVersion ? ` · WOZ ${f.wozVersion}` : ''}{on.length ? ` · in ${on.map((d) => LABEL[d]).join(', ')}` : ''}</span>
                   </button>
                   <details className="dd-more tile-more">
                     <summary title="More options">⋯</summary>

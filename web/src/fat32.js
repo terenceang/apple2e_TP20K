@@ -17,6 +17,7 @@
  * @typedef {{
  *   name: string, short: string, size: number, cluster: number, attr: number,
  *   dir: boolean, slots: { lba: number, off: number }[],
+ *   wozVersion?: number, fragmented?: boolean,
  * }} DirEntry
  * `name` is the long name when there is one, `short` the 11-byte 8.3 form
  * ("GAME    DSK"), `slots` where the entry and its LFN entries sit.

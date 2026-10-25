@@ -7,7 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { mkfs, memoryDevice, Fat32 } from '../src/fat32.js'
-import { Card, fitsDrive, prepareCardFile } from '../src/card.js'
+import { Card, fitsDrive, prepareCardFile, formatDiskTooltip } from '../src/card.js'
 import { parseCardStatus, readSectors, writeSectors, reloadDrive } from '../src/disk.js'
 import { createCardBoard } from './board.js'
 import { dskToWoz, wozToDsk } from '../src/woz.js'
@@ -58,6 +58,23 @@ test('upload, list, mount, move between drives, eject and download', async () =>
   const [lode, tr] = s.files
   assert.ok(fitsDrive(lode, 0) && !fitsDrive(lode, 2), 'a .woz is slot 6 only')
   assert.ok(!fitsDrive(tr, 0) && fitsDrive(tr, 2))
+  assert.equal(lode.wozVersion, 2, 'converted floppy is WOZ 2')
+  const tip = formatDiskTooltip(lode)
+  assert.match(tip, /Format: WOZ 2/)
+  assert.match(tip, /5\.25" Floppy Disk II \(WOZ 2, Slot 6\)/)
+
+  const v1 = new Uint8Array(256 + 2 * 6656)
+  v1.set([0x57, 0x4f, 0x5a, 0x31, 0xff, 0x0a, 0x0d, 0x0a])
+  v1[21] = 1; v1[22] = 0
+  await card.upload('Oregon.woz', v1)
+  s = await card.scan()
+  const oregon = s.files.find((f) => f.name === 'Oregon.woz')
+  assert.equal(oregon.wozVersion, 1, 'native WOZ 1 file has wozVersion 1')
+  const tip1 = formatDiskTooltip(oregon, ['S6,D1'])
+  assert.match(tip1, /Format: WOZ 1/)
+  assert.match(tip1, /5\.25" Floppy Disk II \(WOZ 1, Slot 6\)/)
+  assert.match(tip1, /Mounted in: S6,D1/)
+  await card.remove(oregon)
   const po = { name: 'ProDOS.po', short: 'PRODOS  PO ', size: 143360 }
   assert.ok(!fitsDrive(po, 0) && fitsDrive(po, 2), 'a .po on the card is a slot 7 volume')
   const dsk = { name: 'GAME.DSK', short: 'GAME    DSK', size: 143360 }

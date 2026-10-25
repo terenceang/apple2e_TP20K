@@ -233,13 +233,16 @@ export function toWoz(name, data) {
   const e = (/\.([^.]*)$/.exec(name)?.[1] ?? '').toLowerCase()
   const base = name.replace(/\.[^.]*$/, '')
   let woz
+  let version = 2
   if (e === 'woz') {
-    woz = wozInfo(data).version === 1 ? woz1ToWoz2(data) : data
+    const info = wozInfo(data)
+    woz = data
+    version = info.version
   } else if (e === 'dsk' || e === 'do') woz = dskToWoz(data, 'dos')
   else if (e === 'po') woz = dskToWoz(data, 'po')
   else if (e === 'nib') woz = nibToWoz(data)
   else throw new Error(`${name}: not a floppy image (.dsk .do .po .nib .woz)`)
-  return { name: `${base}.woz`, data: woz }
+  return { name: `${base}.woz`, data: woz, version }
 }
 
 // ---- reading it back -----------------------------------------------------
